@@ -21,7 +21,7 @@ const summaryCards = [
         icon: "warning",
         iconClass: "bg-amber-50 text-amber-600",
         valueClass: "text-amber-600",
-        path: "/simulations/shortages",
+        path: "/simulations/12-month-trend",
     },
     {
         label: "当月の確定試算",
@@ -82,7 +82,7 @@ const calculationStatuses = [
 
 const alerts = [
     { title: "Amazon未対応ASIN", detail: "取込指摘から対象データを確認してください", count: "3件", icon: "link_off", color: "text-red-600 bg-red-50", path: "/imports/issues" },
-    { title: "30日以内の欠品予測", detail: "FBAを中心に欠品が見込まれます", count: "4 SKU", icon: "inventory", color: "text-amber-600 bg-amber-50", path: "/simulations/shortages" },
+    { title: "30日以内の欠品予測", detail: "FBAを中心に欠品が見込まれます", count: "4 SKU", icon: "inventory", color: "text-amber-600 bg-amber-50", path: "/simulations/12-month-trend" },
     { title: "在庫取込時の消失SKU", detail: "前回存在したSKUが見つかりません", count: "2件", icon: "scan_delete", color: "text-amber-600 bg-amber-50", path: "/imports/issues" },
     { title: "需要予測不能", detail: "実績不足のSKUを確認してください", count: "1 SKU", icon: "query_stats", color: "text-blue-600 bg-blue-50", path: "/forecasts" },
 ];

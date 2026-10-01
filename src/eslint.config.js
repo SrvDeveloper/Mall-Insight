@@ -17,6 +17,7 @@ const browserGlobals = {
     clearInterval: "readonly",
     MouseEvent: "readonly",
     KeyboardEvent: "readonly",
+    HTMLElement: "readonly",
 };
 
 export default tseslint.config(

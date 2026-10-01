@@ -84,7 +84,6 @@ export const navigation: NavGroup[] = [
             { id: "PG-710", label: "対象品番選定", path: "/simulations/selection" },
             { id: "PG-720", label: "在庫試算実行", path: "/simulations/run" },
             { id: "PG-730", label: "12か月在庫推移", path: "/simulations/12-month-trend" },
-            { id: "PG-740", label: "欠品・推奨発注一覧", path: "/simulations/shortages" },
             { id: "PG-750", label: "確定試算履歴・再表示", path: "/simulations/history" },
         ],
     },
@@ -92,10 +91,7 @@ export const navigation: NavGroup[] = [
         id: "master",
         label: "マスタ",
         icon: "database",
-        pages: [
-            { id: "PG-830", label: "倉庫マスタ", path: "/masters/warehouses" },
-            { id: "PG-840", label: "調達マスタ", path: "/masters/procurement" },
-        ],
+        pages: [{ id: "PG-830", label: "倉庫マスタ", path: "/masters/warehouses" }],
     },
     {
         id: "settings",

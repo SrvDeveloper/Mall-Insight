@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, nextTick, reactive, ref } from "vue";
 import AppIcon from "@/components/icons/AppIcon.vue";
 import BaseInput from "@/components/ui/BaseInput.vue";
 import BaseSelect, { type SelectOption } from "@/components/ui/BaseSelect.vue";
@@ -21,6 +21,16 @@ function monthLabels(count: number): { key: string; label: string }[] {
 }
 const months = monthLabels(12);
 
+// 欠品警告・過剰在庫警告は、基準日時点の在庫ではなく「基準日から6か月後」時点の
+// シミュレーション結果（月末在庫・未充足需要）で判定する。調達リードタイム等を踏まえ、
+// 直近の在庫状況ではなく半年先を見越して警告を出す運用方針のため。
+const WARNING_CHECK_MONTH_INDEX = 5;
+
+// 調達マスタの簡素化方針により、調達リードタイムと安全在庫日数はSKUごとに持たず全SKU共通の固定値とする。
+// 発注ロット・最小発注数・仕入先はデータとして管理せずメモ運用とするため、本画面の計算対象に含めない。
+const LEAD_TIME_DAYS = 30;
+const SAFETY_STOCK_DAYS = 10;
+
 // --- ダミーデータ：売上上位20品番として確定済みの対象品番・SKU -----------
 // システム需要予測はSKU単位で1本だけ保持し、モール（倉庫区分）別には保持しない
 // （要件定義書 FR-011、在庫利用要件 第3.3節：倉庫区分別需要は按分比率から必要時に算出するもので別建て保存しない）。
@@ -33,8 +43,6 @@ interface SkuDefinition {
     bossStock: number | null; // 基準日時点のBOSS在庫（現在庫の内訳、参考表示専用）
     ecStock: number | null; // ECストック：EC出荷用に確保した社内予備在庫（販売では減らない）
     freeStock: number | null; // フリー在庫：社内の自由に使える在庫（販売では減らない）
-    leadTimeDays: number;
-    safetyStockDays: number;
     demand: number[]; // システム需要予測（SKU単位、月別12か月）
     inbound: number[]; // 補充数：倉庫別に入力されず、SKU単位で1つだけ存在する（月別、12か月）
 }
@@ -53,26 +61,31 @@ const productGroups: ProductGroup[] = [
         brand: "SHIORI",
         skus: [
             {
-                sku: "P001-RED-30",
+                sku: "fisi-05-1-10",
                 amazonStock: 520,
                 bossStock: 980,
                 ecStock: 150,
                 freeStock: 300,
-                leadTimeDays: 14,
-                safetyStockDays: 10,
-                demand: [440, 448, 464, 490, 538, 565, 510, 460, 436, 420, 410, 410],
+                demand: [440, 448, 200, 220, 538, 565, 510, 460, 436, 420, 410, 410],
                 inbound: [0, 0, 300, 80, 0, 0, 0, 0, 0, 0, 0, 0],
             },
             {
-                sku: "P001-BLU-30",
-                amazonStock: 900,
+                sku: "fisi-05-1-15",
+                amazonStock: 300,
                 bossStock: 950,
                 ecStock: 90,
                 freeStock: 200,
-                leadTimeDays: 14,
-                safetyStockDays: 10,
-                demand: [],
+                demand: [120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230],
                 inbound: [0, 0, 0, 0, 250, 0, 50, 0, 0, 0, 0, 0],
+            },
+            {
+                sku: "fisi-05-1-20",
+                amazonStock: 100,
+                bossStock: 40,
+                ecStock: 0,
+                freeStock: 0,
+                demand: [120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230],
+                inbound: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             },
         ],
     },
@@ -87,8 +100,22 @@ const productGroups: ProductGroup[] = [
                 bossStock: 60,
                 ecStock: 40,
                 freeStock: 120,
-                leadTimeDays: 21,
-                safetyStockDays: 12,
+                demand: [218, 220, 226, 233, 242, 249, 234, 224, 217, 213, 211, 211],
+                inbound: [0, 0, 0, 0, 60, 300, 0, 0, 0, 0, 0, 0],
+            },
+        ],
+    },
+    {
+        productCode: "P-003",
+        category: "生活雑貨",
+        brand: "URBAN CRAFT",
+        skus: [
+            {
+                sku: "P003-BLK-FREE",
+                amazonStock: 500,
+                bossStock: 60,
+                ecStock: 40,
+                freeStock: 120,
                 demand: [218, 220, 226, 233, 242, 249, 234, 224, 217, 213, 211, 211],
                 inbound: [0, 0, 0, 0, 60, 300, 0, 0, 0, 0, 0, 0],
             },
@@ -110,15 +137,14 @@ interface SeriesResult {
     forecastUnavailable: boolean;
     partial: boolean;
     series: MonthResult[];
-    shortageIndex: number; // -1 = 欠品予測なし
     shortageApproxLabel: string | null;
     warningLevel: "none" | "shortage" | "excess";
     recommendedOrder: number | null;
 }
 
-function buildResult(input: { openingStock: number | null; leadTimeDays: number; safetyStockDays: number; demand: number[]; inbound: number[]; partial: boolean }): SeriesResult {
+function buildResult(input: { openingStock: number | null; demand: number[]; inbound: number[]; partial: boolean }): SeriesResult {
     if (input.openingStock === null || input.demand.length === 0) {
-        return { forecastUnavailable: true, partial: input.partial, series: [], shortageIndex: -1, shortageApproxLabel: null, warningLevel: "none", recommendedOrder: null };
+        return { forecastUnavailable: true, partial: input.partial, series: [], shortageApproxLabel: null, warningLevel: "none", recommendedOrder: null };
     }
 
     let stock = input.openingStock;
@@ -133,26 +159,23 @@ function buildResult(input: { openingStock: number | null; leadTimeDays: number;
     });
 
     const avgDailyDemand = input.demand.reduce((a, b) => a + b, 0) / input.demand.length / 30;
-    const shortageIndex = series.findIndex((s) => s.shortfall > 0);
 
-    const safetyStock = avgDailyDemand * input.safetyStockDays;
-    const leadTimeMonths = Math.max(1, Math.ceil(input.leadTimeDays / 30));
+    const safetyStock = avgDailyDemand * SAFETY_STOCK_DAYS;
+    const leadTimeMonths = Math.max(1, Math.ceil(LEAD_TIME_DAYS / 30));
     const leadTimeDemand = input.demand.slice(0, leadTimeMonths).reduce((a, b) => a + b, 0);
     const scheduledInbound = input.inbound.slice(0, leadTimeMonths).reduce((a, b) => a + b, 0);
     const recommendedOrder = Math.max(0, Math.round(leadTimeDemand + safetyStock - input.openingStock - scheduledInbound));
 
-    const stockDays = avgDailyDemand > 0 ? input.openingStock / avgDailyDemand : null;
-    const hasShortage = shortageIndex >= 0;
-    const avgMonthEnd = series.reduce((a, s) => a + s.monthEnd, 0) / series.length;
-    const isExcess = !hasShortage && input.openingStock > 0 && avgMonthEnd > avgDailyDemand * 30 * 4;
+    const checkMonth = series[WARNING_CHECK_MONTH_INDEX];
+    const isShortageAtCheckMonth = checkMonth.shortfall > 0;
+    const isExcessAtCheckMonth = !isShortageAtCheckMonth && avgDailyDemand > 0 && checkMonth.monthEnd > avgDailyDemand * 30 * 4;
 
     return {
         forecastUnavailable: false,
         partial: input.partial,
         series,
-        shortageIndex,
         shortageApproxLabel: null,
-        warningLevel: hasShortage && stockDays !== null && stockDays < input.leadTimeDays + input.safetyStockDays ? "shortage" : isExcess ? "excess" : "none",
+        warningLevel: isShortageAtCheckMonth ? "shortage" : isExcessAtCheckMonth ? "excess" : "none",
         recommendedOrder,
     };
 }
@@ -172,22 +195,22 @@ const productRows = computed<ProductRow[]>(() =>
             // 補充数（確定入荷数）は倉庫別に保持しないSKU単位の値だが、計算上の帰属先はこのSKU単位の在庫以外になく、
             // FR-060（月末在庫=月初在庫+確定入荷-需要予測）の通りそのまま組み込む。
             const openingStock = (sku.amazonStock ?? 0) + (sku.bossStock ?? 0);
-            const result = buildResult({ openingStock, leadTimeDays: sku.leadTimeDays, safetyStockDays: sku.safetyStockDays, demand: sku.demand, inbound: sku.inbound, partial: false });
+            const result = buildResult({ openingStock, demand: sku.demand, inbound: sku.inbound, partial: false });
 
             return { ...sku, result };
         }),
     })),
 );
 
-// --- Ctrl+ホバーでツールチップ表示 -----------------------------------------
+// --- ホバーでツールチップ表示 -----------------------------------------------
 // SKU欄：基準日時点の現在庫（在庫総数・Amazon・BOSS・ストック・フリー）の内訳を表示。
 // 月欄：その月の販売数・補充数のみを表示（現在庫の内訳は月によって変動しないため対象外）。
-const ctrlPressed = ref(false);
+const tooltipEl = ref<HTMLElement | null>(null);
 const tooltip = reactive({
     visible: false,
     mode: "month" as "sku" | "month",
-    x: 0,
-    y: 0,
+    left: 0,
+    top: 0,
     monthLabel: "",
     salesText: "",
     replenishmentText: "",
@@ -202,120 +225,106 @@ function stockText(value: number | null): string {
     return value === null ? "ー" : value.toLocaleString();
 }
 
-function onSkuHover(event: MouseEvent, r: SkuRow): void {
-    if (!ctrlPressed.value) return;
+// ツールチップの内容によって高さ・幅が変わるため、描画後に実測して画面外にはみ出さない位置へ補正する。
+function positionTooltip(event: MouseEvent): void {
+    const offset = 14;
+    const margin = 8;
+    tooltip.left = event.clientX + offset;
+    tooltip.top = event.clientY + offset;
 
-    tooltip.visible = true;
-    tooltip.mode = "sku";
-    tooltip.x = event.clientX;
-    tooltip.y = event.clientY;
-    tooltip.amazonText = stockText(r.amazonStock);
-    tooltip.bossText = stockText(r.bossStock);
-    tooltip.ecStockText = stockText(r.ecStock);
-    tooltip.freeStockText = stockText(r.freeStock);
-    const total = (r.amazonStock ?? 0) + (r.bossStock ?? 0) + (r.ecStock ?? 0) + (r.freeStock ?? 0);
-    tooltip.totalText = total.toLocaleString();
+    nextTick(() => {
+        const el = tooltipEl.value;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        if (event.clientY + offset + rect.height > window.innerHeight - margin) {
+            tooltip.top = Math.max(margin, event.clientY - offset - rect.height);
+        }
+        if (event.clientX + offset + rect.width > window.innerWidth - margin) {
+            tooltip.left = Math.max(margin, event.clientX - offset - rect.width);
+        }
+    });
+}
+
+// ホバーしてすぐ表示すると意図しない通過でも出てしまうため、0.2秒とどまってから表示する。
+const HOVER_DELAY_MS = 200;
+let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearHoverTimer(): void {
+    if (hoverTimer !== null) {
+        clearTimeout(hoverTimer);
+        hoverTimer = null;
+    }
+}
+
+function onSkuHover(event: MouseEvent, r: SkuRow): void {
+    if (tooltip.visible && tooltip.mode === "sku") {
+        positionTooltip(event);
+        return;
+    }
+    clearHoverTimer();
+    hoverTimer = setTimeout(() => {
+        tooltip.visible = true;
+        tooltip.mode = "sku";
+        tooltip.amazonText = stockText(r.amazonStock);
+        tooltip.bossText = stockText(r.bossStock);
+        tooltip.ecStockText = stockText(r.ecStock);
+        tooltip.freeStockText = stockText(r.freeStock);
+        const total = (r.amazonStock ?? 0) + (r.bossStock ?? 0) + (r.ecStock ?? 0) + (r.freeStock ?? 0);
+        tooltip.totalText = total.toLocaleString();
+        positionTooltip(event);
+    }, HOVER_DELAY_MS);
 }
 
 function onMonthHover(event: MouseEvent, r: SkuRow, index: number, monthLabel: string): void {
-    if (!ctrlPressed.value) return;
-
-    tooltip.visible = true;
-    tooltip.mode = "month";
-    tooltip.x = event.clientX;
-    tooltip.y = event.clientY;
-    tooltip.monthLabel = monthLabel;
-    if (r.result.forecastUnavailable) {
-        tooltip.salesText = "予測不能";
-        tooltip.replenishmentText = "ー";
+    if (tooltip.visible && tooltip.mode === "month") {
+        positionTooltip(event);
         return;
     }
-    const month = r.result.series[index];
-    tooltip.salesText = month.demand.toLocaleString();
-    tooltip.replenishmentText = month.inbound > 0 ? `+${month.inbound.toLocaleString()}` : "0";
+    clearHoverTimer();
+    hoverTimer = setTimeout(() => {
+        tooltip.visible = true;
+        tooltip.mode = "month";
+        tooltip.monthLabel = monthLabel;
+        if (r.result.forecastUnavailable) {
+            tooltip.salesText = "予測不能";
+            tooltip.replenishmentText = "ー";
+        } else {
+            const month = r.result.series[index];
+            tooltip.salesText = month.demand.toLocaleString();
+            tooltip.replenishmentText = month.inbound > 0 ? `+${month.inbound.toLocaleString()}` : "0";
+        }
+        positionTooltip(event);
+    }, HOVER_DELAY_MS);
 }
 
 function hideTooltip(): void {
+    clearHoverTimer();
     tooltip.visible = false;
 }
-
-function handleKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Control") ctrlPressed.value = true;
-}
-function handleKeyUp(e: KeyboardEvent): void {
-    if (e.key === "Control") {
-        ctrlPressed.value = false;
-        hideTooltip();
-    }
-}
-function handleBlur(): void {
-    ctrlPressed.value = false;
-    hideTooltip();
-}
-
-onMounted(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    window.addEventListener("blur", handleBlur);
-});
-onUnmounted(() => {
-    window.removeEventListener("keydown", handleKeyDown);
-    window.removeEventListener("keyup", handleKeyUp);
-    window.removeEventListener("blur", handleBlur);
-});
 
 // --- 絞り込み --------------------------------------------------------------
 const keyword = ref("");
 const category = ref("all");
-const shortageFilter = ref("all");
-const sortOrder = ref("productCode");
 
 const categoryOptions: SelectOption[] = [
     { label: "すべて", value: "all" },
     { label: "化粧品", value: "化粧品" },
     { label: "生活雑貨", value: "生活雑貨" },
 ];
-const shortageOptions: SelectOption[] = [
-    { label: "すべて", value: "all" },
-    { label: "30日以内に欠品予測あり", value: "30" },
-    { label: "60日以内に欠品予測あり", value: "60" },
-    { label: "欠品予測あり（全期間）", value: "any" },
-    { label: "欠品予測なし", value: "none" },
-];
-const sortOptions: SelectOption[] = [
-    { label: "品番順", value: "productCode" },
-    { label: "欠品が早い順", value: "shortage" },
-];
 
-const expanded = reactive<Record<string, boolean>>({});
+const expanded = reactive<Record<string, boolean>>(Object.fromEntries(productGroups.map((group) => [group.productCode, true])));
 function toggleExpand(group: ProductRow): void {
     expanded[group.productCode] = !expanded[group.productCode];
 }
 
-function monthsUntilShortage(group: ProductRow): number {
-    const indices = group.skuRows.filter((r) => r.result.shortageIndex >= 0).map((r) => r.result.shortageIndex);
-    return indices.length > 0 ? Math.min(...indices) : Infinity;
-}
-
-const filteredGroups = computed(() => {
-    let groups = productRows.value.filter((group) => {
+const filteredGroups = computed(() =>
+    productRows.value.filter((group) => {
         if (category.value !== "all" && group.category !== category.value) return false;
         if (keyword.value && !group.skuRows.some((r) => `${group.productCode}${r.sku}`.includes(keyword.value))) return false;
 
-        const minShortageIdx = monthsUntilShortage(group);
-        const hasShortage = minShortageIdx !== Infinity;
-        if (shortageFilter.value === "30" && !(minShortageIdx <= 0)) return false;
-        if (shortageFilter.value === "60" && !(minShortageIdx <= 1)) return false;
-        if (shortageFilter.value === "any" && !hasShortage) return false;
-        if (shortageFilter.value === "none" && hasShortage) return false;
-
         return true;
-    });
-
-    groups = [...groups].sort((a, b) => (sortOrder.value === "productCode" ? a.productCode.localeCompare(b.productCode) : monthsUntilShortage(a) - monthsUntilShortage(b)));
-
-    return groups;
-});
+    }),
+);
 
 function warningCount(group: ProductRow): number {
     return group.skuRows.filter((r) => r.result.warningLevel === "shortage").length;
@@ -334,18 +343,18 @@ function cellClass(value: number, result: SeriesResult): string {
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <div class="flex items-center gap-2">
-                    <h1 class="text-[19px] font-bold text-slate-900">12か月在庫推移</h1>
-                    <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">サンプルデータ</span>
+                    <h1 class="text-[22px] font-bold text-slate-900">12か月在庫推移</h1>
+                    <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[12px] font-semibold text-slate-600">サンプルデータ</span>
                 </div>
-                <p class="mt-1 text-[12.5px] text-slate-500">対象品番に属するSKU別に、基準日から12か月先までの月次在庫推移を表示します。</p>
+                <p class="mt-1 text-[14px] text-slate-500">対象品番に属するSKU別に、基準日から12か月先までの月次在庫推移を表示します。</p>
             </div>
-            <span class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-2.5 py-1 text-[11px] font-semibold text-primary-700">
-                <AppIcon name="trending-up" :size="13" />
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-2.5 py-1 text-[13px] font-semibold text-primary-700">
+                <AppIcon name="trending-up" :size="15" />
                 需要値はシステム需要予測に基づく
             </span>
         </div>
 
-        <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[11.5px] text-slate-500">
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] text-slate-500">
             <span
                 >基準日 <span class="font-semibold text-slate-700">{{ baseDate }}</span></span
             >
@@ -358,14 +367,12 @@ function cellClass(value: number, result: SeriesResult): string {
             <span
                 >算出日時 <span class="font-semibold text-slate-700">{{ calculatedAt }}</span></span
             >
-            <span class="ml-auto inline-flex items-center gap-1 font-semibold text-slate-600"><AppIcon name="layers" :size="13" />改善モード（現行Excel再現モードではない）</span>
+            <span class="ml-auto inline-flex items-center gap-1 font-semibold text-slate-600"><AppIcon name="layers" :size="15" />改善モード（現行Excel再現モードではない）</span>
         </div>
 
         <div class="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
             <BaseInput v-model="keyword" label="品番・SKU" placeholder="検索" icon="search" class="w-44" />
             <BaseSelect v-model="category" label="カテゴリー" :options="categoryOptions" class="w-34" />
-            <BaseSelect v-model="shortageFilter" label="欠品時期" :options="shortageOptions" class="w-52" />
-            <BaseSelect v-model="sortOrder" label="並び替え" :options="sortOptions" class="w-36" />
         </div>
 
         <div v-for="group in filteredGroups" :key="group.productCode" class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -374,16 +381,16 @@ function cellClass(value: number, result: SeriesResult): string {
                     <AppIcon name="chevron-right" :size="14" class="shrink-0 text-slate-400 transition-transform" :class="expanded[group.productCode] ? 'rotate-90' : ''" />
                     <div class="min-w-0">
                         <div class="flex items-center gap-2">
-                            <span class="truncate text-[13.5px] font-bold text-slate-900">{{ group.productCode }}</span>
-                            <span class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{{ group.category }}</span>
-                            <span class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{{ group.brand }}</span>
+                            <span class="truncate text-[16px] font-bold text-slate-900">{{ group.productCode }}</span>
+                            <span class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[12px] font-semibold text-slate-500">{{ group.category }}</span>
+                            <span class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[12px] font-semibold text-slate-500">{{ group.brand }}</span>
                         </div>
-                        <p class="mt-0.5 truncate text-[11px] text-slate-500">SKU {{ group.skuRows.length }}件</p>
+                        <p class="mt-0.5 truncate text-[13px] text-slate-500">SKU {{ group.skuRows.length }}件</p>
                     </div>
                 </div>
                 <div class="flex shrink-0 items-center gap-1.5">
-                    <span v-if="warningCount(group) > 0" class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600">欠品警告 {{ warningCount(group) }}件</span>
-                    <span v-else class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">欠品警告なし</span>
+                    <span v-if="warningCount(group) > 0" class="rounded-full bg-red-50 px-2 py-0.5 text-[12px] font-semibold text-red-600">欠品警告 {{ warningCount(group) }}件</span>
+                    <span v-else class="rounded-full bg-emerald-50 px-2 py-0.5 text-[12px] font-semibold text-emerald-600">欠品警告なし</span>
                 </div>
             </button>
 
@@ -394,18 +401,24 @@ function cellClass(value: number, result: SeriesResult): string {
                         <col v-for="m in months" :key="m.key" class="w-[6%]" />
                         <col class="w-[12%]" />
                     </colgroup>
-                    <thead class="bg-slate-50 text-[12px] font-semibold text-slate-500">
+                    <thead class="bg-slate-50 text-[14px] font-semibold text-slate-500">
                         <tr>
                             <th class="sticky left-0 z-10 border-r border-b border-slate-200 bg-slate-50 px-4 py-2.5">SKU</th>
-                            <th v-for="m in months" :key="m.key" class="border-r border-b border-slate-200 px-2 py-2.5 text-right">{{ m.label }}</th>
+                            <th
+                                v-for="(m, index) in months"
+                                :key="m.key"
+                                class="border-r border-b border-slate-200 px-2 py-2.5 text-right"
+                                :class="index === WARNING_CHECK_MONTH_INDEX ? 'bg-yellow-100 text-yellow-800' : ''"
+                            >
+                                {{ m.label }}
+                            </th>
                             <th class="border-b border-slate-200 px-3 py-2.5">警告</th>
                         </tr>
                     </thead>
-                    <tbody class="text-[13px]">
+                    <tbody class="text-[15px]">
                         <tr v-for="r in group.skuRows" :key="r.sku" class="border-b border-slate-200 hover:bg-slate-50/70">
                             <td
-                                class="sticky left-0 z-10 border-r border-slate-200 bg-white px-4 py-2.5"
-                                :class="ctrlPressed ? 'cursor-help' : ''"
+                                class="sticky left-0 z-10 cursor-help border-r border-slate-200 bg-white px-4 py-2.5"
                                 @mouseenter="onSkuHover($event, r)"
                                 @mousemove="onSkuHover($event, r)"
                                 @mouseleave="hideTooltip"
@@ -414,14 +427,14 @@ function cellClass(value: number, result: SeriesResult): string {
                             </td>
 
                             <template v-if="r.result.forecastUnavailable">
-                                <td :colspan="12" class="border-r border-slate-200 px-2 py-2.5 text-center text-[12.5px] font-medium text-slate-400">予測不能（対象期間の販売実績なし）</td>
+                                <td :colspan="12" class="border-r border-slate-200 px-2 py-2.5 text-center text-[14px] font-medium text-slate-400">予測不能（対象期間の販売実績なし）</td>
                             </template>
                             <template v-else>
                                 <td
                                     v-for="(month, index) in r.result.series"
                                     :key="month.key"
-                                    class="border-r border-slate-200 px-2 py-2.5 text-right tabular-nums"
-                                    :class="[cellClass(month.displayValue, r.result), ctrlPressed ? 'cursor-help' : '']"
+                                    class="cursor-help border-r border-slate-200 px-2 py-2.5 text-right tabular-nums"
+                                    :class="cellClass(month.displayValue, r.result)"
                                     @mouseenter="onMonthHover($event, r, index, month.label)"
                                     @mousemove="onMonthHover($event, r, index, month.label)"
                                     @mouseleave="hideTooltip"
@@ -431,64 +444,68 @@ function cellClass(value: number, result: SeriesResult): string {
                             </template>
 
                             <td class="whitespace-nowrap px-3 py-2.5">
-                                <span v-if="r.result.warningLevel === 'shortage'" class="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">
-                                    <AppIcon name="warning" :size="12" />欠品警告
+                                <span v-if="r.result.warningLevel === 'shortage'" class="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[13px] font-semibold text-red-600">
+                                    <AppIcon name="warning" :size="14" />欠品警告
                                 </span>
-                                <span v-else-if="r.result.warningLevel === 'excess'" class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600">
-                                    <AppIcon name="inventory_2" :size="12" />過剰在庫
+                                <span v-else-if="r.result.warningLevel === 'excess'" class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[13px] font-semibold text-blue-600">
+                                    <AppIcon name="inventory_2" :size="14" />過剰在庫
                                 </span>
                                 <span v-else-if="!r.result.forecastUnavailable" class="text-slate-300">—</span>
                             </td>
                         </tr>
                     </tbody>
                 </table>
-
-                <div class="flex flex-wrap items-center gap-4 border-t border-slate-100 bg-slate-50/60 px-4 py-2.5 text-[10.5px] text-slate-500">
-                    <span class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-red-50" />マイナス値＝未充足需要（欠品数量）</span>
-                    <span class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-amber-50" />月末在庫 0</span>
-                    <span class="flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-blue-50" />過剰在庫の目安</span>
-                    <span class="flex items-center gap-1.5"><AppIcon name="search" :size="11" />Ctrl+ホバー：SKU欄は現在庫の内訳、月欄は販売数・補充数を表示</span>
-                    <span class="ml-auto inline-flex items-center gap-1"
-                        ><AppIcon name="history" :size="12" />使用データ: {{ forecastVersion }} / 計算式: 月末在庫=MAX(0,月初在庫+確定入荷-需要予測)、未充足需要=MAX(0,需要予測-月初在庫-確定入荷)</span
-                    >
-                </div>
             </div>
         </div>
 
-        <p v-if="filteredGroups.length === 0" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-[12.5px] text-slate-400">条件に一致する対象品番がありません。</p>
+        <p v-if="filteredGroups.length === 0" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-[14px] text-slate-400">条件に一致する対象品番がありません。</p>
 
-        <div
-            v-if="tooltip.visible"
-            class="pointer-events-none fixed z-50 min-w-36 rounded-lg bg-slate-900 px-3 py-2 text-[11px] text-white shadow-lg"
-            :style="{ left: `${tooltip.x + 14}px`, top: `${tooltip.y + 14}px` }"
-        >
-            <template v-if="tooltip.mode === 'sku'">
-                <p class="font-semibold text-slate-300">現在庫の内訳（基準日時点）</p>
-                <p class="mt-1 flex items-center justify-between gap-4">
-                    <span class="text-slate-400">在庫総数</span><span class="font-semibold tabular-nums">{{ tooltip.totalText }}</span>
-                </p>
-                <p class="mt-1 flex items-center justify-between gap-4 border-t border-slate-700 pt-1">
-                    <span class="text-slate-400">Amazon</span><span class="font-semibold tabular-nums">{{ tooltip.amazonText }}</span>
-                </p>
-                <p class="flex items-center justify-between gap-4">
-                    <span class="text-slate-400">BOSS</span><span class="font-semibold tabular-nums">{{ tooltip.bossText }}</span>
-                </p>
-                <p class="flex items-center justify-between gap-4">
-                    <span class="text-slate-400">ストック</span><span class="font-semibold tabular-nums">{{ tooltip.ecStockText }}</span>
-                </p>
-                <p class="flex items-center justify-between gap-4">
-                    <span class="text-slate-400">フリー</span><span class="font-semibold tabular-nums">{{ tooltip.freeStockText }}</span>
-                </p>
-            </template>
-            <template v-else>
-                <p class="font-semibold text-slate-300">{{ tooltip.monthLabel }} の内訳</p>
-                <p class="mt-1 flex items-center justify-between gap-4">
-                    <span class="text-slate-400">販売数</span><span class="font-semibold tabular-nums">{{ tooltip.salesText }}</span>
-                </p>
-                <p class="flex items-center justify-between gap-4">
-                    <span class="text-slate-400">補充数</span><span class="font-semibold tabular-nums text-emerald-400">{{ tooltip.replenishmentText }}</span>
-                </p>
-            </template>
-        </div>
+        <Transition name="tooltip-fade">
+            <div
+                v-if="tooltip.visible"
+                ref="tooltipEl"
+                class="pointer-events-none fixed z-50 min-w-36 rounded-lg bg-slate-900 px-3 py-2 text-[13px] text-white shadow-lg"
+                :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
+            >
+                <template v-if="tooltip.mode === 'sku'">
+                    <p class="font-semibold text-slate-300">現在庫の内訳（基準日時点）</p>
+                    <p class="mt-1 flex items-center justify-between gap-4">
+                        <span class="text-slate-400">在庫総数</span><span class="font-semibold tabular-nums">{{ tooltip.totalText }}</span>
+                    </p>
+                    <p class="mt-1 flex items-center justify-between gap-4 border-t border-slate-700 pt-1">
+                        <span class="text-slate-400">Amazon</span><span class="font-semibold tabular-nums">{{ tooltip.amazonText }}</span>
+                    </p>
+                    <p class="flex items-center justify-between gap-4">
+                        <span class="text-slate-400">BOSS</span><span class="font-semibold tabular-nums">{{ tooltip.bossText }}</span>
+                    </p>
+                    <p class="flex items-center justify-between gap-4">
+                        <span class="text-slate-400">ストック</span><span class="font-semibold tabular-nums">{{ tooltip.ecStockText }}</span>
+                    </p>
+                    <p class="flex items-center justify-between gap-4">
+                        <span class="text-slate-400">フリー</span><span class="font-semibold tabular-nums">{{ tooltip.freeStockText }}</span>
+                    </p>
+                </template>
+                <template v-else>
+                    <p class="font-semibold text-slate-300">{{ tooltip.monthLabel }} の内訳</p>
+                    <p class="mt-1 flex items-center justify-between gap-4">
+                        <span class="text-slate-400">販売数</span><span class="font-semibold tabular-nums">{{ tooltip.salesText }}</span>
+                    </p>
+                    <p class="flex items-center justify-between gap-4">
+                        <span class="text-slate-400">補充数</span><span class="font-semibold tabular-nums text-emerald-400">{{ tooltip.replenishmentText }}</span>
+                    </p>
+                </template>
+            </div>
+        </Transition>
     </div>
 </template>
+
+<style scoped>
+.tooltip-fade-enter-active,
+.tooltip-fade-leave-active {
+    transition: opacity 0.15s ease;
+}
+.tooltip-fade-enter-from,
+.tooltip-fade-leave-to {
+    opacity: 0;
+}
+</style>
