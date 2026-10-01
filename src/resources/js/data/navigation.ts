@@ -93,7 +93,6 @@ export const navigation: NavGroup[] = [
         label: "マスタ",
         icon: "database",
         pages: [
-            { id: "PG-810", label: "商品マスタ", path: "/masters/products" },
             { id: "PG-830", label: "倉庫マスタ", path: "/masters/warehouses" },
             { id: "PG-840", label: "調達マスタ", path: "/masters/procurement" },
         ],

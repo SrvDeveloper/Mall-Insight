@@ -2,13 +2,20 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 import { navigation, topLevelPages } from "@/data/navigation";
 import { useAuthStore } from "@/stores/auth";
 import AppLayout from "@/layouts/AppLayout.vue";
+import DashboardView from "@/views/DashboardView.vue";
 import LoginView from "@/views/LoginView.vue";
 import PlaceholderView from "@/views/PlaceholderView.vue";
+import TwelveMonthInventoryTrendView from "@/views/TwelveMonthInventoryTrendView.vue";
+
+const implementedPages: Record<string, RouteRecordRaw["component"]> = {
+    "PG-010": DashboardView,
+    "PG-730": TwelveMonthInventoryTrendView,
+};
 
 const topLevelRoutes: RouteRecordRaw[] = topLevelPages.map((page) => ({
     path: page.path.slice(1),
     name: page.id,
-    component: PlaceholderView,
+    component: implementedPages[page.id] ?? PlaceholderView,
     meta: { title: page.label },
 }));
 
@@ -16,7 +23,7 @@ const groupRoutes: RouteRecordRaw[] = navigation.flatMap((group) =>
     group.pages.map((page) => ({
         path: page.path.slice(1),
         name: page.id,
-        component: PlaceholderView,
+        component: implementedPages[page.id] ?? PlaceholderView,
         meta: { title: page.label, group: group.label },
     })),
 );
