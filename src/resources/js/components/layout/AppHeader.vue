@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { initFlowbite } from "flowbite";
 import { useAuthStore } from "@/stores/auth";
 import AppIcon from "@/components/icons/AppIcon.vue";
+import AppLogo from "@/components/icons/AppLogo.vue";
 
 defineProps<{ collapsed: boolean }>();
 const emit = defineEmits<{ "toggle-sidebar": [] }>();
@@ -34,12 +35,8 @@ function handleLogout(): void {
         <div class="h-6 w-px bg-slate-200" />
 
         <router-link to="/dashboard" class="flex items-center gap-2.5">
-            <span class="flex h-7 w-7 items-end justify-center gap-0.75 rounded-lg bg-primary-600 p-1.5">
-                <span class="h-1.75 w-1 rounded-sm bg-primary-200"></span>
-                <span class="h-3.25 w-1 rounded-sm bg-white"></span>
-                <span class="h-1 w-1 rounded-sm bg-primary-300"></span>
-            </span>
-            <span class="text-[15px] font-bold tracking-tight text-slate-900">Mall Insight</span>
+            <AppLogo :size="28" />
+            <span class="text-[15px] font-bold tracking-tight text-slate-900">Mall <span class="text-primary-600">Insight</span></span>
         </router-link>
 
         <div class="h-6 w-px bg-slate-200" />

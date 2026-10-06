@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import BaseInput from "@/components/ui/BaseInput.vue";
 import BaseButton from "@/components/ui/BaseButton.vue";
+import AppLogo from "@/components/icons/AppLogo.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -37,13 +38,9 @@ async function handleSubmit(): Promise<void> {
     <div class="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <div class="w-full max-w-95">
             <div class="mb-7 flex flex-col items-center gap-3 text-center">
-                <span class="flex h-11 w-11 items-end justify-center gap-1 rounded-xl bg-primary-600 p-2.5">
-                    <span class="h-2.5 w-1.5 rounded-sm bg-primary-200"></span>
-                    <span class="h-5 w-1.5 rounded-sm bg-white"></span>
-                    <span class="h-1.5 w-1.5 rounded-sm bg-primary-300"></span>
-                </span>
+                <AppLogo :size="44" />
                 <div>
-                    <h1 class="text-lg font-bold text-slate-900">Mall Insight</h1>
+                    <h1 class="text-lg font-bold tracking-tight text-slate-900">Mall <span class="text-primary-600">Insight</span></h1>
                     <p class="mt-0.5 text-[12.5px] text-slate-500">ECモール統合分析システム</p>
                 </div>
             </div>
