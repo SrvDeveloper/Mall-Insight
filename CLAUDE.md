@@ -30,6 +30,8 @@ php artisan test --filter=Name   # メソッド名/クラス名を指定して�
 vendor/bin/phpunit tests/Feature/ExampleTest.php   # テストファイルを直接指定して実行
 php artisan dev                  # ローカル開発サーバーの起動（serve + queue + vite、composerのdevスクリプト経由）
 php artisan migrate              # マイグレーション実行（.env.exampleではsqliteがデフォルト、devcontainerではMySQL）
+php artisan crosswalker:sync-items   # CrossWalkerから品番・SKUを取得（CROSSWALKER_MOCK=true ならサンプルを使う）
+php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得など）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
 ```
 
 ### JS / Vue

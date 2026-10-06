@@ -1,0 +1,65 @@
+{
+    "_comment": "CROSSWALKER_MOCK=true のときに CrossWalker API（GET /items）の代わりに返すサンプル。実データで確認した特徴（name が null、サイズなしは \"0\"、SKUコードが品番で始まらない品番、無効なSKU、子ASIN未設定）を含む。",
+    "data": [
+        {
+            "item_no": "fisi-05",
+            "name": null,
+            "brand": "SHIORI",
+            "category": "老眼鏡",
+            "parent_asin": "B09T32PVM5",
+            "status": "active",
+            "skus": [
+                { "sku_code": "fisi-05-1-10", "child_asin": "B0MOCK0101", "status": "active", "tq_item_no": "FISI05", "tq_color_no": "1", "tq_size": "10" },
+                { "sku_code": "fisi-05-1-15", "child_asin": "B0MOCK0102", "status": "active", "tq_item_no": "FISI05", "tq_color_no": "1", "tq_size": "15" },
+                { "sku_code": "fisi-05-1-20", "child_asin": "B0MOCK0103", "status": "active", "tq_item_no": "FISI05", "tq_color_no": "1", "tq_size": "20" },
+                { "sku_code": "fisi-05-2-10", "child_asin": "B0MOCK0104", "status": "active", "tq_item_no": "FISI05", "tq_color_no": "2", "tq_size": "10" },
+                { "sku_code": "fisi-05-2-15", "child_asin": "B0MOCK0105", "status": "active", "tq_item_no": "FISI05", "tq_color_no": "2", "tq_size": "15" },
+                { "sku_code": "fisi-05-2-20", "child_asin": "B0MOCK0106", "status": "active", "tq_item_no": "FISI05", "tq_color_no": "2", "tq_size": "20" }
+            ],
+            "updated_at": "2026-09-08T07:08:16.000000Z"
+        },
+        {
+            "item_no": "si-01sap",
+            "name": null,
+            "brand": "SHIORI",
+            "category": "老眼鏡",
+            "parent_asin": "B0MOCK0200",
+            "status": "active",
+            "skus": [
+                { "sku_code": "si-01sa-1-15", "child_asin": "B0MOCK0201", "status": "active", "tq_item_no": "SI01SA", "tq_color_no": "1A", "tq_size": "15" },
+                { "sku_code": "si-01sa-1-20", "child_asin": "B0MOCK0202", "status": "active", "tq_item_no": "SI01SA", "tq_color_no": "1A", "tq_size": "20" },
+                { "sku_code": "si-01sa-2-15", "child_asin": "B0MOCK0203", "status": "active", "tq_item_no": "SI01SA", "tq_color_no": "2A", "tq_size": "15" }
+            ],
+            "updated_at": "2026-09-30T08:07:55.000000Z"
+        },
+        {
+            "item_no": "fi2002",
+            "name": null,
+            "brand": "FEELLIFE",
+            "category": "サングラス",
+            "parent_asin": "B0MOCK0300",
+            "status": "active",
+            "skus": [
+                { "sku_code": "fi2002-1", "child_asin": "B0MOCK0301", "status": "active", "tq_item_no": "FI2002", "tq_color_no": "1", "tq_size": "0" },
+                { "sku_code": "fi2002-2", "child_asin": "B0MOCK0302", "status": "active", "tq_item_no": "FI2002", "tq_color_no": "2", "tq_size": "0" },
+                { "sku_code": "fi2002-3", "child_asin": null, "status": "active", "tq_item_no": "FI2002", "tq_color_no": "3", "tq_size": "0" }
+            ],
+            "updated_at": "2026-08-21T02:15:00.000000Z"
+        },
+        {
+            "item_no": "spc-007",
+            "name": null,
+            "brand": "SPC",
+            "category": "老眼鏡",
+            "parent_asin": "B0MOCK0400",
+            "status": "active",
+            "skus": [
+                { "sku_code": "spc-007-1-10", "child_asin": "B0MOCK0401", "status": "inactive", "tq_item_no": "SPC007", "tq_color_no": "1", "tq_size": "10" },
+                { "sku_code": "spc-007-1-15", "child_asin": "B0MOCK0402", "status": "inactive", "tq_item_no": "SPC007", "tq_color_no": "1", "tq_size": "15" },
+                { "sku_code": "spc-007-2-10", "child_asin": "B0MOCK0403", "status": "active", "tq_item_no": "SPC007", "tq_color_no": "2", "tq_size": "10" },
+                { "sku_code": "spc-007-2-15", "child_asin": null, "status": "active", "tq_item_no": "SPC007", "tq_color_no": "2", "tq_size": "15" }
+            ],
+            "updated_at": "2026-10-01T09:30:00.000000Z"
+        }
+    ]
+}

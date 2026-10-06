@@ -4,10 +4,11 @@ import { useRoute, useRouter, type LocationQuery } from "vue-router";
 import { fetchItems, type ItemQuery } from "@/api/items";
 import { ApiError } from "@/api/client";
 import StatusBadge, { type BadgeTone } from "@/components/ui/StatusBadge.vue";
+import CrossWalkerSyncPanel from "@/components/CrossWalkerSyncPanel.vue";
 import type { ActiveStatus, Item, Paginated } from "@/types/api";
 
 /**
- * 品番・SKU一覧（バックログ B-001・B-002）。CrossWalker から取得した品番と所属SKUを確認する。
+ * 品番・SKU（決定記録 K-017：商品データの状態確認）。CrossWalker からの取得状況と、取得した品番・所属SKUを確認する。
  * 検索条件は URL のクエリに持たせ、再読み込みしても同じ条件で表示する。
  */
 
@@ -119,6 +120,8 @@ const validationMessage = computed(() => (loadError.value?.isValidationError ? (
             <p class="text-sm text-stone-500">CrossWalker から取得した品番と、所属するSKUを確認します。品番を商品名として扱います。</p>
         </header>
 
+        <CrossWalkerSyncPanel @synced="load" />
+
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <form class="flex w-full gap-2 sm:max-w-md" role="search" @submit.prevent="search">
                 <label for="item-keyword" class="sr-only">品番・SKUコードで検索</label>
@@ -158,7 +161,7 @@ const validationMessage = computed(() => (loadError.value?.isValidationError ? (
             <div v-else-if="!result && isLoading" class="px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
 
             <div v-else-if="result && result.data.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
-                {{ hasFilter ? "条件に一致する品番はありません。" : "品番がまだ登録されていません。CrossWalker から品番を取得すると、ここに表示されます。" }}
+                {{ hasFilter ? "条件に一致する品番はありません。" : "品番がまだ登録されていません。「CrossWalkerから取得」を押すと、ここに表示されます。" }}
             </div>
 
             <div v-else-if="result" class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">

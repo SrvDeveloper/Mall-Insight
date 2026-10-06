@@ -7,6 +7,10 @@ import { fetchItems } from "@/api/items";
 import type { Item, Paginated } from "@/types/api";
 
 vi.mock("@/api/items", () => ({ fetchItems: vi.fn() }));
+vi.mock("@/api/crosswalkerSyncs", () => ({
+    fetchLatestCrossWalkerSync: vi.fn().mockResolvedValue({ latest: null, last_succeeded: null }),
+    runCrossWalkerSync: vi.fn(),
+}));
 
 const item: Item = {
     id: 1,

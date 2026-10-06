@@ -35,4 +35,13 @@ return [
         ],
     ],
 
+    'crosswalker' => [
+        'base_url' => env('CROSSWALKER_BASE_URL'),
+        'api_key' => env('CROSSWALKER_API_KEY'),
+        // true のときは実APIを呼ばず、database/data/crosswalker-items.json のサンプルを返す
+        'mock' => (bool) env('CROSSWALKER_MOCK', false),
+        'connect_timeout' => (int) env('CROSSWALKER_CONNECT_TIMEOUT', 5),
+        'timeout' => (int) env('CROSSWALKER_TIMEOUT', 10),
+    ],
+
 ];
