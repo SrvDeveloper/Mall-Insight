@@ -14,6 +14,10 @@ export interface NavGroup {
  */
 export const navigation: NavGroup[] = [
     {
+        label: "取込",
+        pages: [{ name: "inventory-imports", label: "在庫の取得", path: "/imports/inventory" }],
+    },
+    {
         label: "商品",
         pages: [{ name: "items", label: "品番・SKU", path: "/items" }],
     },

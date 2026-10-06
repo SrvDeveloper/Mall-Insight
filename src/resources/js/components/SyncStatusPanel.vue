@@ -1,16 +1,27 @@
-<script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { fetchLatestCrossWalkerSync, runCrossWalkerSync } from "@/api/crosswalkerSyncs";
-import type { CrossWalkerSync, CrossWalkerSyncState } from "@/types/api";
+<script setup lang="ts" generic="T extends SyncRecordBase">
+import { computed, onMounted, ref, shallowRef } from "vue";
+import type { SyncRecordBase, SyncState } from "@/types/api";
 
 /**
- * CrossWalker からの品番・SKU取得の状況と、手動での取得（バックログ B-002、決定記録 K-017・K-018）。
+ * 外部システムからの取得状況と、手動での取得（決定記録 K-017・K-018・K-021）。
  * 最後の取得が失敗していても、表示中のデータがいつ時点のものかを必ず示す。
  */
 
-const emit = defineEmits<{ synced: [sync: CrossWalkerSync] }>();
+const props = defineProps<{
+    /** 取得元のシステム名（例：CrossWalker） */
+    source: string;
+    /** 自動取得の説明（例：毎朝6時） */
+    schedule: string;
+    /** 取得したものの名前（例：品番とSKU） */
+    subject: string;
+    loadState: () => Promise<SyncState<T>>;
+    runSync: () => Promise<T>;
+    /** 成功した取得の内容を1行で表す */
+    summarize: (sync: T) => string;
+}>();
+const emit = defineEmits<{ synced: [sync: T] }>();
 
-const state = ref<CrossWalkerSyncState | null>(null);
+const state = shallowRef<SyncState<T> | null>(null);
 const isRunning = ref(false);
 const hasLoadError = ref(false);
 
@@ -19,7 +30,7 @@ const formatDateTime = (value: string): string => dateTimeFormat.format(new Date
 
 async function load(): Promise<void> {
     try {
-        state.value = await fetchLatestCrossWalkerSync();
+        state.value = await props.loadState();
         hasLoadError.value = false;
     } catch {
         hasLoadError.value = true;
@@ -32,7 +43,7 @@ async function run(): Promise<void> {
     }
     isRunning.value = true;
     try {
-        const sync = await runCrossWalkerSync();
+        const sync = await props.runSync();
         await load();
         emit("synced", sync);
     } catch {
@@ -47,22 +58,13 @@ onMounted(load);
 const latest = computed(() => state.value?.latest ?? null);
 const lastSucceeded = computed(() => state.value?.last_succeeded ?? null);
 const latestFailed = computed(() => latest.value?.status === "failed");
-
-function summary(sync: CrossWalkerSync): string {
-    const changes = [
-        sync.added_item_count ? `追加 ${sync.added_item_count}件` : null,
-        sync.removed_item_count ? `削除 ${sync.removed_item_count}件` : null,
-        sync.detached_sku_count ? `品番から外れたSKU ${sync.detached_sku_count}件` : null,
-    ].filter(Boolean);
-    return `品番 ${sync.item_count}件・SKU ${sync.sku_count}件${changes.length ? `（${changes.join("、")}）` : ""}`;
-}
 </script>
 
 <template>
     <section
         class="flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
         :class="latestFailed ? 'border-amber-300 bg-amber-50' : 'border-stone-200 bg-white'"
-        aria-label="CrossWalkerからの取得状況"
+        :aria-label="`${source}からの取得状況`"
     >
         <div class="flex min-w-0 flex-col gap-0.5 text-sm">
             <template v-if="hasLoadError">
@@ -72,8 +74,8 @@ function summary(sync: CrossWalkerSync): string {
                 <p class="text-stone-500">取得状況を読み込み中…</p>
             </template>
             <template v-else-if="!latest">
-                <p class="font-semibold text-stone-900">CrossWalkerからまだ取得していません。</p>
-                <p class="text-stone-500">「CrossWalkerから取得」を押すと、品番とSKUを取り込みます。以後は毎朝6時に自動で取得します。</p>
+                <p class="font-semibold text-stone-900">{{ source }}からまだ取得していません。</p>
+                <p class="text-stone-500">「{{ source }}から取得」を押すと、{{ subject }}を取り込みます。以後は{{ schedule }}に自動で取得します。</p>
             </template>
             <template v-else-if="latestFailed">
                 <p class="font-semibold text-amber-900">{{ formatDateTime(latest.finished_at) }} の取得（{{ latest.triggered_by_label }}）に失敗しました。</p>
@@ -82,7 +84,7 @@ function summary(sync: CrossWalkerSync): string {
                     {{
                         lastSucceeded
                             ? `表示中のデータは ${formatDateTime(lastSucceeded.finished_at)} に取得したものです。`
-                            : "まだ一度も取得に成功していないため、表示中のデータはCrossWalkerのものではありません。"
+                            : `まだ一度も取得に成功していないため、表示中のデータは${source}のものではありません。`
                     }}
                 </p>
             </template>
@@ -91,7 +93,7 @@ function summary(sync: CrossWalkerSync): string {
                     <span class="font-semibold">最終取得 {{ formatDateTime(latest.finished_at) }}</span>
                     <span class="text-stone-500">（{{ latest.triggered_by_label }}）</span>
                 </p>
-                <p class="text-stone-500 tabular-nums">{{ summary(latest) }}。毎朝6時に自動で取得します。</p>
+                <p class="text-stone-500 tabular-nums">{{ summarize(latest) }}。{{ schedule }}に自動で取得します。</p>
             </template>
         </div>
 
@@ -101,7 +103,7 @@ function summary(sync: CrossWalkerSync): string {
             :disabled="isRunning"
             @click="run"
         >
-            {{ isRunning ? "取得中…" : "CrossWalkerから取得" }}
+            {{ isRunning ? "取得中…" : `${source}から取得` }}
         </button>
     </section>
 </template>

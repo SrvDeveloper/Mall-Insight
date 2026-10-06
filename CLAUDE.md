@@ -31,7 +31,8 @@ vendor/bin/phpunit tests/Feature/ExampleTest.php   # テストファイルを直
 php artisan dev                  # ローカル開発サーバーの起動（serve + queue + vite、composerのdevスクリプト経由）
 php artisan migrate              # マイグレーション実行（.env.exampleではsqliteがデフォルト、devcontainerではMySQL）
 php artisan crosswalker:sync-items   # CrossWalkerから品番・SKUを取得（CROSSWALKER_MOCK=true ならサンプルを使う）
-php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得など）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
+php artisan zerostockview:sync-inventory   # ZeroStockViewから日次在庫を取得（ZEROSTOCKVIEW_MOCK=true なら生成したサンプルを使う）
+php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得、10時のZeroStockView取得）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
 ```
 
 ### JS / Vue

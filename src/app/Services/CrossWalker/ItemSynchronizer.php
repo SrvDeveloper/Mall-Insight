@@ -7,6 +7,7 @@ use App\Enums\SyncTrigger;
 use App\Models\CrossWalkerSync;
 use App\Models\Item;
 use App\Models\Sku;
+use App\Services\SyncAlreadyRunningException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;

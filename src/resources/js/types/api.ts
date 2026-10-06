@@ -42,7 +42,16 @@ export interface Item {
     skus: Sku[];
 }
 
-export interface CrossWalkerSync {
+export interface CrossWalkerSync extends SyncRecordBase {
+    item_count: number | null;
+    sku_count: number | null;
+    added_item_count: number | null;
+    removed_item_count: number | null;
+    detached_sku_count: number | null;
+}
+
+/** 外部システムからの取得記録の共通部分。 */
+export interface SyncRecordBase {
     id: number;
     status: "succeeded" | "failed";
     status_label: string;
@@ -50,15 +59,25 @@ export interface CrossWalkerSync {
     triggered_by_label: string;
     started_at: string;
     finished_at: string;
-    item_count: number | null;
-    sku_count: number | null;
-    added_item_count: number | null;
-    removed_item_count: number | null;
-    detached_sku_count: number | null;
     error_message: string | null;
 }
 
-export interface CrossWalkerSyncState {
-    latest: CrossWalkerSync | null;
-    last_succeeded: CrossWalkerSync | null;
+export interface SyncState<T extends SyncRecordBase> {
+    latest: T | null;
+    last_succeeded: T | null;
+}
+
+export interface ZeroStockViewSync extends SyncRecordBase {
+    from_date: string | null;
+    to_date: string | null;
+    stock_date_count: number | null;
+    sku_row_count: number | null;
+    created_sku_count: number | null;
+    latest_stock_date: string | null;
+}
+
+export interface InventoryDate {
+    stock_date: string;
+    sku_count: number;
+    fetched_at: string;
 }

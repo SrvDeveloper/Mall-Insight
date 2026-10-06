@@ -44,4 +44,13 @@ return [
         'timeout' => (int) env('CROSSWALKER_TIMEOUT', 10),
     ],
 
+    'zerostockview' => [
+        'base_url' => env('ZEROSTOCKVIEW_BASE_URL'),
+        'api_key' => env('ZEROSTOCKVIEW_API_KEY'),
+        // true のときは実APIを呼ばず、CrossWalker のサンプルSKUに対する在庫を生成して返す
+        'mock' => (bool) env('ZEROSTOCKVIEW_MOCK', false),
+        'connect_timeout' => (int) env('ZEROSTOCKVIEW_CONNECT_TIMEOUT', 5),
+        'timeout' => (int) env('ZEROSTOCKVIEW_TIMEOUT', 30),
+    ],
+
 ];

@@ -4,8 +4,9 @@ import { useRoute, useRouter, type LocationQuery } from "vue-router";
 import { fetchItems, type ItemQuery } from "@/api/items";
 import { ApiError } from "@/api/client";
 import StatusBadge, { type BadgeTone } from "@/components/ui/StatusBadge.vue";
-import CrossWalkerSyncPanel from "@/components/CrossWalkerSyncPanel.vue";
-import type { ActiveStatus, Item, Paginated } from "@/types/api";
+import SyncStatusPanel from "@/components/SyncStatusPanel.vue";
+import { fetchLatestCrossWalkerSync, runCrossWalkerSync } from "@/api/crosswalkerSyncs";
+import type { ActiveStatus, CrossWalkerSync, Item, Paginated } from "@/types/api";
 
 /**
  * 品番・SKU（決定記録 K-017：商品データの状態確認）。CrossWalker からの取得状況と、取得した品番・所属SKUを確認する。
@@ -110,6 +111,15 @@ function formatDateTime(value: string | null): string {
     return value ? dateTimeFormat.format(new Date(value)) : "—";
 }
 
+function summarizeSync(sync: CrossWalkerSync): string {
+    const changes = [
+        sync.added_item_count ? `追加 ${sync.added_item_count}件` : null,
+        sync.removed_item_count ? `削除 ${sync.removed_item_count}件` : null,
+        sync.detached_sku_count ? `品番から外れたSKU ${sync.detached_sku_count}件` : null,
+    ].filter(Boolean);
+    return `品番 ${sync.item_count}件・SKU ${sync.sku_count}件${changes.length ? `（${changes.join("、")}）` : ""}`;
+}
+
 const validationMessage = computed(() => (loadError.value?.isValidationError ? (Object.values(loadError.value.errors).flat()[0] ?? loadError.value.message) : null));
 </script>
 
@@ -120,7 +130,15 @@ const validationMessage = computed(() => (loadError.value?.isValidationError ? (
             <p class="text-sm text-stone-500">CrossWalker から取得した品番と、所属するSKUを確認します。品番を商品名として扱います。</p>
         </header>
 
-        <CrossWalkerSyncPanel @synced="load" />
+        <SyncStatusPanel
+            source="CrossWalker"
+            schedule="毎朝6時"
+            subject="品番とSKU"
+            :load-state="fetchLatestCrossWalkerSync"
+            :run-sync="runCrossWalkerSync"
+            :summarize="summarizeSync"
+            @synced="load"
+        />
 
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <form class="flex w-full gap-2 sm:max-w-md" role="search" @submit.prevent="search">

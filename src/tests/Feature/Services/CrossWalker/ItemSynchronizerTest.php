@@ -9,7 +9,7 @@ use App\Models\CrossWalkerSync;
 use App\Models\Item;
 use App\Models\Sku;
 use App\Services\CrossWalker\ItemSynchronizer;
-use App\Services\CrossWalker\SyncAlreadyRunningException;
+use App\Services\SyncAlreadyRunningException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;

@@ -1,8 +1,8 @@
 import { apiClient } from "@/api/client";
-import type { CrossWalkerSync, CrossWalkerSyncState } from "@/types/api";
+import type { CrossWalkerSync, SyncState } from "@/types/api";
 
-export async function fetchLatestCrossWalkerSync(): Promise<CrossWalkerSyncState> {
-    const { data } = await apiClient.get<{ data: CrossWalkerSyncState }>("/crosswalker-syncs/latest");
+export async function fetchLatestCrossWalkerSync(): Promise<SyncState<CrossWalkerSync>> {
+    const { data } = await apiClient.get<{ data: SyncState<CrossWalkerSync> }>("/crosswalker-syncs/latest");
     return data.data;
 }
 
