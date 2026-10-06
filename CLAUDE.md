@@ -12,7 +12,7 @@
 - `docs/documents/` — 2026年10月6日に更新を停止した旧設計書（参考資料）。計算式・取込形式（BOSS・Amazon各レポート、日次在庫CSV）の参照には使えるが、確定した仕様とはみなさない。編集しない
 - `docs/参考/` — 取込要件で参照されているサンプル取込データ（BOSSのCSV/XLSX出力、AmazonのAmazon全注文レポート・FBA在庫レポート）
 
-**現在の状態：** `src/` 内の Laravel/Vue アプリはまだ手つかずのフレームワークスケルトンのまま（デフォルトの `welcome` ルート/ビュー、デフォルトの `User` モデルのみで、業務コードは未実装）。`src/AGENTS.md` と `src/CLAUDE.md` には Laravel Boost の `<laravel-boost-guidelines>` ブートストラップ用ブロックがまだ残っており、Boost は未インストールの状態を示している。そのブロックの指示に従い、本格的なアプリケーション実装に入る前に `src/` で `composer require laravel/boost --dev && php artisan boost:install` を実行し、生成された `src/AGENTS.md` を読み直すこと。`src/CLAUDE.md` / `src/AGENTS.md` は Boost のインストーラーが管理するファイルなので手動で編集しない。
+**現在の状態：** バックログに沿って実装中（進捗は `docs/プロダクト/02.バックログ.md` の各項目の状態を参照）。Laravel Boost は導入済みで、`src/CLAUDE.md` は Boost が生成・管理するファイルなので手動で編集しない。`src/AGENTS.md` には Boost のブートストラップ用ブロックが残っているが、`boost.json` の対象エージェントが `claude_code` だけのため再生成されないだけであり、Boost の再インストールは不要。
 
 ## 作業ディレクトリ
 
@@ -49,8 +49,8 @@ npm run check            # format:check → lint → typecheck → test の順�
 
 ## 技術スタックと構成
 
-- **バックエンド**: Laravel 13、PHP 8.3。`App\` 名前空間で PSR-4 オートロード（`src/app/`）。標準的な Laravel の構成（`app/Http/Controllers`、`app/Models`、`app/Providers`、`routes/web.php`、`database/migrations`）。
-- **フロントエンド**: Vue 3 + TypeScript、Vite（`laravel-vite-plugin`）でビルド。`vite.config.js` はエントリポイントとして `resources/js/app.ts` を指定しているが、現状は空のスケルトンである `resources/js/app.js` しか存在しない — フロントエンド実装に着手する際は、`app.ts` を作成するか設定側を修正して不整合を解消する必要がある。状態管理は Pinia（`pinia-plugin-persistedstate` 導入済み）、ルーティングは vue-router、スタイリングは Tailwind CSS v4（`@tailwindcss/vite`）と Flowbite コンポーネント。パスエイリアス：`@` → `resources/js`、`@css` → `resources/css`。
+- **バックエンド**: Laravel 13、PHP 8.3。`App\` 名前空間で PSR-4 オートロード（`src/app/`）。標準的な Laravel の構成（`app/Http/Controllers`、`app/Models`、`app/Providers`、`routes/web.php`、`database/migrations`）。API は `routes/api.php` に `/api/v1/...` として定義し、Eloquent API Resource で返す。`routes/web.php` は `api/` 以外のすべてのパスで SPA の枠（`app.blade.php`）を返す。タイムゾーンは Asia/Tokyo、言語は日本語（`lang/ja/`）。
+- **フロントエンド**: Vue 3 + TypeScript、Vite（`laravel-vite-plugin`）でビルド。エントリポイントは `resources/js/app.ts`。状態管理は Pinia（`pinia-plugin-persistedstate` 導入済み）、ルーティングは vue-router、スタイリングは Tailwind CSS v4（`@tailwindcss/vite`）。Tailwind の設定は `resources/css/app.css` の `@theme` に書く（`tailwind.config.js` は使わない）。Flowbite は依存に入っているが現在は使っていない。API 呼び出しは `resources/js/api/client.ts` の共通クライアントを使い、エラーは `ApiError` に変換される。パスエイリアス：`@` → `resources/js`、`@css` → `resources/css`。
 - **データベース**: ローカルではデフォルトで sqlite（`src/.env.example`）、devcontainer では MySQL 8.0（`db` サービス、データベース名 `mall_insight`）。テストは sqlite の `:memory:` を強制使用（`src/phpunit.xml`）。
 - **開発環境**: `.devcontainer/` が Docker Compose 構成を定義（AlmaLinux 9.6、PHP 8.3、Node 24）。サービスは `app`、`db`（MySQL）、`phpmyadmin`（8081番ポート）。
 

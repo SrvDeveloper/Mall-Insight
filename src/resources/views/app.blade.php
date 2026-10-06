@@ -15,7 +15,7 @@
 
         @vite(['resources/css/app.css', 'resources/js/app.ts'])
     </head>
-    <body class="h-full bg-slate-50 font-sans text-slate-900 antialiased">
+    <body class="h-full bg-stone-50 font-sans text-stone-900 antialiased">
         <div id="app" class="h-full"></div>
     </body>
 </html>

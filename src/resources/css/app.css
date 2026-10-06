@@ -1,10 +1,12 @@
 @import "tailwindcss";
 
-@config '../../tailwind.config.js';
-
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
+/*
+ * 配色の方針：画面の基本は無彩色（stone）とし、色は状態（警告・有効/無効など）を伝えるためだけに使う。
+ */
 @theme {
     --font-sans: "Instrument Sans", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Noto Sans JP", monospace;
 }
