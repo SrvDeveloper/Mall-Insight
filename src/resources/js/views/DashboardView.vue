@@ -24,14 +24,14 @@ const summaryCards = [
         path: "/simulations/12-month-trend",
     },
     {
-        label: "当月の確定試算",
-        value: "未確定",
+        label: "12か月在庫推移",
+        value: "最新表示",
         unit: "",
-        detail: "最終確定 2026-07-31",
-        icon: "task_alt",
+        detail: "最新データで自動算出",
+        icon: "calculate",
         iconClass: "bg-blue-50 text-blue-600",
         valueClass: "text-slate-900",
-        path: "/simulations/run",
+        path: "/simulations/12-month-trend",
     },
 ];
 
@@ -75,10 +75,7 @@ const warehouses = [
     { name: "FBA", date: "2026-08-29", days: "2日", stock: "5,792", status: "要確認", warning: true },
 ];
 
-const calculationStatuses = [
-    { label: "月次需要予測の更新", note: "予測結果の確認が必要です", status: "確認待ち", icon: "pending", complete: false },
-    { label: "在庫試算の実行・確定", note: "今月の試算は未実行です", status: "未着手", icon: "radio_button_unchecked", complete: false },
-];
+const calculationStatuses = [{ label: "月次需要予測の更新", note: "予測結果の確認が必要です", status: "確認待ち", icon: "pending", complete: false }];
 
 const alerts = [
     { title: "Amazon未対応ASIN", detail: "取込指摘から対象データを確認してください", count: "3件", icon: "link_off", color: "text-red-600 bg-red-50", path: "/imports/issues" },

@@ -6,11 +6,18 @@ ENV PHP_VERSION=8.3
 ENV COMPOSER_VERSION=2.8.12
 ENV NODE_VERSION=24
 ENV NPM_VERSION=latest
+ENV PATH="/root/.local/bin:${PATH}"
+ENV TZ=Asia/Tokyo
 
 # Setup
 RUN dnf -y update && \
-    dnf -y install epel-release git unzip findutils yum-utils ca-certificates && \
+    dnf -y install epel-release git unzip findutils procps-ng yum-utils ca-certificates glibc-gconv-extra && \
     dnf config-manager --set-enabled crb
+
+# Timezone
+RUN dnf -y install tzdata && \
+    ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
+    echo "${TZ}" > /etc/timezone
 
 # PHP
 RUN dnf -y install https://rpms.remirepo.net/enterprise/remi-release-9.rpm && \
@@ -23,10 +30,13 @@ RUN dnf -y install https://rpms.remirepo.net/enterprise/remi-release-9.rpm && \
 RUN curl -sS https://getcomposer.org/installer | php -- --version=${COMPOSER_VERSION} && \
     mv composer.phar /usr/local/bin/composer
 
-# Node.js
+# Node.js & Codex
 RUN curl -fsSL https://rpm.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
     dnf install -y nodejs && \
-    npm install -g npm@${NPM_VERSION}
+    npm install -g npm@${NPM_VERSION} @openai/codex
+
+# Claude Code
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # cleanup
 RUN dnf clean all

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from "vue";
+import BaseButton from "@/components/ui/BaseButton.vue";
 import AppIcon from "@/components/icons/AppIcon.vue";
 import BaseInput from "@/components/ui/BaseInput.vue";
 import BaseSelect, { type SelectOption } from "@/components/ui/BaseSelect.vue";
@@ -8,7 +9,18 @@ import BaseSelect, { type SelectOption } from "@/components/ui/BaseSelect.vue";
 const baseDate = "2026-08-31";
 const selectionVersion = "選定v2026-09-01";
 const forecastVersion = "予測v2026-09-01-003";
-const calculatedAt = "2026-09-01 09:05";
+const calculatedAt = ref("2026-09-01 09:05");
+const isCalculating = ref(false);
+
+function recalculate(): void {
+    if (isCalculating.value) return;
+
+    isCalculating.value = true;
+    window.setTimeout(() => {
+        calculatedAt.value = new Date().toLocaleString("ja-JP", { hour12: false });
+        isCalculating.value = false;
+    }, 500);
+}
 
 function monthLabels(count: number): { key: string; label: string }[] {
     const [y, m] = [2026, 9];
@@ -44,7 +56,7 @@ interface SkuDefinition {
     ecStock: number | null; // ECストック：EC出荷用に確保した社内予備在庫（販売では減らない）
     freeStock: number | null; // フリー在庫：社内の自由に使える在庫（販売では減らない）
     demand: number[]; // システム需要予測（SKU単位、月別12か月）
-    inbound: number[]; // 補充数：倉庫別に入力されず、SKU単位で1つだけ存在する（月別、12か月）
+    inbound: number[]; // 状態が在庫試算対象である発注・入荷予定のSKU明細から集計した月別入荷予定数
 }
 
 interface ProductGroup {
@@ -192,8 +204,8 @@ const productRows = computed<ProductRow[]>(() =>
         ...group,
         skuRows: group.skus.map((sku) => {
             // 月次推移の計算にはAmazon+BOSSの現在庫合計のみを用いる（ストック・フリーは販売対象外のため含めない）。
-            // 補充数（確定入荷数）は倉庫別に保持しないSKU単位の値だが、計算上の帰属先はこのSKU単位の在庫以外になく、
-            // FR-060（月末在庫=月初在庫+確定入荷-需要予測）の通りそのまま組み込む。
+            // 反映対象入荷予定数は、発注・入荷予定のSKU明細から月別に集計する。このサンプル画面ではSKU合計を表示するため、
+            // FR-060（月末在庫=月初在庫+反映対象入荷予定-需要予測）の通りそのまま組み込む。
             const openingStock = (sku.amazonStock ?? 0) + (sku.bossStock ?? 0);
             const result = buildResult({ openingStock, demand: sku.demand, inbound: sku.inbound, partial: false });
 
@@ -204,7 +216,7 @@ const productRows = computed<ProductRow[]>(() =>
 
 // --- ホバーでツールチップ表示 -----------------------------------------------
 // SKU欄：基準日時点の現在庫（在庫総数・Amazon・BOSS・ストック・フリー）の内訳を表示。
-// 月欄：その月の販売数・補充数のみを表示（現在庫の内訳は月によって変動しないため対象外）。
+// 月欄：その月の販売数・入荷予定数のみを表示（現在庫の内訳は月によって変動しないため対象外）。
 const tooltipEl = ref<HTMLElement | null>(null);
 const tooltip = reactive({
     visible: false,
@@ -346,12 +358,18 @@ function cellClass(value: number, result: SeriesResult): string {
                     <h1 class="text-[22px] font-bold text-slate-900">12か月在庫推移</h1>
                     <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[12px] font-semibold text-slate-600">サンプルデータ</span>
                 </div>
-                <p class="mt-1 text-[14px] text-slate-500">対象品番に属するSKU別に、基準日から12か月先までの月次在庫推移を表示します。</p>
+                <p class="mt-1 text-[14px] text-slate-500">画面を開いた時点の最新の予測・在庫・反映対象の発注・入荷予定から、12か月先までの在庫推移を自動算出します。</p>
             </div>
-            <span class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-2.5 py-1 text-[13px] font-semibold text-primary-700">
-                <AppIcon name="trending-up" :size="15" />
-                需要値はシステム需要予測に基づく
-            </span>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+                <span class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-2.5 py-1 text-[13px] font-semibold text-primary-700">
+                    <AppIcon name="trending-up" :size="15" />
+                    需要値はシステム需要予測に基づく
+                </span>
+                <BaseButton variant="outline" size="sm" :disabled="isCalculating" @click="recalculate">
+                    <AppIcon name="sync" :size="14" :class="isCalculating ? 'animate-spin' : ''" />
+                    {{ isCalculating ? "再計算中…" : "最新データで再計算" }}
+                </BaseButton>
+            </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] text-slate-500">
@@ -491,7 +509,7 @@ function cellClass(value: number, result: SeriesResult): string {
                         <span class="text-slate-400">販売数</span><span class="font-semibold tabular-nums">{{ tooltip.salesText }}</span>
                     </p>
                     <p class="flex items-center justify-between gap-4">
-                        <span class="text-slate-400">補充数</span><span class="font-semibold tabular-nums text-emerald-400">{{ tooltip.replenishmentText }}</span>
+                        <span class="text-slate-400">入荷予定数</span><span class="font-semibold tabular-nums text-emerald-400">{{ tooltip.replenishmentText }}</span>
                     </p>
                 </template>
             </div>

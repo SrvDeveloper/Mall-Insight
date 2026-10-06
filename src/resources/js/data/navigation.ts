@@ -73,7 +73,7 @@ export const navigation: NavGroup[] = [
         pages: [
             { id: "PG-610", label: "在庫照会", path: "/inventory/lookup" },
             { id: "PG-620", label: "在庫手入力", path: "/inventory/manual-entry" },
-            { id: "PG-630", label: "入荷予定・補充実績管理", path: "/inventory/replenishment" },
+            { id: "PG-630", label: "発注・入荷予定管理", path: "/inventory/replenishment" },
         ],
     },
     {
@@ -82,9 +82,7 @@ export const navigation: NavGroup[] = [
         icon: "layers",
         pages: [
             { id: "PG-710", label: "対象品番選定", path: "/simulations/selection" },
-            { id: "PG-720", label: "在庫試算実行", path: "/simulations/run" },
             { id: "PG-730", label: "12か月在庫推移", path: "/simulations/12-month-trend" },
-            { id: "PG-750", label: "確定試算履歴・再表示", path: "/simulations/history" },
         ],
     },
     {

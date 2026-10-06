@@ -1,60 +1,46 @@
 name: mall-insight
 
 services:
-  # PHP
-  app:
-    container_name: mall-insight-app
-    build:
-      context: ../../
-      dockerfile: .devcontainer/docker/dockerfile
-    volumes:
-      - ../../:/workspace
-      - ./app/php.ini:/etc/php.ini
-      - vendor-cache:/workspace/src/vendor
-      - node-modules-cache:/workspace/src/node_modules
-    depends_on:
-      - db
-    networks:
-      - network
-    tty: true
+    # PHP
+    app:
+        container_name: mall-insight-app
+        build:
+            context: ../../
+            dockerfile: .devcontainer/docker/dockerfile
+        volumes:
+            - ../../:/workspace
+            - ./app/php.ini:/etc/php.ini
+            - vendor-cache:/workspace/src/vendor
+            - node-modules-cache:/workspace/src/node_modules
+        depends_on:
+            - db
+        networks:
+            - network
+        tty: true
 
-  # MySQL
-  db:
-    container_name: mall-insight-db
-    image: mysql:8.0.39
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: mall_insight
-      MYSQL_USER: developer
-      MYSQL_PASSWORD: developer
-      TZ: Asia/Tokyo
-    ports:
-      - "3306:3306"
-    volumes:
-      - volume:/var/lib/mysql
-    networks:
-      - network
-  
-  # phpMyAdmin
-  phpmyadmin:
-    container_name: mall-insight-pma
-    image: phpmyadmin:latest
-    environment:
-      PMA_HOST: db
-      PMA_PORT: 3306
-      PMA_USER: developer
-      PMA_PASSWORD: developer
-    ports:
-      - "8081:80"
-    networks:
-      - network
+    # MySQL
+    db:
+        container_name: mall-insight-db
+        image: mysql:8.0.39
+        environment:
+            MYSQL_ROOT_PASSWORD: rootpass
+            MYSQL_DATABASE: mall_insight
+            MYSQL_USER: developer
+            MYSQL_PASSWORD: developer
+            TZ: Asia/Tokyo
+        ports:
+            - "3306:3306"
+        volumes:
+            - volume:/var/lib/mysql
+        networks:
+            - network
 
 volumes:
-  volume:
-  vendor-cache:
-  node-modules-cache:
+    volume:
+    vendor-cache:
+    node-modules-cache:
 
 # 定義されたネットワーク
 networks:
-  network:
-    driver: bridge
+    network:
+        driver: bridge
