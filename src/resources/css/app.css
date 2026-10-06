@@ -8,28 +8,3 @@
 @theme {
     --font-sans: "Instrument Sans", "Noto Sans JP", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
-
-/* Google Fonts Icons (Material Symbols) — used by AppIcon.vue as a fallback for names not in its built-in SVG set */
-.material-symbols-outlined {
-    font-family: "Material Symbols Outlined";
-    font-weight: normal;
-    font-style: normal;
-    line-height: 1;
-    letter-spacing: normal;
-    text-transform: none;
-    display: inline-block;
-    white-space: nowrap;
-    word-wrap: normal;
-    direction: ltr;
-    -webkit-font-smoothing: antialiased;
-}
-
-/* Route/page transition used by <router-view> */
-.page-enter-active,
-.page-leave-active {
-    transition: opacity 0.15s ease;
-}
-.page-enter-from,
-.page-leave-to {
-    opacity: 0;
-}

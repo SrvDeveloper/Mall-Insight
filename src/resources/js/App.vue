@@ -1,9 +1,7 @@
 <script setup lang="ts"></script>
 
 <template>
-    <router-view v-slot="{ Component }">
-        <transition name="page" mode="out-in">
-            <component :is="Component" />
-        </transition>
-    </router-view>
+    <div class="flex min-h-screen items-center justify-center">
+        <p class="text-sm text-slate-500">Mall Insight</p>
+    </div>
 </template>
