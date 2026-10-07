@@ -285,3 +285,57 @@ export interface InboundPlanPayload {
     note: string | null;
     allocations: { sku_id: number; quantity: number }[];
 }
+
+/** SKU1件・1か月分の在庫推移（B-008、K-026）。provisional_inbound は未割り振りの入荷予定を仮に割り振った分（K-043）。 */
+export interface MonthTrend {
+    /** YYYY-MM */
+    month: string;
+    days: number;
+    opening_stock: number;
+    demand: number;
+    inbound: number;
+    provisional_inbound: number;
+    ending_stock: number;
+    shortfall: number;
+}
+
+/** SKU1件の12か月在庫推移。計算できないSKUは months が null で、status_label に理由を持つ。 */
+export interface SkuTrend {
+    sku_id: number;
+    sku_code: string;
+    status: "calculated" | "unpredictable" | "no_stock";
+    status_label: string;
+    opening_stock: number | null;
+    stock_by_warehouse: { warehouse: string; label: string; quantity: number | null }[] | null;
+    average_daily: number | null;
+    is_partial_forecast: boolean;
+    forecast_reason_label: string | null;
+    warning: "none" | "shortage";
+    warning_label: string;
+    first_shortage_month: string | null;
+    months: MonthTrend[] | null;
+}
+
+export interface ItemTrend {
+    item_no: string;
+    brand: string;
+    category: string;
+    /** 需要予測の出せるSKUが無く、仮に割り振れなかった入荷予定の数 */
+    unassignable_inbound: number;
+    skus: SkuTrend[];
+}
+
+export interface InventoryTrendResponse {
+    data: ItemTrend[];
+    meta: {
+        calculated_at: string;
+        stock_date: string | null;
+        forecast_from: string;
+        sales_channels: { channel: "boss" | "amazon"; label: string; sales_data_to: string | null }[];
+        selection: { confirmed_at: string; item_count: number } | null;
+        settings: { check_month_offset: number };
+        /** 判定する月（YYYY-MM） */
+        check_month: string;
+        overdue_inbound_count: number;
+    };
+}

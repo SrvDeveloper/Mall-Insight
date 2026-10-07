@@ -11,11 +11,11 @@
 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
         @vite(['resources/css/app.css', 'resources/js/app.ts'])
     </head>
-    <body class="h-full bg-stone-50 font-sans text-stone-900 antialiased">
+    <body class="h-full bg-stone-100 font-sans text-stone-900 antialiased">
         <div id="app" class="h-full"></div>
     </body>
 </html>

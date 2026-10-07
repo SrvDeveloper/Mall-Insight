@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\DemandForecastController;
 use App\Http\Controllers\Api\V1\InboundPlanController;
 use App\Http\Controllers\Api\V1\InboundPlanReceiptController;
 use App\Http\Controllers\Api\V1\InventoryDateController;
+use App\Http\Controllers\Api\V1\InventoryTrendController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\ItemRankingController;
 use App\Http\Controllers\Api\V1\ItemSelectionController;
@@ -23,6 +24,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     Route::apiResource('inbound-plans', InboundPlanController::class)->except('show');
     Route::post('/inbound-plans/{inboundPlan}/receipt', [InboundPlanReceiptController::class, 'store'])->name('inbound-plans.receipt.store');
     Route::delete('/inbound-plans/{inboundPlan}/receipt', [InboundPlanReceiptController::class, 'destroy'])->name('inbound-plans.receipt.destroy');
+    Route::get('/inventory-trends', [InventoryTrendController::class, 'index'])->name('inventory-trends.index');
     Route::get('/unregistered-skus', [UnregisteredSkuController::class, 'index'])->name('unregistered-skus.index');
     Route::get('/crosswalker-syncs/latest', [CrossWalkerSyncController::class, 'latest'])->name('crosswalker-syncs.latest');
     Route::post('/crosswalker-syncs', [CrossWalkerSyncController::class, 'store'])->name('crosswalker-syncs.store');

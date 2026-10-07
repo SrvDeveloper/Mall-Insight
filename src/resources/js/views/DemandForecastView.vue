@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, shallowRef, useTemplateRef, watch } from "vue";
+import { computed, onMounted, ref, shallowRef, useTemplateRef } from "vue";
 import { RouterLink } from "vue-router";
 import { fetchDemandForecasts } from "@/api/demandForecasts";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
+import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
+import { useVirtualRows } from "@/composables/useVirtualRows";
 import type { AverageWindow, DemandForecastResponse, ItemForecast, MonthlyDemand, SkuForecast } from "@/types/api";
 
 /**
@@ -66,50 +68,8 @@ const hasError = ref(false);
 const onlyUnpredictable = ref(false);
 const view = ref<ForecastView>("total");
 
-/** 意図せず通り過ぎただけで出ないよう、少しとどまってから表示する。 */
-const TOOLTIP_DELAY_MS = 200;
-const TOOLTIP_GAP_PX = 6;
-const VIEWPORT_MARGIN_PX = 8;
-
 const tooltipElement = useTemplateRef<HTMLElement>("tooltipElement");
-// SKUのデータは大きいため、深く監視しない
-const tooltip = shallowReactive<{ sku: SkuForecast | null; left: number; top: number }>({ sku: null, left: 0, top: 0 });
-let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearTooltipTimer(): void {
-    if (tooltipTimer !== null) {
-        clearTimeout(tooltipTimer);
-        tooltipTimer = null;
-    }
-}
-
-/** 基準平均日販のセルの下に、右端をそろえて出す。画面からはみ出すときは上に出し、左右は画面内に収める。 */
-function showTooltip(event: Event, sku: SkuForecast, delay = TOOLTIP_DELAY_MS): void {
-    clearTooltipTimer();
-    const target = event.currentTarget as HTMLElement;
-    tooltipTimer = setTimeout(async () => {
-        tooltip.sku = sku;
-        const anchor = target.getBoundingClientRect();
-        tooltip.left = anchor.right;
-        tooltip.top = anchor.bottom + TOOLTIP_GAP_PX;
-        await nextTick();
-        const size = tooltipElement.value?.getBoundingClientRect();
-        if (!size) {
-            return;
-        }
-        tooltip.left = Math.min(Math.max(VIEWPORT_MARGIN_PX, anchor.right - size.width), window.innerWidth - size.width - VIEWPORT_MARGIN_PX);
-        if (anchor.bottom + TOOLTIP_GAP_PX + size.height > window.innerHeight - VIEWPORT_MARGIN_PX) {
-            tooltip.top = Math.max(VIEWPORT_MARGIN_PX, anchor.top - TOOLTIP_GAP_PX - size.height);
-        }
-    }, delay);
-}
-
-function hideTooltip(): void {
-    clearTooltipTimer();
-    tooltip.sku = null;
-}
-
-onBeforeUnmount(clearTooltipTimer);
+const { tooltip, show: showTooltip, hide: hideTooltip } = useAnchoredTooltip<SkuForecast>(tooltipElement);
 
 const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 const formatDateTime = (value: string): string => dateTimeFormat.format(new Date(value));
@@ -203,13 +163,6 @@ const visibleItems = computed<ItemRows[]>(() => {
     return table.value.items.map((item) => ({ ...item, rows: item.rows.filter((row) => row.needsAttention) })).filter((item) => item.rows.length > 0);
 });
 
-/** 描く行の高さ（px）。見えている行だけを描くため、すべての行を同じ高さにする。 */
-const ROW_HEIGHT = 37;
-/** 見えている範囲の前後に余分に描く行数。速くスクロールしても空白が見えにくいようにする。 */
-const OVERSCAN_ROWS = 15;
-/** 枠の高さが測れないとき（テストなど）の高さ。 */
-const FALLBACK_VIEWPORT_PX = 800;
-
 type FlatRow = { kind: "item"; key: string; group: ItemRows } | { kind: "sku"; key: string; row: SkuRow };
 
 /** 品番の行とSKUの行を1列に並べたもの。 */
@@ -221,40 +174,7 @@ const flatRows = computed<FlatRow[]>(() =>
 );
 
 const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
-const scrollTop = ref(0);
-const viewportHeight = ref(FALLBACK_VIEWPORT_PX);
-let scrollFrame = 0;
-
-function measureScrollBox(): void {
-    const element = scrollBox.value;
-    if (element) {
-        scrollTop.value = element.scrollTop;
-        viewportHeight.value = element.clientHeight || FALLBACK_VIEWPORT_PX;
-    }
-}
-
-/** スクロールのたびに描く行を入れ替える。1回の描画につき1回だけ測る。 */
-function onScroll(): void {
-    hideTooltip();
-    if (scrollFrame === 0) {
-        scrollFrame = requestAnimationFrame(() => {
-            scrollFrame = 0;
-            measureScrollBox();
-        });
-    }
-}
-
-watch(scrollBox, () => nextTick(measureScrollBox));
-onBeforeUnmount(() => cancelAnimationFrame(scrollFrame));
-
-const renderRange = computed(() => {
-    const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS);
-    const end = Math.min(flatRows.value.length, start + Math.ceil(viewportHeight.value / ROW_HEIGHT) + OVERSCAN_ROWS * 2);
-    return { start, end };
-});
-const renderedRows = computed(() => flatRows.value.slice(renderRange.value.start, renderRange.value.end));
-const topSpacerHeight = computed(() => renderRange.value.start * ROW_HEIGHT);
-const bottomSpacerHeight = computed(() => (flatRows.value.length - renderRange.value.end) * ROW_HEIGHT);
+const { onScroll, renderedRows, topSpacerHeight, bottomSpacerHeight } = useVirtualRows(flatRows, scrollBox, hideTooltip);
 
 /** チャネルの販売実績の最新日から、予測の開始日（今日）までの日数。 */
 function salesDataAgeDays(salesDataTo: string): number {
@@ -266,7 +186,7 @@ function monthLabel(month: string): string {
 }
 
 /** ツールチップに出すチャネル。合計の表示ではすべてのチャネル、チャネルの表示ではそのチャネルだけ。 */
-const tooltipChannels = computed(() => (tooltip.sku?.channels ?? []).filter((channel) => view.value === "total" || channel.channel === view.value));
+const tooltipChannels = computed(() => (tooltip.content?.channels ?? []).filter((channel) => view.value === "total" || channel.channel === view.value));
 
 function excludedLabel(window: AverageWindow): string {
     const minDays = result.value?.meta.min_sales_days ?? 14;
@@ -364,65 +284,79 @@ function windowRange(window: AverageWindow): string {
                     </label>
                 </div>
 
+                <!-- 表の見方（在庫推移の画面の凡例とそろえる） -->
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-stone-200 bg-stone-50/60 px-4 py-2 text-xs text-stone-600" data-testid="legend">
+                    <span class="inline-flex items-center gap-1.5"><span class="font-medium text-amber-700">予測不能</span>販売実績や日数が足りず、予測を出せないSKU（理由を表示）</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="text-amber-700">一部</span>一部のチャネルだけ予測できなかったSKU</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="text-stone-400">—</span>そのチャネルでは販売していない</span>
+                    <span class="text-stone-400">基準平均日販にマウスを乗せると内訳が出ます</span>
+                </div>
+
                 <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
                     {{ onlyUnpredictable ? "予測不能のSKUはありません。" : "対象品番にSKUがありません。" }}
                 </div>
 
                 <!-- 表は画面の高さに収まる枠の中でスクロールさせ、横スクロールバーが常に見え、列見出しが上に残るようにする -->
+                <!-- 在庫推移の表と見た目をそろえる。固定した欄でも罫線が消えないよう、罫線は border-separate で各欄に引く -->
                 <div v-else ref="scrollBox" class="max-h-[calc(100dvh-5rem)] overflow-auto" :class="isLoading ? 'opacity-60' : ''" data-testid="forecast-scroll" @scroll="onScroll">
-                    <table class="w-full min-w-[86rem] table-fixed text-left text-sm">
+                    <table
+                        class="w-full min-w-[78rem] table-fixed border-separate border-spacing-0 text-left text-[13px] [&_td]:border-r [&_td]:border-b [&_td]:border-stone-200 [&_th]:border-r [&_th]:border-b [&_th]:border-stone-200 [&_tr>*:last-child]:border-r-0"
+                    >
                         <colgroup>
-                            <col class="w-60" />
-                            <col class="w-30" />
-                            <col v-for="month in months" :key="month.month" class="w-19" />
-                            <col class="w-24" />
+                            <col class="w-56" />
+                            <col class="w-26" />
+                            <col v-for="month in months" :key="month.month" class="w-18" />
+                            <col class="w-22" />
                         </colgroup>
-                        <thead class="text-xs font-semibold text-stone-500 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-stone-50 [&_th]:shadow-[inset_0_-1px_0_var(--color-stone-200)]">
+                        <thead class="text-xs font-medium text-stone-500 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:border-b-stone-300 [&_th]:bg-stone-50">
                             <tr>
-                                <th scope="col" class="left-0 z-30! px-3 py-2.5">品番・SKU</th>
-                                <th scope="col" class="px-3 py-2.5 text-right whitespace-nowrap">基準平均日販</th>
-                                <th v-for="(month, index) in months" :key="month.month" scope="col" class="px-2 py-2.5 text-right whitespace-nowrap tabular-nums">
+                                <th scope="col" class="left-0 z-30! border-r-stone-300! px-3 py-2">品番・SKU</th>
+                                <th scope="col" class="px-2 py-2 text-right whitespace-nowrap">基準平均日販</th>
+                                <th v-for="(month, index) in months" :key="month.month" scope="col" class="px-2 py-2 text-right whitespace-nowrap tabular-nums">
                                     {{ monthLabel(month.month) }}
-                                    <span v-if="index === 0" class="block text-[11px] font-normal">{{ month.days }}日分</span>
+                                    <span v-if="index === 0" class="block text-[10px] font-normal text-stone-400">{{ month.days }}日分</span>
                                 </th>
-                                <th scope="col" class="px-3 py-2.5 text-right whitespace-nowrap">12か月計</th>
+                                <th scope="col" class="px-2 py-2 text-right whitespace-nowrap">12か月計</th>
                             </tr>
                         </thead>
                         <tbody>
                             <!-- 見えていない行の分の高さ。スクロールバーの長さと位置を、全行を描いたときと同じにする -->
                             <tr v-if="topSpacerHeight > 0" aria-hidden="true" :style="{ height: `${topSpacerHeight}px` }">
-                                <td :colspan="months.length + 3" class="p-0" />
+                                <td :colspan="months.length + 3" class="border-0! p-0" />
                             </tr>
                             <template v-for="entry in renderedRows" :key="entry.key">
-                                <tr v-if="entry.kind === 'item'" class="h-[37px] bg-stone-100 shadow-[inset_0_1px_0_var(--color-stone-200)]" data-testid="item-row">
+                                <!-- 品番の行は、上に濃い線を引いて品番のまとまりの区切りを示す（在庫推移の表とそろえる。線は行の高さを変えない inset の影） -->
+                                <tr v-if="entry.kind === 'item'" class="h-[37px] bg-stone-100 [&>*]:shadow-[inset_0_2px_0_var(--color-stone-400)]" data-testid="item-row">
                                     <th
                                         scope="rowgroup"
-                                        class="sticky left-0 z-10 truncate bg-stone-100 px-3 py-2 text-left"
+                                        class="sticky left-0 z-10 truncate border-r-stone-300! bg-stone-100 px-3 py-2 text-left font-normal"
                                         :title="`${entry.group.item.item_no} ${entry.group.item.brand}・${entry.group.item.category}`"
                                     >
                                         <span class="font-mono font-semibold text-stone-900">{{ entry.group.item.item_no }}</span>
-                                        <span class="ml-2 text-xs font-normal text-stone-500">{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span>
+                                        <span class="ml-2 rounded border border-stone-300 bg-white px-1.5 py-px text-[11px] text-stone-600"
+                                            >{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span
+                                        >
                                     </th>
-                                    <td class="truncate px-3 py-2 text-right text-xs text-stone-500">
+                                    <td class="truncate px-2 py-2 text-right text-[11px] text-stone-500">
                                         <span v-if="entry.group.hasUnpredictable">予測不能を除く</span>
                                     </td>
                                     <td v-for="(month, index) in months" :key="month.month" class="px-2 py-2 text-right font-semibold text-stone-900 tabular-nums">
                                         {{ entry.group.monthTotalTexts[index] ?? "0" }}
                                     </td>
-                                    <td class="px-3 py-2 text-right font-semibold text-stone-900 tabular-nums">{{ entry.group.yearTotalText }}</td>
+                                    <td class="px-2 py-2 text-right font-semibold text-stone-900 tabular-nums">{{ entry.group.yearTotalText }}</td>
                                 </tr>
-                                <tr v-else class="group h-[37px] shadow-[inset_0_1px_0_var(--color-stone-100)] hover:bg-stone-50" data-testid="sku-row">
+                                <tr v-else class="group h-[37px] hover:bg-stone-50" data-testid="sku-row">
                                     <!-- 横スクロールで下の列が透けないよう、固定した列には不透明な背景を付け、行のハイライトに合わせて色を変える -->
-                                    <td class="sticky left-0 z-10 truncate bg-white px-3 py-2 group-hover:bg-stone-50" :title="entry.row.sku.sku_code">
-                                        <span class="font-mono text-stone-800">{{ entry.row.sku.sku_code }}</span>
+                                    <td class="sticky left-0 z-10 truncate border-r-stone-300! bg-white py-2 pr-3 pl-6 group-hover:bg-stone-50" :title="entry.row.sku.sku_code">
+                                        <span class="font-mono text-stone-700">{{ entry.row.sku.sku_code }}</span>
                                         <StatusBadge v-if="entry.row.sku.status === 'inactive'" class="ml-2" tone="neutral" :label="entry.row.sku.status_label ?? ''" />
                                     </td>
-                                    <td class="px-3 py-2 text-right whitespace-nowrap">
+                                    <td class="px-2 py-2 text-right whitespace-nowrap">
                                         <span
                                             tabindex="0"
-                                            class="cursor-help underline decoration-stone-300 decoration-dotted underline-offset-4 tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900"
-                                            :class="entry.row.figures.baseAverage !== null ? 'text-stone-700' : entry.row.figures.notSold ? 'text-stone-400' : 'font-semibold text-amber-800'"
-                                            :aria-describedby="tooltip.sku?.sku_id === entry.row.sku.sku_id ? 'average-tooltip' : undefined"
+                                            class="cursor-help tabular-nums hover:underline hover:decoration-stone-400 hover:decoration-dotted hover:underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900"
+                                            :class="entry.row.figures.baseAverage !== null ? 'text-stone-700' : entry.row.figures.notSold ? 'text-stone-300' : 'font-medium text-amber-700'"
+                                            :aria-describedby="tooltip.content?.sku_id === entry.row.sku.sku_id ? 'average-tooltip' : undefined"
                                             data-testid="base-average"
                                             @mouseenter="showTooltip($event, entry.row.sku)"
                                             @mouseleave="hideTooltip"
@@ -431,17 +365,17 @@ function windowRange(window: AverageWindow): string {
                                         >
                                             {{ entry.row.baseText }}
                                         </span>
-                                        <span v-if="entry.row.figures.isPartial" class="ml-1 text-[11px] font-semibold text-amber-700" data-testid="partial">一部</span>
+                                        <span v-if="entry.row.figures.isPartial" class="ml-1 text-[10px] font-medium text-amber-700" data-testid="partial">一部</span>
                                     </td>
                                     <template v-if="entry.row.figures.monthly">
                                         <td v-for="(text, index) in entry.row.monthTexts" :key="index" class="px-2 py-2 text-right text-stone-700 tabular-nums">{{ text }}</td>
-                                        <td class="px-3 py-2 text-right text-stone-700 tabular-nums">{{ entry.row.yearText }}</td>
+                                        <td class="px-2 py-2 text-right text-stone-700 tabular-nums">{{ entry.row.yearText }}</td>
                                     </template>
                                     <td
                                         v-else
                                         :colspan="months.length + 1"
-                                        class="truncate px-2 py-2"
-                                        :class="entry.row.figures.notSold ? 'text-stone-400' : 'text-amber-800'"
+                                        class="truncate px-3 py-2 text-xs"
+                                        :class="entry.row.figures.notSold ? 'text-stone-400' : 'text-amber-700'"
                                         data-testid="unpredictable-reason"
                                     >
                                         {{ entry.row.figures.reason }}
@@ -449,7 +383,7 @@ function windowRange(window: AverageWindow): string {
                                 </tr>
                             </template>
                             <tr v-if="bottomSpacerHeight > 0" aria-hidden="true" :style="{ height: `${bottomSpacerHeight}px` }">
-                                <td :colspan="months.length + 3" class="p-0" />
+                                <td :colspan="months.length + 3" class="border-0! p-0" />
                             </tr>
                         </tbody>
                     </table>
@@ -457,7 +391,7 @@ function windowRange(window: AverageWindow): string {
             </section>
 
             <div
-                v-if="tooltip.sku"
+                v-if="tooltip.content"
                 id="average-tooltip"
                 ref="tooltipElement"
                 role="tooltip"
@@ -465,8 +399,10 @@ function windowRange(window: AverageWindow): string {
                 :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
             >
                 <p class="border-b border-stone-600 px-3 py-2 text-xs text-stone-300">
-                    <span class="font-mono font-semibold text-white">{{ tooltip.sku.sku_code }}</span> の基準平均日販
-                    <span class="ml-1 font-semibold text-white tabular-nums">{{ figuresOf(tooltip.sku).baseAverage !== null ? formatAverage(figuresOf(tooltip.sku).baseAverage!) : "予測不能" }}</span>
+                    <span class="font-mono font-semibold text-white">{{ tooltip.content.sku_code }}</span> の基準平均日販
+                    <span class="ml-1 font-semibold text-white tabular-nums">{{
+                        figuresOf(tooltip.content).baseAverage !== null ? formatAverage(figuresOf(tooltip.content).baseAverage!) : "予測不能"
+                    }}</span>
                 </p>
                 <section v-for="channel in tooltipChannels" :key="channel.channel" class="border-b border-stone-700 pb-1 last:border-b-0" :data-testid="`tooltip-${channel.channel}`">
                     <p class="px-3 pt-2 text-xs font-semibold text-stone-200">
@@ -504,7 +440,7 @@ function windowRange(window: AverageWindow): string {
                     </table>
                     <p v-if="channel.unpredictable_reason_label" class="px-3 pt-1 pb-1 text-xs text-amber-300">{{ channel.unpredictable_reason_label }}</p>
                 </section>
-                <p v-if="tooltip.sku.channels.length === 0" class="px-3 py-2 text-xs text-amber-300">{{ tooltip.sku.unpredictable_reason_label }}</p>
+                <p v-if="tooltip.content.channels.length === 0" class="px-3 py-2 text-xs text-amber-300">{{ tooltip.content.unpredictable_reason_label }}</p>
             </div>
         </template>
     </div>

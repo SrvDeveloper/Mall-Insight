@@ -24,7 +24,7 @@ const sidebarOpen = ref(false);
 
             <NotificationBanner />
 
-            <main class="flex-1 px-4 py-6 lg:px-8 lg:py-8">
+            <main class="flex-1 px-4 py-6 lg:px-10 lg:py-8">
                 <router-view />
             </main>
         </div>
