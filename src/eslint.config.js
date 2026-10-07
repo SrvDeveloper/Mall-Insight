@@ -18,6 +18,10 @@ const browserGlobals = {
     MouseEvent: "readonly",
     KeyboardEvent: "readonly",
     HTMLElement: "readonly",
+    HTMLInputElement: "readonly",
+    Event: "readonly",
+    File: "readonly",
+    FormData: "readonly",
 };
 
 export default tseslint.config(

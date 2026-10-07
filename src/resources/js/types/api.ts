@@ -81,3 +81,34 @@ export interface InventoryDate {
     sku_count: number;
     fetched_at: string;
 }
+
+export interface SalesImportIssue {
+    id: number;
+    level: "error" | "warning";
+    level_label: string;
+    row_number: number | null;
+    source_order_id: string | null;
+    sku_code: string | null;
+    message: string;
+}
+
+export interface SalesImport {
+    id: number;
+    source: string;
+    file_name: string;
+    status: "succeeded" | "failed";
+    status_label: string;
+    started_at: string;
+    finished_at: string;
+    row_count: number | null;
+    created_line_count: number | null;
+    updated_line_count: number | null;
+    skipped_line_count: number | null;
+    error_row_count: number | null;
+    created_sku_count: number | null;
+    warning_count?: number;
+    sales_date_from: string | null;
+    sales_date_to: string | null;
+    error_message: string | null;
+    issues?: SalesImportIssue[];
+}
