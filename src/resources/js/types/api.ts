@@ -176,3 +176,64 @@ export interface CurrentItemSelection {
     data: ItemSelection | null;
     meta: { fiscal_year_start: string };
 }
+
+/** 期間別平均日販（B-006、K-035・K-036）。日数が足りず除外した期間は平均日販が null で、重みは0。 */
+export interface AverageWindow {
+    length: number;
+    /** 期間の末日が販売実績の最新日の何日前か。期間は重ならずに遡る。 */
+    offset: number;
+    /** 「直近30日」「31〜90日前」など */
+    label: string;
+    from: string | null;
+    to: string | null;
+    /** 販売できた日数（欠品日を除く、K-037） */
+    sales_days: number;
+    /** 欠品していた日数。AmazonとBOSSの在庫の合計が0以下の日 */
+    stockout_days: number;
+    /** 欠品日を除いた販売数 */
+    sales_quantity: number;
+    average: number | null;
+    base_weight: number;
+    weight: number;
+    is_excluded: boolean;
+}
+
+export interface MonthlyDemand {
+    /** YYYY-MM */
+    month: string;
+    days: number;
+    quantity: number;
+}
+
+/** SKU1件の需要予測。予測不能のSKUは base_average・monthly が null で、理由を持つ。 */
+export interface SkuForecast {
+    sku_id: number;
+    sku_code: string;
+    status: ActiveStatus | null;
+    status_label: string | null;
+    base_average: number | null;
+    unpredictable_reason: "insufficient_days" | "stockout" | "no_sales" | null;
+    unpredictable_reason_label: string | null;
+    windows: AverageWindow[];
+    monthly: MonthlyDemand[] | null;
+}
+
+export interface ItemForecast {
+    item_no: string;
+    brand: string;
+    category: string;
+    skus: SkuForecast[];
+}
+
+export interface DemandForecastResponse {
+    data: ItemForecast[];
+    meta: {
+        calculated_at: string;
+        sales_data_from: string | null;
+        sales_data_to: string | null;
+        forecast_from: string;
+        selection: { confirmed_at: string; item_count: number } | null;
+        window_weights: { length: number; weight: number }[];
+        min_sales_days: number;
+    };
+}

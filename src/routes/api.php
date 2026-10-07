@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
+use App\Http\Controllers\Api\V1\DemandForecastController;
 use App\Http\Controllers\Api\V1\InventoryDateController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\ItemRankingController;
@@ -16,6 +17,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
     Route::get('/item-selections', [ItemSelectionController::class, 'index'])->name('item-selections.index');
     Route::get('/item-selections/current', [ItemSelectionController::class, 'current'])->name('item-selections.current');
     Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
+    Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
     Route::get('/unregistered-skus', [UnregisteredSkuController::class, 'index'])->name('unregistered-skus.index');
     Route::get('/crosswalker-syncs/latest', [CrossWalkerSyncController::class, 'latest'])->name('crosswalker-syncs.latest');
     Route::post('/crosswalker-syncs', [CrossWalkerSyncController::class, 'store'])->name('crosswalker-syncs.store');

@@ -27,6 +27,14 @@ enum Warehouse: string
     }
 
     /**
+     * その区分から直接販売するか。フリー在庫・ECストックは、AmazonやBOSSへ移してから販売する（決定記録 K-028）。
+     */
+    public function isSoldDirectly(): bool
+    {
+        return ! in_array($this, [self::FreeStock, self::EcStock], true);
+    }
+
+    /**
      * ZeroStockView の日次在庫APIでの項目名。
      */
     public function zeroStockViewField(): string

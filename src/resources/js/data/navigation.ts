@@ -26,6 +26,9 @@ export const navigation: NavGroup[] = [
     },
     {
         label: "在庫試算",
-        pages: [{ name: "target-items", label: "対象品番", path: "/target-items" }],
+        pages: [
+            { name: "target-items", label: "対象品番", path: "/target-items" },
+            { name: "forecasts", label: "需要予測", path: "/forecasts" },
+        ],
     },
 ];
