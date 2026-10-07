@@ -75,7 +75,7 @@ const latestFailed = computed(() => latest.value?.status === "failed");
             </template>
             <template v-else-if="!latest">
                 <p class="font-semibold text-stone-900">{{ source }}からまだ取得していません。</p>
-                <p class="text-stone-500">「{{ source }}から取得」を押すと、{{ subject }}を取り込みます。以後は{{ schedule }}に自動で取得します。</p>
+                <p class="text-stone-500">「取得実行」を押すと、{{ source }}から{{ subject }}を取り込みます。以後は{{ schedule }}に自動で取得します。</p>
             </template>
             <template v-else-if="latestFailed">
                 <p class="font-semibold text-amber-900">{{ formatDateTime(latest.finished_at) }} の取得（{{ latest.triggered_by_label }}）に失敗しました。</p>
@@ -103,7 +103,7 @@ const latestFailed = computed(() => latest.value?.status === "failed");
             :disabled="isRunning"
             @click="run"
         >
-            {{ isRunning ? "取得中…" : `${source}から取得` }}
+            {{ isRunning ? "取得中…" : "取得実行" }}
         </button>
     </section>
 </template>

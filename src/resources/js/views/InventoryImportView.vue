@@ -105,7 +105,7 @@ function summarizeSync(sync: ZeroStockViewSync): string {
                 <button type="button" class="rounded-md border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="loadDates">再読み込み</button>
             </div>
             <div v-else-if="!dates" class="px-6 py-12 text-center text-sm text-stone-500">読み込み中…</div>
-            <div v-else-if="dates.data.length === 0" class="px-6 py-12 text-center text-sm text-stone-500">在庫がまだありません。「ZeroStockViewから取得」を押すと、ここに表示されます。</div>
+            <div v-else-if="dates.data.length === 0" class="px-6 py-12 text-center text-sm text-stone-500">在庫がまだありません。上の「取得実行」を押すと、ここに表示されます。</div>
             <table v-else class="w-full text-left text-sm" :class="isLoading ? 'opacity-60' : ''">
                 <thead class="border-b border-stone-200 bg-stone-50 text-xs font-semibold text-stone-500">
                     <tr>

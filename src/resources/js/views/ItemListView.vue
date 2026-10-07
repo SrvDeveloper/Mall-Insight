@@ -241,7 +241,7 @@ const validationMessage = computed(() => (loadError.value?.isValidationError ? (
                 <div v-else-if="!result && isLoading" class="px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
 
                 <div v-else-if="result && result.data.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
-                    {{ hasFilter ? "条件に一致する品番はありません。" : "品番がまだ登録されていません。「CrossWalkerから取得」を押すと、ここに表示されます。" }}
+                    {{ hasFilter ? "条件に一致する品番はありません。" : "品番がまだ登録されていません。上の「取得実行」を押すと、ここに表示されます。" }}
                 </div>
 
                 <div v-else-if="result" class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">

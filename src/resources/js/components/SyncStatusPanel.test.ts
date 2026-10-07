@@ -48,6 +48,8 @@ describe("SyncStatusPanel", () => {
 
         expect(wrapper.text()).toContain("CrossWalkerからまだ取得していません。");
         expect(wrapper.text()).toContain("以後は毎朝6時に自動で取得します。");
+        expect(wrapper.text()).toContain("「取得実行」を押すと、CrossWalkerから品番とSKUを取り込みます。");
+        expect(wrapper.find("button").text()).toBe("取得実行");
     });
 
     it("shows the last fetch time and the summary after a successful fetch", async () => {
