@@ -2,6 +2,7 @@
 
 namespace App\Services\Forecast;
 
+use App\Enums\Channel;
 use App\Models\Item;
 use App\Models\ItemSelection;
 use Carbon\CarbonImmutable;
@@ -12,13 +13,13 @@ use Carbon\CarbonImmutable;
 final readonly class DemandForecast
 {
     /**
+     * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channels  チャネルごとの販売実績の期間。取り込んでいなければ null
      * @param  list<array{item: Item, skus: list<SkuForecast>}>  $items  対象品番の順（売上順位の高い順）
      */
     public function __construct(
         public CarbonImmutable $calculatedAt,
         public ?ItemSelection $selection,
-        public ?CarbonImmutable $salesDataFrom,
-        public ?CarbonImmutable $salesDataTo,
+        public array $channels,
         public CarbonImmutable $forecastFrom,
         public array $items,
     ) {}

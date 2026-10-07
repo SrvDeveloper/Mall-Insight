@@ -37,24 +37,30 @@ class DemandForecastControllerTest extends TestCase
         $response = $this->getJson('/api/v1/demand-forecasts');
 
         $response->assertOk()
-            ->assertJsonPath('meta.sales_data_from', '2025-10-01')
-            ->assertJsonPath('meta.sales_data_to', '2026-09-30')
+            ->assertJsonPath('meta.channels', [
+                ['channel' => 'boss', 'label' => 'BOSS', 'sales_data_from' => '2025-10-01', 'sales_data_to' => '2026-09-30'],
+                ['channel' => 'amazon', 'label' => 'Amazon', 'sales_data_from' => null, 'sales_data_to' => null],
+            ])
+            ->assertJsonCount(1, 'data.0.skus.0.channels')
+            ->assertJsonPath('data.0.skus.0.channels.0.channel', 'boss')
+            ->assertJsonPath('data.0.skus.0.channels.0.base_average', 1.5)
+            ->assertJsonPath('data.0.skus.0.is_partial', false)
             ->assertJsonPath('meta.forecast_from', '2026-10-07')
             ->assertJsonPath('meta.selection.item_count', 1)
             ->assertJsonPath('data.0.item_no', 'fl-01')
             ->assertJsonPath('data.0.skus.0.sku_code', 'fl-01-1-10')
-            ->assertJsonPath('data.0.skus.0.windows.0', ['length' => 30, 'offset' => 0, 'label' => '直近30日', 'from' => '2026-09-01', 'to' => '2026-09-30', 'sales_days' => 30, 'stockout_days' => 0, 'sales_quantity' => 30, 'average' => 1, 'base_weight' => 0.5, 'weight' => 0.5, 'is_excluded' => false])
-            ->assertJsonPath('data.0.skus.0.windows.1.label', '31〜90日前')
-            ->assertJsonPath('data.0.skus.0.windows.1.from', '2026-07-03')
-            ->assertJsonPath('data.0.skus.0.windows.1.to', '2026-08-31')
-            ->assertJsonPath('data.0.skus.0.windows.1.sales_quantity', 120)
-            ->assertJsonPath('data.0.skus.0.windows.2.label', '91〜180日前')
-            ->assertJsonPath('data.0.skus.0.windows.2.from', '2026-04-04')
-            ->assertJsonPath('data.0.skus.0.windows.2.to', '2026-07-02')
-            ->assertJsonPath('data.0.skus.0.windows.2.sales_quantity', 180)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0', ['length' => 30, 'offset' => 0, 'label' => '直近30日', 'from' => '2026-09-01', 'to' => '2026-09-30', 'sales_days' => 30, 'stockout_days' => 0, 'sales_quantity' => 30, 'average' => 1, 'base_weight' => 0.5, 'weight' => 0.5, 'is_excluded' => false])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.label', '31〜90日前')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.from', '2026-07-03')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.to', '2026-08-31')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.sales_quantity', 120)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.label', '91〜180日前')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.from', '2026-04-04')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.to', '2026-07-02')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.sales_quantity', 180)
             // 30÷30×0.5 + 120÷60×0.3 + 180÷90×0.2 = 0.5 + 0.6 + 0.4
             ->assertJsonPath('data.0.skus.0.base_average', 1.5)
-            ->assertJsonPath('data.0.skus.0.unpredictable_reason', null)
+            ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', null)
             ->assertJsonCount(12, 'data.0.skus.0.monthly')
             ->assertJsonPath('data.0.skus.0.monthly.0', ['month' => '2026-10', 'days' => 25, 'quantity' => 37.5])
             ->assertJsonPath('data.0.skus.0.monthly.1', ['month' => '2026-11', 'days' => 30, 'quantity' => 45])
@@ -70,10 +76,10 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.windows.*.sales_days', [30, 40, 0])
-            ->assertJsonPath('data.0.skus.0.windows.*.from', ['2026-09-07', '2026-07-29', null])
-            ->assertJsonPath('data.0.skus.0.windows.*.is_excluded', [false, false, true])
-            ->assertJsonPath('data.0.skus.0.windows.*.weight', [0.625, 0.375, 0])
+        $response->assertJsonPath('data.0.skus.0.channels.0.windows.*.sales_days', [30, 40, 0])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.from', ['2026-09-07', '2026-07-29', null])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.is_excluded', [false, false, true])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.weight', [0.625, 0.375, 0])
             // 60÷30×0.625 + 40÷40×0.375 = 1.25 + 0.375
             ->assertJsonPath('data.0.skus.0.base_average', 1.625);
     }
@@ -87,21 +93,21 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.windows.*.sales_days', [30, 10, 0])
-            ->assertJsonPath('data.0.skus.0.windows.*.weight', [1, 0, 0])
+        $response->assertJsonPath('data.0.skus.0.channels.0.windows.*.sales_days', [30, 10, 0])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.weight', [1, 0, 0])
             ->assertJsonPath('data.0.skus.0.base_average', 1);
     }
 
-    public function test_leaves_out_stockout_days_from_both_the_sales_and_the_days(): void
+    public function test_leaves_out_days_out_of_stock_in_the_channel_from_both_the_sales_and_the_days(): void
     {
         $sku = $this->targetSku('fl-01', 'fl-01-1-10');
         $this->sell(Sku::factory()->create(), '2026-01-01', 1);
         // 直近30日 = 09-07〜10-06。在庫の記録は 09-16 から（それより前は欠品としない）
         $this->sell($sku, '2026-09-10', 6);
-        // 09-18（金）にAmazonとBOSSの在庫が0。土日（19・20日）も引き継いで欠品、21日（月）に入荷
-        $this->stock($sku, '2026-09-16', ['amazon_fba' => 5, 'free_stock' => 0]);
-        $this->stock($sku, '2026-09-17', ['amazon_fba' => 1]);
-        $this->stock($sku, '2026-09-18', ['amazon_fba' => 0, 'boss_own' => 0, 'free_stock' => 50, 'ec_stock' => 10]);
+        // 09-18（金）にBOSSの在庫が0（Amazon・フリー在庫・ECストックにはある）。土日（19・20日）も引き継いで欠品、21日（月）に入荷
+        $this->stock($sku, '2026-09-16', ['boss_own' => 5, 'free_stock' => 0]);
+        $this->stock($sku, '2026-09-17', ['boss_rfc' => 1]);
+        $this->stock($sku, '2026-09-18', ['boss_own' => 0, 'boss_rfc' => 0, 'amazon_fba' => 30, 'free_stock' => 50, 'ec_stock' => 10]);
         $this->stock($sku, '2026-09-21', ['boss_own' => 20]);
         $this->sell($sku, '2026-09-18', 1);
         $this->sell($sku, '2026-09-20', 3);
@@ -110,11 +116,11 @@ class DemandForecastControllerTest extends TestCase
         $response = $this->getJson('/api/v1/demand-forecasts');
 
         // 欠品日は 09-18〜20 の3日。販売数は欠品日の4点を除いた27点、販売できた日数は27日
-        $response->assertJsonPath('data.0.skus.0.windows.0.stockout_days', 3)
-            ->assertJsonPath('data.0.skus.0.windows.0.sales_days', 27)
-            ->assertJsonPath('data.0.skus.0.windows.0.sales_quantity', 27)
-            ->assertJsonPath('data.0.skus.0.windows.0.average', 1)
-            ->assertJsonPath('data.0.skus.0.windows.1.stockout_days', 0);
+        $response->assertJsonPath('data.0.skus.0.channels.0.windows.0.stockout_days', 3)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.sales_days', 27)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.sales_quantity', 27)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.average', 1)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.stockout_days', 0);
     }
 
     public function test_excludes_a_window_with_stockouts_on_half_of_its_days_and_is_unpredictable_when_none_remain(): void
@@ -124,21 +130,61 @@ class DemandForecastControllerTest extends TestCase
         // 販売実績は 08-28〜10-06（直近30日 + 31〜90日前は10日で除外）
         $this->sell($short, '2026-08-28', 1);
         $this->sell($long, '2026-10-06', 15);
-        // fl-01-1-10 は 09-22 から欠品（直近30日のうち15日 = 半分）
-        $this->stock($short, '2026-09-21', ['amazon_fba' => 3]);
-        $this->stock($short, '2026-09-22', ['amazon_fba' => 0]);
-        $this->stock($long, '2026-09-22', ['amazon_fba' => 0]);
+        // fl-01-1-10 は 09-22 からBOSSで欠品（直近30日のうち15日 = 半分）
+        $this->stock($short, '2026-09-21', ['boss_own' => 3]);
+        $this->stock($short, '2026-09-22', ['boss_own' => 0, 'amazon_fba' => 8]);
+        $this->stock($long, '2026-09-22', ['boss_rfc' => 0]);
         $this->stock($long, '2026-09-23', ['boss_rfc' => 10]);
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.windows.0.stockout_days', 15)
-            ->assertJsonPath('data.0.skus.0.windows.0.is_excluded', true)
-            ->assertJsonPath('data.0.skus.0.unpredictable_reason', 'stockout')
-            ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', '欠品していた日が多く、平均日販を出せません')
-            ->assertJsonPath('data.0.skus.1.windows.0.stockout_days', 1)
-            ->assertJsonPath('data.0.skus.1.windows.0.sales_days', 29)
-            ->assertJsonPath('data.0.skus.1.unpredictable_reason', null);
+        $response->assertJsonPath('data.0.skus.0.channels.0.windows.0.stockout_days', 15)
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.is_excluded', true)
+            ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', 'stockout')
+            ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason_label', '欠品していた日が多く、平均日販を出せません')
+            ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', 'BOSS：欠品していた日が多く、平均日販を出せません')
+            ->assertJsonPath('data.0.skus.1.channels.0.windows.0.stockout_days', 1)
+            ->assertJsonPath('data.0.skus.1.channels.0.windows.0.sales_days', 29)
+            ->assertJsonPath('data.0.skus.1.channels.0.unpredictable_reason', null);
+    }
+
+    public function test_forecasts_each_channel_from_its_own_sales_and_stock_and_adds_them_up(): void
+    {
+        $sku = $this->targetSku('fl-01', 'fl-01-1-10');
+        $bossOnly = Sku::factory()->create(['item_id' => $sku->item_id, 'sku_code' => 'fl-01-1-15', 'position' => 1]);
+        // BOSS は 2025-10-01〜2026-10-06、Amazon は 2026-04-01〜2026-10-05 まで取り込み済み
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1);
+        $this->sell($sku, '2026-10-06', 30);
+        $this->sell($bossOnly, '2026-10-06', 15);
+        $this->sell(Sku::factory()->create(), '2026-04-01', 1, 'amazon_fba');
+        $this->sell($sku, '2026-10-05', 54, 'amazon_fba');
+        // Amazon は 09-26 から欠品（BOSS の在庫はある）
+        $this->stock($sku, '2026-09-25', ['amazon_fba' => 5, 'boss_own' => 10]);
+        $this->stock($sku, '2026-09-26', ['amazon_fba' => 0, 'amazon_own' => 0, 'boss_own' => 10]);
+        $this->stock($sku, '2026-10-01', ['amazon_fba' => 40, 'boss_own' => 10]);
+
+        $response = $this->getJson('/api/v1/demand-forecasts');
+
+        $response->assertJsonPath('meta.channels.1.sales_data_from', '2026-04-01')
+            ->assertJsonPath('meta.channels.1.sales_data_to', '2026-10-05')
+            ->assertJsonPath('data.0.skus.0.channels.*.channel', ['boss', 'amazon'])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.stockout_days', 0)
+            // BOSS は 30÷30×0.5 + 0 + 0
+            ->assertJsonPath('data.0.skus.0.channels.0.base_average', 0.5)
+            // Amazon の直近30日は 09-06〜10-05。欠品は 09-26〜30 の5日、販売できた日は25日
+            ->assertJsonPath('data.0.skus.0.channels.1.windows.0.from', '2026-09-06')
+            ->assertJsonPath('data.0.skus.0.channels.1.windows.0.stockout_days', 5)
+            ->assertJsonPath('data.0.skus.0.channels.1.windows.0.sales_days', 25)
+            // Amazon は 54÷25×0.5 + 0 + 0。合計は 0.5 + 1.08
+            ->assertJsonPath('data.0.skus.0.channels.1.base_average', 1.08)
+            ->assertJsonPath('data.0.skus.0.base_average', 1.58)
+            ->assertJsonPath('data.0.skus.0.monthly.0.quantity', 39.5)
+            ->assertJsonPath('data.0.skus.0.is_partial', false)
+            // Amazon で売れていない SKU は、BOSS の予測だけを合計に入れ、一部予測不能とする
+            ->assertJsonPath('data.0.skus.1.base_average', 0.25)
+            ->assertJsonPath('data.0.skus.1.is_partial', true)
+            ->assertJsonPath('data.0.skus.1.channels.1.unpredictable_reason', 'no_sales')
+            ->assertJsonPath('data.0.skus.1.unpredictable_reason_label', 'Amazon：直近180日に販売実績がありません');
     }
 
     public function test_is_unpredictable_with_fewer_than_14_days_of_sales_data(): void
@@ -149,12 +195,13 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.windows.*.is_excluded', [true, true, true])
-            ->assertJsonPath('data.0.skus.0.windows.*.weight', [0, 0, 0])
+        $response->assertJsonPath('data.0.skus.0.channels.0.windows.*.is_excluded', [true, true, true])
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.weight', [0, 0, 0])
             ->assertJsonPath('data.0.skus.0.base_average', null)
             ->assertJsonPath('data.0.skus.0.monthly', null)
-            ->assertJsonPath('data.0.skus.0.unpredictable_reason', 'insufficient_days')
-            ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', '販売実績の日数が足りません（14日未満）');
+            ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', 'insufficient_days')
+            ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason_label', '販売実績の日数が足りません（14日未満）')
+            ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', 'BOSS：販売実績の日数が足りません（14日未満）');
     }
 
     public function test_is_unpredictable_instead_of_zero_when_the_sku_did_not_sell_in_the_last_180_days(): void
@@ -169,8 +216,9 @@ class DemandForecastControllerTest extends TestCase
 
         $response->assertJsonPath('data.0.skus.1.sku_code', 'fl-01-1-15')
             ->assertJsonPath('data.0.skus.1.base_average', null)
-            ->assertJsonPath('data.0.skus.1.unpredictable_reason', 'no_sales')
-            ->assertJsonPath('data.0.skus.1.unpredictable_reason_label', '直近180日に販売実績がありません');
+            ->assertJsonPath('data.0.skus.1.channels.0.unpredictable_reason', 'no_sales')
+            ->assertJsonPath('data.0.skus.1.channels.0.unpredictable_reason_label', '直近180日に販売実績がありません')
+            ->assertJsonPath('data.0.skus.1.unpredictable_reason_label', 'BOSS：直近180日に販売実績がありません');
     }
 
     public function test_returns_no_items_before_target_items_are_confirmed(): void
@@ -222,7 +270,7 @@ class DemandForecastControllerTest extends TestCase
         }
     }
 
-    private function sell(Sku $sku, string $date, int $quantity): void
+    private function sell(Sku $sku, string $date, int $quantity, string $warehouse = 'boss_own'): void
     {
         static $orderId = 1;
 
@@ -232,7 +280,7 @@ class DemandForecastControllerTest extends TestCase
             'sales_date' => $date,
             'mall' => 'rakuten',
             'sku_id' => $sku->id,
-            'warehouse' => 'boss_own',
+            'warehouse' => $warehouse,
             'quantity' => $quantity,
             'amount' => 1000 * $quantity,
         ]);

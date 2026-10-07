@@ -2,6 +2,7 @@
 
 namespace App\Services\Forecast;
 
+use App\Enums\Channel;
 use App\Enums\Warehouse;
 use App\Models\Inventory;
 use App\Models\Item;
@@ -15,9 +16,12 @@ use Illuminate\Support\Collection;
  * 平均日販による需要予測（バックログ B-006、決定記録 K-035）。対象品番（K-030）のSKUについて、
  * 3つの期間の平均日販を重みでまとめた基準平均日販から、12か月分の月別の需要を求める。結果は保存しない。
  *
- * 期間は取り込んだ販売実績の最新日から重ならずに遡る（直近30日、その前の60日＝31〜90日前、さらに前の90日＝91〜180日前）。
- * 最初の販売日より前の日は数えない。
- * 欠品していた日（AmazonとBOSSの在庫の合計が0以下の日）は、販売数・日数の両方から外す（K-037）。
+ * 予測はチャネル（BOSS・Amazon）ごとに行い、SKUの予測は予測できたチャネルの合計とする（K-038）。
+ * チャネルは販売実績の出荷倉庫で決め、販売実績を取り込んでいないチャネルは予測しない。
+ *
+ * 期間はチャネルの販売実績の最新日から重ならずに遡る（直近30日、その前の60日＝31〜90日前、さらに前の90日＝91〜180日前）。
+ * そのチャネルの最初の販売日より前の日は数えない。
+ * 欠品していた日（そのチャネルの在庫の区分の合計が0以下の日）は、販売数・日数の両方から外す（K-037・K-038）。
  * 販売できた日数が14日未満か、欠品日が期間の半分以上ある期間は除外して重みを割り戻し、
  * 3期間とも除外されたSKUと、使える期間に1点も売れていないSKUは予測不能とする。
  */
@@ -34,31 +38,67 @@ class DemandForecaster
     public function forecast(CarbonImmutable $now): DemandForecast
     {
         $selection = ItemSelection::current()?->load('items');
-        $range = SalesLine::query()->selectRaw('min(sales_date) as first_date, max(sales_date) as last_date')->first();
-        $salesDataFrom = $range?->first_date ? CarbonImmutable::parse($range->first_date)->startOfDay() : null;
-        $salesDataTo = $range?->last_date ? CarbonImmutable::parse($range->last_date)->startOfDay() : null;
         $forecastFrom = $now->startOfDay();
-
         $items = $this->targetItems($selection);
-        $skus = $items->flatMap(fn (Item $item) => $item->skus);
-        $ranges = $this->windowRanges($salesDataFrom, $salesDataTo);
-        $skuIds = $skus->pluck('id')->all();
-        // SKUごとに日付の計算を繰り返すと遅いため、期間ごとの日付（Y-m-d）の一覧を先に1回だけ作って使い回す
-        $windowDates = array_map(fn (array $range): array => $this->dates($range['from'], $range['to']), $ranges);
-        $dailySales = $this->dailySales($skuIds, $ranges);
-        $stockoutDates = $this->stockoutDates($skuIds, $ranges);
+        $skuIds = $items->flatMap(fn (Item $item) => $item->skus)->pluck('id')->all();
+        $channelRanges = $this->channelSalesRanges();
+
+        // チャネルごとに、期間・日別の販売数・欠品日を求める。SKUごとに日付の計算を繰り返すと遅いため、
+        // 期間ごとの日付（Y-m-d）の一覧を先に1回だけ作って使い回す
+        $channelData = [];
+        foreach ($channelRanges as $channelRange) {
+            if ($channelRange['to'] === null) {
+                continue;
+            }
+            $channel = $channelRange['channel'];
+            $ranges = $this->windowRanges($channelRange['from'], $channelRange['to']);
+            $channelData[] = [
+                'channel' => $channel,
+                'ranges' => $ranges,
+                'window_dates' => array_map(fn (array $range): array => $this->dates($range['from'], $range['to']), $ranges),
+                'daily_sales' => $this->dailySales($skuIds, $ranges, $channel),
+                'stockout_dates' => $this->stockoutDates($skuIds, $ranges, $channel),
+            ];
+        }
 
         return new DemandForecast(
             calculatedAt: $now,
             selection: $selection,
-            salesDataFrom: $salesDataFrom,
-            salesDataTo: $salesDataTo,
+            channels: $channelRanges,
             forecastFrom: $forecastFrom,
             items: $items->map(fn (Item $item): array => [
                 'item' => $item,
-                'skus' => $item->skus->map(fn (Sku $sku): SkuForecast => $this->forecastSku($sku, $ranges, $windowDates, $dailySales[$sku->id] ?? [], $stockoutDates[$sku->id] ?? [], $forecastFrom))->all(),
+                'skus' => $item->skus->map(fn (Sku $sku): SkuForecast => SkuForecast::combine($sku, array_map(
+                    fn (array $data): ChannelForecast => $this->forecastChannel($data['channel'], $data['ranges'], $data['window_dates'], $data['daily_sales'][$sku->id] ?? [], $data['stockout_dates'][$sku->id] ?? [], $forecastFrom),
+                    $channelData,
+                )))->all(),
             ])->values()->all(),
         );
+    }
+
+    /**
+     * チャネルごとの販売実績の最初と最後の販売日。取り込んでいないチャネルは null。
+     *
+     * @return list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>
+     */
+    private function channelSalesRanges(): array
+    {
+        $byWarehouse = SalesLine::query()
+            ->selectRaw('warehouse, min(sales_date) as first_date, max(sales_date) as last_date')
+            ->groupBy('warehouse')
+            ->toBase()
+            ->get()
+            ->keyBy('warehouse');
+
+        return array_map(function (Channel $channel) use ($byWarehouse): array {
+            $rows = $byWarehouse->only(array_map(fn (Warehouse $warehouse): string => $warehouse->value, $channel->warehouses()));
+
+            return [
+                'channel' => $channel,
+                'from' => $rows->isEmpty() ? null : CarbonImmutable::parse($rows->min('first_date'))->startOfDay(),
+                'to' => $rows->isEmpty() ? null : CarbonImmutable::parse($rows->max('last_date'))->startOfDay(),
+            ];
+        }, Channel::cases());
     }
 
     /**
@@ -103,13 +143,13 @@ class DemandForecaster
     }
 
     /**
-     * SKUごと・日ごとの販売数量（期間に含まれる日だけ）。
+     * SKUごと・日ごとの、そのチャネルの販売数量（期間に含まれる日だけ）。
      *
      * @param  list<int>  $skuIds
      * @param  array<int, array{from: ?CarbonImmutable, to: ?CarbonImmutable, days: int, offset: int}>  $ranges
      * @return array<int, array<string, int>> [SKU ID => [Y-m-d => 販売数量]]
      */
-    private function dailySales(array $skuIds, array $ranges): array
+    private function dailySales(array $skuIds, array $ranges, Channel $channel): array
     {
         [$from, $to] = $this->span($ranges);
         if ($skuIds === [] || $from === null) {
@@ -122,6 +162,7 @@ class DemandForecaster
             $rows = SalesLine::query()
                 ->selectRaw('sku_id, sales_date, sum(quantity) as quantity')
                 ->whereIn('sku_id', $chunk)
+                ->whereIn('warehouse', $this->warehouseValues($channel))
                 ->where('sales_date', '>=', $from->toDateString())
                 ->where('sales_date', '<', $to->addDay()->toDateString())
                 ->groupBy('sku_id', 'sales_date')
@@ -136,27 +177,26 @@ class DemandForecaster
     }
 
     /**
-     * SKUごとの欠品日（K-037）。在庫基準日の、直接販売する区分（AmazonとBOSS）の在庫の合計が0以下なら欠品とする。
+     * SKUごとの、そのチャネルの欠品日（K-037・K-038）。在庫基準日の、そのチャネルの在庫の区分の合計が0以下なら欠品とする。
      * 在庫基準日の無い日（土日など）は直前の在庫基準日の状態を引き継ぎ、そのSKUの最初の在庫基準日より前は欠品としない。
      *
      * @param  list<int>  $skuIds
      * @param  array<int, array{from: ?CarbonImmutable, to: ?CarbonImmutable, days: int, offset: int}>  $ranges
      * @return array<int, array<string, true>> [SKU ID => [Y-m-d => true]]
      */
-    private function stockoutDates(array $skuIds, array $ranges): array
+    private function stockoutDates(array $skuIds, array $ranges, Channel $channel): array
     {
         [$from, $to] = $this->span($ranges);
         if ($skuIds === [] || $from === null) {
             return [];
         }
-        $soldDirectly = array_map(fn (Warehouse $warehouse): string => $warehouse->value, array_values(array_filter(Warehouse::cases(), fn (Warehouse $warehouse): bool => $warehouse->isSoldDirectly())));
 
         $stockouts = [];
         foreach (array_chunk($skuIds, 500) as $chunk) {
             $rows = Inventory::query()
                 ->selectRaw('sku_id, stock_date, sum(quantity) as quantity')
                 ->whereIn('sku_id', $chunk)
-                ->whereIn('warehouse', $soldDirectly)
+                ->whereIn('warehouse', $this->warehouseValues($channel))
                 ->where('stock_date', '<', $to->addDay()->toDateString())
                 ->groupBy('sku_id', 'stock_date')
                 ->orderBy('stock_date')
@@ -186,6 +226,14 @@ class DemandForecaster
         }
 
         return $stockouts;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function warehouseValues(Channel $channel): array
+    {
+        return array_map(fn (Warehouse $warehouse): string => $warehouse->value, $channel->warehouses());
     }
 
     /**
@@ -225,7 +273,7 @@ class DemandForecaster
      * @param  array<string, int>  $dailySales  [Y-m-d => 販売数量]
      * @param  array<string, true>  $stockoutDates  [Y-m-d => true]
      */
-    private function forecastSku(Sku $sku, array $ranges, array $windowDates, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom): SkuForecast
+    private function forecastChannel(Channel $channel, array $ranges, array $windowDates, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom): ChannelForecast
     {
         // 期間ごとに、欠品日を除いた販売数と販売できた日数を数える
         $counts = [];
@@ -263,14 +311,14 @@ class DemandForecaster
         if ($baseAverage === null) {
             $hasStockout = array_sum(array_column($counts, 'stockout_days')) > 0;
 
-            return new SkuForecast($sku, $windows, null, null, $hasStockout ? UnpredictableReason::Stockout : UnpredictableReason::InsufficientDays);
+            return new ChannelForecast($channel, $windows, null, null, $hasStockout ? UnpredictableReason::Stockout : UnpredictableReason::InsufficientDays);
         }
         // 使える期間に1点も売れていないSKUは、在庫の記録が無い期間に欠品していた可能性があるため0と予測しない
         if (array_sum(array_map(fn (AverageWindow $window): int => $window->isExcluded() ? 0 : $window->salesQuantity, $windows)) === 0) {
-            return new SkuForecast($sku, $windows, null, null, UnpredictableReason::NoSales);
+            return new ChannelForecast($channel, $windows, null, null, UnpredictableReason::NoSales);
         }
 
-        return new SkuForecast($sku, $windows, $baseAverage, $this->monthly($baseAverage, $forecastFrom));
+        return new ChannelForecast($channel, $windows, $baseAverage, $this->monthly($baseAverage, $forecastFrom));
     }
 
     /**

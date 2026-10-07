@@ -205,17 +205,30 @@ export interface MonthlyDemand {
     quantity: number;
 }
 
-/** SKU1件の需要予測。予測不能のSKUは base_average・monthly が null で、理由を持つ。 */
+/** SKU1件・チャネル1つの需要予測（K-038）。予測不能のときは base_average・monthly が null で、理由を持つ。 */
+export interface ChannelForecast {
+    channel: "boss" | "amazon";
+    channel_label: string;
+    base_average: number | null;
+    unpredictable_reason: "insufficient_days" | "stockout" | "no_sales" | null;
+    unpredictable_reason_label: string | null;
+    windows: AverageWindow[];
+    monthly: MonthlyDemand[] | null;
+}
+
+/** SKU1件の需要予測。予測できたチャネルの合計。1つも予測できなければ base_average・monthly が null。 */
 export interface SkuForecast {
     sku_id: number;
     sku_code: string;
     status: ActiveStatus | null;
     status_label: string | null;
     base_average: number | null;
-    unpredictable_reason: "insufficient_days" | "stockout" | "no_sales" | null;
-    unpredictable_reason_label: string | null;
-    windows: AverageWindow[];
     monthly: MonthlyDemand[] | null;
+    /** 一部のチャネルだけ予測できなかった */
+    is_partial: boolean;
+    /** 予測できなかったチャネルの理由（「Amazon：直近180日に販売実績がありません」など） */
+    unpredictable_reason_label: string | null;
+    channels: ChannelForecast[];
 }
 
 export interface ItemForecast {
@@ -229,8 +242,8 @@ export interface DemandForecastResponse {
     data: ItemForecast[];
     meta: {
         calculated_at: string;
-        sales_data_from: string | null;
-        sales_data_to: string | null;
+        /** チャネルごとの販売実績の期間。取り込んでいなければ null */
+        channels: { channel: "boss" | "amazon"; label: string; sales_data_from: string | null; sales_data_to: string | null }[];
         forecast_from: string;
         selection: { confirmed_at: string; item_count: number } | null;
         window_weights: { length: number; weight: number }[];

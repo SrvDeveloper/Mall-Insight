@@ -27,11 +27,15 @@ enum Warehouse: string
     }
 
     /**
-     * その区分から直接販売するか。フリー在庫・ECストックは、AmazonやBOSSへ移してから販売する（決定記録 K-028）。
+     * その区分から販売するチャネル。フリー在庫・ECストックは、AmazonやBOSSへ移してから販売するため null（決定記録 K-028）。
      */
-    public function isSoldDirectly(): bool
+    public function channel(): ?Channel
     {
-        return ! in_array($this, [self::FreeStock, self::EcStock], true);
+        return match ($this) {
+            self::AmazonOwn, self::AmazonFba => Channel::Amazon,
+            self::BossOwn, self::BossRfc => Channel::Boss,
+            self::FreeStock, self::EcStock => null,
+        };
     }
 
     /**
