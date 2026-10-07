@@ -24,4 +24,8 @@ export const navigation: NavGroup[] = [
         label: "商品",
         pages: [{ name: "items", label: "品番・SKU", path: "/items" }],
     },
+    {
+        label: "在庫試算",
+        pages: [{ name: "target-items", label: "対象品番", path: "/target-items" }],
+    },
 ];

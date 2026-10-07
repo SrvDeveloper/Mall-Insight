@@ -25,7 +25,7 @@ class UnregisteredSkuControllerTest extends TestCase
         $few = $this->unregisteredSku('few-1');
         $many = $this->unregisteredSku('many-1');
         $old = $this->unregisteredSku('old-1');
-        $this->sell($few, '2026-10-01', 2);
+        $this->sell($few, '2026-10-07', 2);
         $this->sell($many, '2025-10-08', 3);
         $this->sell($many, '2026-09-30', 4);
         $this->sell($old, '2025-10-07', 9);

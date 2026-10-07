@@ -3,6 +3,7 @@ import AppLayout from "@/layouts/AppLayout.vue";
 import InventoryImportView from "@/views/InventoryImportView.vue";
 import ItemListView from "@/views/ItemListView.vue";
 import SalesImportView from "@/views/SalesImportView.vue";
+import TargetItemSelectionView from "@/views/TargetItemSelectionView.vue";
 
 declare module "vue-router" {
     interface RouteMeta {
@@ -19,6 +20,7 @@ const routes: RouteRecordRaw[] = [
             { path: "imports/sales", name: "sales-imports", component: SalesImportView, meta: { title: "販売実績の取込" } },
             { path: "imports/inventory", name: "inventory-imports", component: InventoryImportView, meta: { title: "在庫の取得" } },
             { path: "items", name: "items", component: ItemListView, meta: { title: "品番・SKU" } },
+            { path: "target-items", name: "target-items", component: TargetItemSelectionView, meta: { title: "対象品番" } },
         ],
     },
     { path: "/:pathMatch(.*)*", redirect: { name: "items" } },

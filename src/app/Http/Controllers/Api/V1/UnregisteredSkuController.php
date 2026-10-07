@@ -25,7 +25,9 @@ class UnregisteredSkuController extends Controller
         $skus = Sku::query()
             ->whereNull('item_id')
             ->where(fn (Builder $query) => $query->whereHas('salesLines')->orWhereHas('inventories'))
-            ->withSum(['salesLines as recent_sales_quantity' => fn (Builder $query) => $query->whereBetween('sales_date', [$salesFrom, $salesTo])], 'quantity')
+            ->withSum(['salesLines as recent_sales_quantity' => fn (Builder $query) => $query
+                ->where('sales_date', '>=', $salesFrom->toDateString())
+                ->where('sales_date', '<', $salesTo->copy()->addDay()->toDateString())], 'quantity')
             ->withMin('salesLines as first_sold_on', 'sales_date')
             ->withMax('salesLines as last_sold_on', 'sales_date')
             ->withMin('inventories as first_stocked_on', 'stock_date')

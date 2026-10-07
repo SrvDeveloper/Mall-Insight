@@ -128,3 +128,51 @@ export interface UnregisteredSku {
 export interface UnregisteredSkuPage extends Paginated<UnregisteredSku> {
     meta: Paginated<UnregisteredSku>["meta"] & { sales_from: string; sales_to: string };
 }
+
+/** 品番の売上順位（B-005、K-032）。期間内に販売実績が無い品番は、売上金額・販売数・順位が null。 */
+export interface ItemRank {
+    item_id: number;
+    item_no: string;
+    brand: string;
+    category: string;
+    status: ActiveStatus;
+    status_label: string;
+    sku_count: number;
+    sales_amount: number | null;
+    sales_quantity: number | null;
+    sales_rank: number | null;
+    is_candidate: boolean;
+}
+
+export interface ItemRanking {
+    data: ItemRank[];
+    meta: { ranking_from: string; ranking_to: string; candidate_rank: number; max_items: number };
+}
+
+/** 選定に含めた品番と、確定時の売上順位。 */
+export interface ItemSelectionItem {
+    item_no: string;
+    sales_rank: number | null;
+    sales_amount: number | null;
+    is_candidate: boolean;
+    exists_in_crosswalker: boolean;
+}
+
+/** 対象品番の選定（確定1回分、K-030）。 */
+export interface ItemSelection {
+    id: number;
+    confirmed_at: string;
+    /** 確定した利用者の名前。ログイン（B-009）より前に確定した選定は null。 */
+    confirmed_by: string | null;
+    ranking_from: string;
+    ranking_to: string;
+    note: string | null;
+    items: ItemSelectionItem[];
+    /** 前回の選定からの変更（履歴の一覧でだけ返る）。初回の選定は null。 */
+    changes?: { added: string[]; removed: string[] } | null;
+}
+
+export interface CurrentItemSelection {
+    data: ItemSelection | null;
+    meta: { fiscal_year_start: string };
+}

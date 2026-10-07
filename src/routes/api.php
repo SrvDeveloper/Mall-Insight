@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
 use App\Http\Controllers\Api\V1\InventoryDateController;
 use App\Http\Controllers\Api\V1\ItemController;
+use App\Http\Controllers\Api\V1\ItemRankingController;
+use App\Http\Controllers\Api\V1\ItemSelectionController;
 use App\Http\Controllers\Api\V1\SalesImportController;
 use App\Http\Controllers\Api\V1\UnregisteredSkuController;
 use App\Http\Controllers\Api\V1\ZeroStockViewSyncController;
@@ -10,6 +12,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->name('api.v1.')->group(function () {
     Route::get('/items', [ItemController::class, 'index'])->name('items.index');
+    Route::get('/item-ranking', [ItemRankingController::class, 'index'])->name('item-ranking.index');
+    Route::get('/item-selections', [ItemSelectionController::class, 'index'])->name('item-selections.index');
+    Route::get('/item-selections/current', [ItemSelectionController::class, 'current'])->name('item-selections.current');
+    Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
     Route::get('/unregistered-skus', [UnregisteredSkuController::class, 'index'])->name('unregistered-skus.index');
     Route::get('/crosswalker-syncs/latest', [CrossWalkerSyncController::class, 'latest'])->name('crosswalker-syncs.latest');
     Route::post('/crosswalker-syncs', [CrossWalkerSyncController::class, 'store'])->name('crosswalker-syncs.store');
