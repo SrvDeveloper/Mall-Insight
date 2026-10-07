@@ -112,3 +112,19 @@ export interface SalesImport {
     error_message: string | null;
     issues?: SalesImportIssue[];
 }
+
+/** 品番に属していないSKU（B-010）。日付はいずれも保存済みのデータ全体から求めた最初と最後の日。 */
+export interface UnregisteredSku {
+    id: number;
+    sku_code: string;
+    recent_sales_quantity: number;
+    first_sold_on: string | null;
+    last_sold_on: string | null;
+    first_stocked_on: string | null;
+    last_stocked_on: string | null;
+}
+
+/** 未登録SKUの一覧。`sales_from`〜`sales_to` が販売数量の集計期間。 */
+export interface UnregisteredSkuPage extends Paginated<UnregisteredSku> {
+    meta: Paginated<UnregisteredSku>["meta"] & { sales_from: string; sales_to: string };
+}

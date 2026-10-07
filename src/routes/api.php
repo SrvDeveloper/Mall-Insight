@@ -4,11 +4,13 @@ use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
 use App\Http\Controllers\Api\V1\InventoryDateController;
 use App\Http\Controllers\Api\V1\ItemController;
 use App\Http\Controllers\Api\V1\SalesImportController;
+use App\Http\Controllers\Api\V1\UnregisteredSkuController;
 use App\Http\Controllers\Api\V1\ZeroStockViewSyncController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->name('api.v1.')->group(function () {
     Route::get('/items', [ItemController::class, 'index'])->name('items.index');
+    Route::get('/unregistered-skus', [UnregisteredSkuController::class, 'index'])->name('unregistered-skus.index');
     Route::get('/crosswalker-syncs/latest', [CrossWalkerSyncController::class, 'latest'])->name('crosswalker-syncs.latest');
     Route::post('/crosswalker-syncs', [CrossWalkerSyncController::class, 'store'])->name('crosswalker-syncs.store');
     Route::get('/sales-imports', [SalesImportController::class, 'index'])->name('sales-imports.index');

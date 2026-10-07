@@ -46,4 +46,12 @@ class Sku extends Model
     {
         return $this->hasMany(Inventory::class);
     }
+
+    /**
+     * @return HasMany<SalesLine, $this>
+     */
+    public function salesLines(): HasMany
+    {
+        return $this->hasMany(SalesLine::class);
+    }
 }
