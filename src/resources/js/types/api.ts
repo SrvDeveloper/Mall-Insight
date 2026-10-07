@@ -251,3 +251,37 @@ export interface DemandForecastResponse {
         min_sales_days: number;
     };
 }
+
+/** 入荷予定のSKUへの割り振り。 */
+export interface InboundPlanAllocation {
+    sku_id: number;
+    sku_code: string;
+    quantity: number;
+}
+
+/** 入荷予定（B-007、K-043）。品番・月単位。割り振っていない残りは、在庫推移で需要予測の比率により仮に割り振る。 */
+export interface InboundPlan {
+    id: number;
+    item_no: string;
+    brand: string | null;
+    category: string | null;
+    exists_in_crosswalker: boolean;
+    /** YYYY-MM */
+    arrival_month: string;
+    quantity: number;
+    allocated_quantity: number;
+    unallocated_quantity: number;
+    note: string | null;
+    received_at: string | null;
+    /** 入荷予定月を過ぎても入荷済みになっていない */
+    is_overdue: boolean;
+    allocations: InboundPlanAllocation[];
+}
+
+export interface InboundPlanPayload {
+    item_no: string;
+    arrival_month: string;
+    quantity: number;
+    note: string | null;
+    allocations: { sku_id: number; quantity: number }[];
+}

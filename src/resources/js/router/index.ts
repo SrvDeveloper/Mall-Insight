@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import AppLayout from "@/layouts/AppLayout.vue";
 import DemandForecastView from "@/views/DemandForecastView.vue";
+import InboundPlanView from "@/views/InboundPlanView.vue";
 import InventoryImportView from "@/views/InventoryImportView.vue";
 import ItemListView from "@/views/ItemListView.vue";
 import SalesImportView from "@/views/SalesImportView.vue";
@@ -23,6 +24,7 @@ const routes: RouteRecordRaw[] = [
             { path: "items", name: "items", component: ItemListView, meta: { title: "品番・SKU" } },
             { path: "target-items", name: "target-items", component: TargetItemSelectionView, meta: { title: "対象品番" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
+            { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },
         ],
     },
     { path: "/:pathMatch(.*)*", redirect: { name: "items" } },
