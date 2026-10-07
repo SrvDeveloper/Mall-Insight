@@ -3,6 +3,7 @@ import { computed, useTemplateRef } from "vue";
 import TrendTooltip from "@/components/inventoryTrend/TrendTooltip.vue";
 import { COVER_COLORS, shortMonthLabel, type ItemRows, type SkuRow, type TrendMonth, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
 import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
+import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
 import { useVirtualRows } from "@/composables/useVirtualRows";
 
 /**
@@ -28,6 +29,7 @@ const tooltipElement = useTemplateRef<HTMLElement>("tooltipElement");
 const { tooltip, show: showTooltip, hide: hideTooltip } = useAnchoredTooltip<TrendTooltipContent>(tooltipElement);
 
 const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
+const { isDragging, onPointerDown, onPointerMove, onPointerEnd, onPointerLeave } = useHorizontalDragScroll(scrollBox, hideTooltip);
 const { onScroll, renderedRows, topSpacerHeight, bottomSpacerHeight } = useVirtualRows(flatRows, scrollBox, hideTooltip, ROW_HEIGHT);
 
 function monthContent(row: SkuRow, index: number): TrendTooltipContent {
@@ -40,7 +42,19 @@ function columnTint(index: number): string {
 </script>
 
 <template>
-    <div ref="scrollBox" class="max-h-[calc(100dvh-5rem)] overflow-auto" data-testid="trend-timeline" @scroll="onScroll">
+    <div
+        ref="scrollBox"
+        class="max-h-[calc(100dvh-5rem)] overflow-auto select-none"
+        :class="isDragging ? 'cursor-grabbing' : ''"
+        data-testid="trend-timeline"
+        @scroll="onScroll"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerEnd"
+        @pointercancel="onPointerEnd"
+        @lostpointercapture="onPointerEnd"
+        @pointerleave="onPointerLeave"
+    >
         <div class="min-w-max text-[13px]">
             <div class="sticky top-0 z-20 grid items-end border-b border-stone-300 bg-white text-xs font-medium text-stone-500" :style="gridColumns">
                 <div class="sticky left-0 z-10 bg-white px-5 pt-3 pb-2">品番・SKU</div>
@@ -60,7 +74,7 @@ function columnTint(index: number): string {
 
             <div v-if="topSpacerHeight > 0" aria-hidden="true" :style="{ height: `${topSpacerHeight}px` }" />
             <template v-for="entry in renderedRows" :key="entry.key">
-                <div v-if="entry.kind === 'item'" class="grid h-[44px] items-center border-t border-stone-200 bg-stone-50" :style="gridColumns" data-testid="timeline-item-row">
+                <div v-if="entry.kind === 'item'" class="grid h-11 items-center border-t border-stone-200 bg-stone-50" :style="gridColumns" data-testid="timeline-item-row">
                     <div class="sticky left-0 z-10 flex h-full items-center gap-2 truncate bg-stone-50 px-5">
                         <span class="font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>
                         <span class="truncate rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span>
@@ -90,10 +104,10 @@ function columnTint(index: number): string {
                         </span>
                     </div>
                     <div class="truncate px-4 text-xs" :class="entry.group.shortageCount > 0 ? 'font-semibold text-red-700' : 'text-stone-500'">
-                        {{ entry.group.shortageCount > 0 ? `判定する月に ${entry.group.shortageCount} SKU が欠品` : "判定する月に欠品なし" }}
+                        {{ entry.group.shortageCount > 0 ? `判定月に ${entry.group.shortageCount} SKU 欠品` : "判定月に欠品なし" }}
                     </div>
                 </div>
-                <div v-else class="group grid h-[44px] items-center border-t border-stone-100 hover:bg-stone-50" :style="gridColumns" data-testid="timeline-sku-row">
+                <div v-else class="group grid h-11 items-center border-t border-stone-100 hover:bg-stone-50" :style="gridColumns" data-testid="timeline-sku-row">
                     <div class="sticky left-0 z-10 flex h-full items-center justify-between gap-2 bg-white pr-4 pl-8 group-hover:bg-stone-50">
                         <span class="truncate font-mono text-[12.5px] text-stone-700" :title="entry.row.sku.sku_code">{{ entry.row.sku.sku_code }}</span>
                         <span class="shrink-0 text-[11px] text-stone-500 tabular-nums">{{ entry.row.coverText }}</span>
@@ -102,7 +116,7 @@ function columnTint(index: number): string {
                         <div v-for="(cell, index) in entry.row.cells" :key="index" class="flex h-full items-center px-0.5" :class="columnTint(index)">
                             <span
                                 tabindex="0"
-                                class="block h-[18px] w-full cursor-help rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-1"
+                                class="block h-4.5 w-full cursor-help rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-1"
                                 :class="COVER_COLORS[cell.cover]"
                                 :aria-label="`${shortMonthLabel(months[index]!.month)} ${cell.text}`"
                                 data-testid="timeline-block"

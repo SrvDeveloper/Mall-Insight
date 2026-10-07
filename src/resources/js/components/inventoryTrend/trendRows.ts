@@ -16,21 +16,27 @@ export const longMonthLabel = (month: string): string => `${month.slice(0, 4)}�
 export type CellTone = "shortage" | "empty" | "normal";
 
 /** タイムラインの帯の色分け。在庫が持つ月数（月末在庫 ÷ 平均月販）で分ける。 */
-export type CoverLevel = "plenty" | "some" | "low" | "empty" | "shortage";
+export type CoverLevel = "plenty" | "enough" | "some" | "limited" | "low" | "critical" | "empty" | "shortage";
 
 /** タイムラインの帯の色（在庫が持つ月数）。凡例でも使う。 */
 export const COVER_COLORS: Record<CoverLevel, string> = {
-    plenty: "bg-stone-700",
-    some: "bg-stone-400",
-    low: "bg-stone-200",
+    plenty: "bg-stone-900",
+    enough: "bg-stone-700",
+    some: "bg-stone-500",
+    limited: "bg-stone-400",
+    low: "bg-stone-300",
+    critical: "bg-stone-200",
     empty: "bg-amber-300",
-    shortage: "bg-red-500",
+    shortage: "bg-red-600",
 };
 
 export const COVER_LEGEND: { level: CoverLevel; label: string }[] = [
-    { level: "plenty", label: "3か月以上" },
-    { level: "some", label: "1〜3か月" },
-    { level: "low", label: "1か月未満" },
+    { level: "plenty", label: "6か月以上" },
+    { level: "enough", label: "3〜6か月未満" },
+    { level: "some", label: "2〜3か月未満" },
+    { level: "limited", label: "1〜2か月未満" },
+    { level: "low", label: "0.5〜1か月未満" },
+    { level: "critical", label: "0.5か月未満" },
     { level: "empty", label: "在庫0" },
     { level: "shortage", label: "足りない" },
 ];
@@ -103,7 +109,11 @@ function coverLevel(month: MonthTrend, averageDaily: number | null): CoverLevel 
         return "plenty";
     }
     const cover = month.ending_stock / (averageDaily * 30);
-    return cover >= 3 ? "plenty" : cover >= 1 ? "some" : "low";
+    if (cover >= 6) return "plenty";
+    if (cover >= 3) return "enough";
+    if (cover >= 2) return "some";
+    if (cover >= 1) return "limited";
+    return cover >= 0.5 ? "low" : "critical";
 }
 
 const SPARK_WIDTH = 240;

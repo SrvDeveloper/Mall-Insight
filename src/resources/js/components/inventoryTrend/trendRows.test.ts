@@ -47,6 +47,37 @@ describe("trendRows", () => {
         expect(sparkline(sku({ months: null, opening_stock: null }), 2)).toBeNull();
     });
 
+    it.each([
+        [180, "plenty"],
+        [179, "enough"],
+        [90, "enough"],
+        [89, "some"],
+        [60, "some"],
+        [59, "limited"],
+        [30, "limited"],
+        [29, "low"],
+        [15, "low"],
+        [14, "critical"],
+        [1, "critical"],
+        [0, "empty"],
+    ])("classifies ending stock %s by its months of cover", (ending, expected) => {
+        const item: ItemTrend = { item_no: "fl-01", brand: "B", category: "C", unassignable_inbound: 0, skus: [sku({ months: [month(0, ending)] })] };
+        const [group] = buildItemRows([item], [{ month: MONTHS[0]!, days: 30 }], 0);
+        expect(group!.rows[0]!.cells[0]!.cover).toBe(expected);
+    });
+
+    it("keeps shortages distinct and treats stock without positive demand as plenty", () => {
+        const item: ItemTrend = {
+            item_no: "fl-01",
+            brand: "B",
+            category: "C",
+            unassignable_inbound: 0,
+            skus: [sku({ months: [month(0, 180, 1)] }), sku({ average_daily: 0, months: [month(0, 1)] })],
+        };
+        const [group] = buildItemRows([item], [{ month: MONTHS[0]!, days: 30 }], 0);
+        expect(group!.rows.map((row) => row.cells[0]!.cover)).toEqual(["shortage", "plenty"]);
+    });
+
     it("builds rows with cover levels, status labels and item totals", () => {
         const item: ItemTrend = { item_no: "fl-01", brand: "B", category: "C", unassignable_inbound: 0, skus: [sku()] };
         const [rows] = buildItemRows(
@@ -55,7 +86,7 @@ describe("trendRows", () => {
             2,
         );
 
-        expect(rows!.rows[0]!.cells.map((cell) => cell.cover)).toEqual(["some", "some", "empty", "shortage"]);
+        expect(rows!.rows[0]!.cells.map((cell) => cell.cover)).toEqual(["some", "limited", "empty", "shortage"]);
         expect(rows!.rows[0]!.status).toEqual({ label: "1月から欠品", isShortage: true });
         expect(rows!.rows[0]!.coverText).toBe("在庫90・3.0か月分");
         expect(rows!.monthTexts).toEqual(["60", "30", "0", "−30"]);

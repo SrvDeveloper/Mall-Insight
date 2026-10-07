@@ -205,7 +205,7 @@ describe("InventoryTrendView", () => {
         const blocks = rows[0]!.findAll('[data-testid="timeline-block"]');
         expect(blocks).toHaveLength(12);
         // 平均日販1・月末在庫75（約2.5か月分）、15（0.5か月分）、足りない月
-        expect(blocks.map((block) => block.attributes("data-cover")).slice(0, 4)).toEqual(["some", "some", "low", "shortage"]);
+        expect(blocks.map((block) => block.attributes("data-cover")).slice(0, 4)).toEqual(["some", "limited", "low", "shortage"]);
         expect(rows[0]!.find('[data-testid="timeline-status"]').text()).toBe("1月から欠品");
         expect(rows[1]!.find('[data-testid="timeline-status"]').text()).toBe("12か月もつ");
         expect(rows[0]!.text()).toContain("在庫100・3.3か月分");
@@ -226,31 +226,19 @@ describe("InventoryTrendView", () => {
         expect(wrapper.find('[data-testid="graph-item"]').text()).toContain("11月 +150");
     });
 
-    it("lets the viewer choose how many SKUs to show per row for each item and remembers it", async () => {
-        window.localStorage.clear();
-        const { wrapper } = await mountView("/inventory-trends?view=graph");
-        const grid = () => wrapper.find('[data-testid="graph-grid"]');
+    it("automatically lays out graphs even when a previous column preference is saved", async () => {
+        const storageKey = "mall-insight.inventory-trend.graph-columns";
+        window.localStorage.setItem(storageKey, JSON.stringify({ "fl-01": 3 }));
+        try {
+            const { wrapper } = await mountView("/inventory-trends?view=graph");
 
-        expect(grid().attributes("style")).toContain("auto-fill");
-        expect(
-            wrapper
-                .find('[data-testid="graph-columns"]')
-                .findAll("button")
-                .map((button) => button.text()),
-        ).toEqual(["自動", "2", "3", "4", "5", "6"]);
-        await wrapper
-            .find('[data-testid="graph-columns"]')
-            .findAll("button")
-            .find((button) => button.text() === "3")!
-            .trigger("click");
-
-        expect(grid().attributes("style")).toContain("repeat(3, minmax(0, 1fr))");
-        expect(JSON.parse(window.localStorage.getItem("mall-insight.inventory-trend.graph-columns")!)).toEqual({ "fl-01": 3 });
-
-        wrapper.unmount();
-        const reopened = await mountView("/inventory-trends?view=graph");
-        expect(reopened.wrapper.find('[data-testid="graph-grid"]').attributes("style")).toContain("repeat(3, minmax(0, 1fr))");
-        window.localStorage.clear();
+            expect(wrapper.find('[data-testid="graph-columns"]').exists()).toBe(false);
+            expect(wrapper.find('[data-testid="graph-grid"]').attributes("style")).toContain("auto-fill");
+            expect(wrapper.findAll('[data-testid="graph-tile"]')).toHaveLength(3);
+            wrapper.unmount();
+        } finally {
+            window.localStorage.removeItem(storageKey);
+        }
     });
 
     it("filters by warning and by keyword in every view", async () => {

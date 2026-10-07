@@ -3,6 +3,7 @@ import { computed, useTemplateRef } from "vue";
 import TrendTooltip from "@/components/inventoryTrend/TrendTooltip.vue";
 import { shortMonthLabel, yearSpans, type CellTone, type ItemRows, type SkuRow, type TrendMonth, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
 import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
+import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
 import { useVirtualRows } from "@/composables/useVirtualRows";
 
 /**
@@ -26,6 +27,7 @@ const tooltipElement = useTemplateRef<HTMLElement>("tooltipElement");
 const { tooltip, show: showTooltip, hide: hideTooltip } = useAnchoredTooltip<TrendTooltipContent>(tooltipElement);
 
 const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
+const { isDragging, onPointerDown, onPointerMove, onPointerEnd, onPointerLeave } = useHorizontalDragScroll(scrollBox, hideTooltip);
 const { onScroll, renderedRows, topSpacerHeight, bottomSpacerHeight } = useVirtualRows(flatRows, scrollBox, hideTooltip, ROW_HEIGHT);
 
 /** 数字の丸い札の色（足りない数は赤、在庫0は黄。それ以外は札を付けない） */
@@ -39,7 +41,19 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
 </script>
 
 <template>
-    <div ref="scrollBox" class="max-h-[calc(100dvh-5rem)] overflow-auto" data-testid="trend-table" @scroll="onScroll">
+    <div
+        ref="scrollBox"
+        class="max-h-[calc(100dvh-5rem)] overflow-auto select-none"
+        :class="isDragging ? 'cursor-grabbing' : ''"
+        data-testid="trend-table"
+        @scroll="onScroll"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerEnd"
+        @pointercancel="onPointerEnd"
+        @lostpointercapture="onPointerEnd"
+        @pointerleave="onPointerLeave"
+    >
         <table class="w-full min-w-[76rem] table-fixed border-separate border-spacing-0 text-left text-[13px]">
             <colgroup>
                 <col class="w-62" />
@@ -81,46 +95,52 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                 </tr>
                 <template v-for="entry in renderedRows" :key="entry.key">
                     <tr v-if="entry.kind === 'item'" class="h-[40px] bg-stone-50 [&>*]:border-t [&>*]:border-stone-200" data-testid="item-row">
-                        <th scope="rowgroup" class="sticky left-0 z-10 truncate bg-stone-50 px-4 text-left font-normal">
-                            <span class="font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>
-                            <span class="ml-2 rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span>
-                            <span v-if="entry.group.shortageCount > 0" class="ml-1.5 rounded-full bg-red-100 px-2 py-px text-[11px] font-semibold text-red-700" data-testid="item-shortage">
-                                欠品 {{ entry.group.shortageCount }}/{{ entry.group.calculatedCount }}
-                            </span>
-                            <span
-                                v-if="entry.group.item.unassignable_inbound > 0"
-                                class="ml-1.5 text-[11px] text-amber-700"
-                                :title="`需要予測の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
-                            >
-                                入荷を割り振れません
-                            </span>
+                        <th scope="rowgroup" class="sticky left-0 z-10 bg-stone-50 px-4 text-left font-normal">
+                            <div class="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                                <span class="shrink-0 font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>
+                                <span class="min-w-0 truncate rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600"
+                                    >{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span
+                                >
+                                <span v-if="entry.group.shortageCount > 0" class="shrink-0 rounded-full bg-red-100 px-2 py-px text-[11px] font-semibold text-red-700" data-testid="item-shortage">
+                                    欠品 {{ entry.group.shortageCount }}/{{ entry.group.calculatedCount }}
+                                </span>
+                                <span
+                                    v-if="entry.group.item.unassignable_inbound > 0"
+                                    class="min-w-0 truncate text-[11px] text-amber-700"
+                                    :title="`需要予測の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
+                                >
+                                    入荷を割り振れません
+                                </span>
+                            </div>
                         </th>
                         <td class="px-3 text-right font-semibold text-stone-900 tabular-nums">{{ entry.group.stockText }}</td>
                         <td
                             v-for="(text, index) in entry.group.monthTexts"
                             :key="index"
-                            class="relative px-3 text-right font-semibold tabular-nums"
+                            class="px-3 text-right font-semibold tabular-nums"
                             :class="[entry.group.monthTones[index] === 'shortage' ? 'text-red-700' : 'text-stone-900', index === checkMonthIndex ? 'bg-stone-200/70' : '']"
                         >
-                            <svg
-                                v-if="entry.group.monthInbounds[index]"
-                                class="absolute top-1/2 left-1.5 size-3.5 -translate-y-1/2 text-stone-400"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.4"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                role="img"
-                                :aria-label="entry.group.monthInbounds[index]!.label"
-                                data-testid="inbound-icon"
-                            >
-                                <title>{{ entry.group.monthInbounds[index]!.label }}</title>
-                                <path d="M2.5 6.5v6.5h11V6.5" />
-                                <path d="M1.5 6.5h13" />
-                                <path d="M8 1.5v6M5.5 5 8 7.5 10.5 5" />
-                            </svg>
-                            {{ text }}
+                            <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                                <svg
+                                    v-if="entry.group.monthInbounds[index]"
+                                    class="size-3.5 shrink-0 text-stone-400"
+                                    viewBox="0 0 16 16"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.4"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    role="img"
+                                    :aria-label="entry.group.monthInbounds[index]!.label"
+                                    data-testid="inbound-icon"
+                                >
+                                    <title>{{ entry.group.monthInbounds[index]!.label }}</title>
+                                    <path d="M2.5 6.5v6.5h11V6.5" />
+                                    <path d="M1.5 6.5h13" />
+                                    <path d="M8 1.5v6M5.5 5 8 7.5 10.5 5" />
+                                </svg>
+                                {{ text }}
+                            </span>
                         </td>
                     </tr>
                     <tr v-else class="group h-[40px] hover:bg-stone-50 [&>*]:border-t [&>*]:border-stone-100" data-testid="sku-row">

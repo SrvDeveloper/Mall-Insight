@@ -161,8 +161,8 @@ const facts = computed(() => {
     <div class="flex flex-col gap-5">
         <header class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1.5">
-                <p class="text-xs text-stone-500">在庫試算 / 12か月在庫推移</p>
-                <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">12か月在庫推移</h1>
+                <p class="text-xs text-stone-500">在庫試算 / 在庫推移</p>
+                <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫推移</h1>
                 <p class="text-[13px] text-stone-600">最新の在庫からシステム需要予測（販売目標ではありません）を引き、入荷予定を足した、12か月先までの月末在庫です。</p>
             </div>
             <div class="flex items-center gap-3">

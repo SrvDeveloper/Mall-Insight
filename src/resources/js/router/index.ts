@@ -26,7 +26,7 @@ const routes: RouteRecordRaw[] = [
             { path: "target-items", name: "target-items", component: TargetItemSelectionView, meta: { title: "対象品番" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
             { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },
-            { path: "inventory-trends", name: "inventory-trends", component: InventoryTrendView, meta: { title: "12か月在庫推移" } },
+            { path: "inventory-trends", name: "inventory-trends", component: InventoryTrendView, meta: { title: "在庫推移" } },
         ],
     },
     { path: "/:pathMatch(.*)*", redirect: { name: "items" } },

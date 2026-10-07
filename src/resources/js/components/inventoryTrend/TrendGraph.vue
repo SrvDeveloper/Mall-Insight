@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { monthLabel, type ItemRows, type TrendMonth } from "@/components/inventoryTrend/trendRows";
 
 /**
  * 在庫推移の「グラフ」（K-047、デザイン案A-3）。品番ごとのカードに、SKUの12か月の在庫の増減を小さなグラフで並べる。
  * 在庫は灰色の面と線、足りない量は0の線より下の赤い面、判定する月は点線、入荷予定は ▲ で示す。
  * 判定する月に欠品するSKUは、カードの枠を薄い赤にする。
- * 1行に並べるSKUの数は、品番ごとに選べる（自動・2〜6）。選んだ数はブラウザに記憶する（閲覧者ごとの好みのため）。
+ * グラフは画面の幅に合わせて自動で折り返す。
  */
 
 const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number }>();
@@ -19,40 +19,6 @@ const axisLabels = computed(() => {
     return { first: first ? monthLabel(first.month) : "", check: check ? monthLabel(check.month) : "", last: last ? monthLabel(last.month) : "" };
 });
 const checkPosition = computed(() => `${((props.checkMonthIndex + 1) / Math.max(1, props.months.length)) * 100}%`);
-
-/** 1行に並べるSKUの数の選択肢。0 は画面の幅に合わせる（自動）。 */
-const COLUMN_OPTIONS = [0, 2, 3, 4, 5, 6];
-const STORAGE_KEY = "mall-insight.inventory-trend.graph-columns";
-
-function loadColumns(): Record<string, number> {
-    try {
-        const saved: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
-        return saved && typeof saved === "object" ? (saved as Record<string, number>) : {};
-    } catch {
-        return {};
-    }
-}
-
-const columnsByItem = ref<Record<string, number>>(loadColumns());
-
-function columnsOf(itemNo: string): number {
-    const value = columnsByItem.value[itemNo];
-    return value !== undefined && COLUMN_OPTIONS.includes(value) ? value : 0;
-}
-
-function selectColumns(itemNo: string, columns: number): void {
-    columnsByItem.value = { ...columnsByItem.value, [itemNo]: columns };
-    try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(columnsByItem.value));
-    } catch {
-        // 記憶できない環境（プライベートブラウズなど）では、この画面を開いている間だけ有効にする
-    }
-}
-
-function gridStyle(itemNo: string): Record<string, string> {
-    const columns = columnsOf(itemNo);
-    return { gridTemplateColumns: columns === 0 ? "repeat(auto-fill, minmax(14.5rem, 1fr))" : `repeat(${columns}, minmax(0, 1fr))` };
-}
 </script>
 
 <template>
@@ -78,25 +44,9 @@ function gridStyle(itemNo: string): Record<string, string> {
                     </span>
                 </template>
                 <span v-if="group.item.unassignable_inbound > 0" class="text-xs text-amber-700">入荷を割り振れません</span>
-                <div class="ml-auto flex items-center gap-1.5 text-[11px] text-stone-500">
-                    <span aria-hidden="true">1行に</span>
-                    <div class="inline-flex gap-0.5 rounded-md bg-stone-100 p-0.5" role="group" :aria-label="`${group.item.item_no} の1行に並べるSKUの数`" data-testid="graph-columns">
-                        <button
-                            v-for="columns in COLUMN_OPTIONS"
-                            :key="columns"
-                            type="button"
-                            class="h-6 min-w-7 rounded px-1.5 tabular-nums"
-                            :class="columnsOf(group.item.item_no) === columns ? 'bg-white font-semibold text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-900'"
-                            :aria-pressed="columnsOf(group.item.item_no) === columns"
-                            @click="selectColumns(group.item.item_no, columns)"
-                        >
-                            {{ columns === 0 ? "自動" : columns }}
-                        </button>
-                    </div>
-                </div>
             </div>
 
-            <div class="grid gap-3" :style="gridStyle(group.item.item_no)" data-testid="graph-grid">
+            <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(min(100%, 14.5rem), 1fr))" data-testid="graph-grid">
                 <div
                     v-for="row in group.rows"
                     :key="row.sku.sku_id"
