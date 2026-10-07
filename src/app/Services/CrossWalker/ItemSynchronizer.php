@@ -6,6 +6,7 @@ use App\Enums\SyncStatus;
 use App\Enums\SyncTrigger;
 use App\Models\CrossWalkerSync;
 use App\Models\Item;
+use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Services\SyncAlreadyRunningException;
 use Illuminate\Support\Carbon;
@@ -81,6 +82,38 @@ class ItemSynchronizer
     }
 
     /**
+     * Amazon の販売実績で見つかった未登録の ASIN は、ASIN をSKUコードにした仮のSKUとして保存している（決定記録 K-040）。
+     * その ASIN を子ASINに持つSKUが CrossWalker に現れたら、仮のSKUを CrossWalker のSKUに置き換え、販売実績を引き継ぐ。
+     *
+     * @param  list<array{sku_code: string, child_asin: ?string}>  $skuRows
+     */
+    private function linkAsinPlaceholders(array $skuRows): void
+    {
+        $codeByAsin = [];
+        foreach ($skuRows as $row) {
+            if ($row['child_asin'] !== null && $row['child_asin'] !== '') {
+                $codeByAsin[$row['child_asin']] = $row['sku_code'];
+            }
+        }
+        if ($codeByAsin === []) {
+            return;
+        }
+
+        $placeholders = Sku::query()->whereNull('item_id')->whereIn('sku_code', array_map('strval', array_keys($codeByAsin)))->whereColumn('sku_code', 'child_asin')->get();
+        foreach ($placeholders as $placeholder) {
+            $skuCode = $codeByAsin[$placeholder->sku_code];
+            $existing = Sku::query()->where('sku_code', $skuCode)->first();
+            if ($existing === null) {
+                $placeholder->update(['sku_code' => $skuCode]);
+
+                continue;
+            }
+            SalesLine::query()->where('sku_id', $placeholder->id)->update(['sku_id' => $existing->id]);
+            $placeholder->delete();
+        }
+    }
+
+    /**
      * @param  list<CrossWalkerItem>  $items
      * @return array{item_count: int, sku_count: int, added_item_count: int, removed_item_count: int, detached_sku_count: int}
      */
@@ -118,6 +151,7 @@ class ItemSynchronizer
                 ];
             }
         }
+        $this->linkAsinPlaceholders($skuRows);
         foreach (array_chunk($skuRows, 500) as $chunk) {
             Sku::upsert($chunk, ['sku_code'], ['item_id', 'child_asin', 'status', 'tq_item_no', 'tq_color_no', 'tq_size', 'position']);
         }

@@ -5,7 +5,8 @@ namespace App\Services\Forecast;
 use App\Models\Sku;
 
 /**
- * SKU1件の需要予測。販売実績を取り込んだチャネルごとに予測し、予測できたチャネルを合計する（決定記録 K-038）。
+ * SKU1件の需要予測。販売実績を取り込んだチャネルのうち、そのSKUを売っているチャネルごとに予測し、予測できたチャネルを合計する
+ * （決定記録 K-038・K-042）。
  * 予測できたチャネルが1つも無ければ、基準平均日販と月別の予測は null。一部のチャネルだけ予測できたときは isPartial。
  */
 final readonly class SkuForecast
@@ -44,7 +45,7 @@ final readonly class SkuForecast
     public function unpredictableReasonLabel(): ?string
     {
         if ($this->channels === []) {
-            return '販売実績がまだ取り込まれていません';
+            return '販売実績がまだ取り込まれていません（または、このSKUを売っているチャネルがありません）';
         }
         $reasons = array_map(fn (ChannelForecast $channel): string => "{$channel->channel->label()}：{$channel->unpredictableReason->label()}", array_values(array_filter($this->channels, fn (ChannelForecast $channel): bool => ! $channel->isPredictable())));
 

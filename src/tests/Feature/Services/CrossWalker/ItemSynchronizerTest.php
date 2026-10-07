@@ -7,6 +7,7 @@ use App\Enums\SyncStatus;
 use App\Enums\SyncTrigger;
 use App\Models\CrossWalkerSync;
 use App\Models\Item;
+use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Services\CrossWalker\ItemSynchronizer;
 use App\Services\SyncAlreadyRunningException;
@@ -110,6 +111,29 @@ class ItemSynchronizerTest extends TestCase
         $this->assertSame([2, 3, 1, 1, 2], [$sync->item_count, $sync->sku_count, $sync->added_item_count, $sync->removed_item_count, $sync->detached_sku_count]);
     }
 
+    public function test_replaces_asin_placeholders_from_amazon_sales_with_the_crosswalker_skus_that_have_the_asin(): void
+    {
+        $renamed = Sku::factory()->unassigned()->create(['sku_code' => 'B0NEW00001', 'child_asin' => 'B0NEW00001', 'status' => null]);
+        $merged = Sku::factory()->unassigned()->create(['sku_code' => 'B0NEW00002', 'child_asin' => 'B0NEW00002', 'status' => null]);
+        $bossOnly = Sku::factory()->unassigned()->create(['sku_code' => 'new-01-1-15', 'child_asin' => null, 'status' => null]);
+        $amazonLine = $this->salesLine($merged, 'amazon');
+        $bossLine = $this->salesLine($bossOnly, 'boss');
+        Http::fake(['crosswalker.test/*' => Http::response($this->fakeItemsPage([
+            $this->cwItem('new-01', [$this->cwSku('new-01-1-10', childAsin: 'B0NEW00001'), $this->cwSku('new-01-1-15', childAsin: 'B0NEW00002')]),
+        ]))]);
+
+        app(ItemSynchronizer::class)->sync(SyncTrigger::Schedule);
+
+        // CrossWalker に同じSKUコードが無ければ、仮のSKUをそのまま CrossWalker のSKUにする
+        $this->assertDatabaseHas('skus', ['id' => $renamed->id, 'sku_code' => 'new-01-1-10', 'child_asin' => 'B0NEW00001', 'status' => 'active']);
+        // すでに同じSKUコードがあれば、販売実績をそちらに移して仮のSKUを消す
+        $this->assertModelMissing($merged);
+        $this->assertSame($bossOnly->id, $amazonLine->fresh()->sku_id);
+        $this->assertSame($bossOnly->id, $bossLine->fresh()->sku_id);
+        $this->assertDatabaseHas('skus', ['id' => $bossOnly->id, 'child_asin' => 'B0NEW00002']);
+        $this->assertSame(2, Sku::count());
+    }
+
     public function test_records_failure_with_user_facing_message_and_keeps_data_when_api_key_is_rejected(): void
     {
         $item = Item::factory()->create();
@@ -181,5 +205,10 @@ class ItemSynchronizerTest extends TestCase
         } finally {
             $lock->release();
         }
+    }
+
+    private function salesLine(Sku $sku, string $source): SalesLine
+    {
+        return SalesLine::create(['source' => $source, 'source_order_id' => uniqid(), 'sales_date' => '2026-10-01', 'mall' => $source === 'amazon' ? 'amazon' : 'rakuten', 'sku_id' => $sku->id, 'warehouse' => $source === 'amazon' ? 'amazon_fba' : 'boss_own', 'quantity' => 1, 'amount' => 1000]);
     }
 }

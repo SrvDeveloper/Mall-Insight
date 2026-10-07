@@ -94,7 +94,8 @@ export interface SalesImportIssue {
 
 export interface SalesImport {
     id: number;
-    source: string;
+    source: "boss" | "amazon";
+    source_label: string;
     file_name: string;
     status: "succeeded" | "failed";
     status_label: string;

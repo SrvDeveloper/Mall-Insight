@@ -1,7 +1,7 @@
 import { apiClient } from "@/api/client";
 import type { Paginated, SalesImport } from "@/types/api";
 
-/** BOSS受注実績のCSVを取り込む。ファイル全体を取り込めなかった場合も、失敗の記録が返る。 */
+/** 販売実績のファイル（BOSS受注実績のCSV、Amazon全注文レポート）を1つ取り込む。ファイル全体を取り込めなかった場合も、失敗の記録が返る。 */
 export async function uploadSalesImport(file: File): Promise<SalesImport> {
     const form = new FormData();
     form.append("file", file);

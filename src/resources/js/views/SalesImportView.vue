@@ -6,13 +6,23 @@ import StatusBadge from "@/components/ui/StatusBadge.vue";
 import type { Paginated, SalesImport } from "@/types/api";
 
 /**
- * 販売実績の取込（バックログ B-004、決定記録 K-022）。BOSS受注実績のCSVを取り込み、結果とエラー・警告を確認する。
+ * 販売実績の取込（バックログ B-004・B-101、決定記録 K-022・K-040）。BOSS受注実績のCSVと Amazon全注文レポートを取り込み、
+ * 結果とエラー・警告を確認する。取込元はファイルの中身からサーバーが判定する。
+ * Amazon のレポートは1か月単位でしか出力できないため、複数のファイルをまとめて選び、1つずつ順に取り込めるようにする。
  */
 
+/** まとめて取り込んだファイル1つ分の結果。サーバーが受け付けなかったファイルは import が null で、理由を持つ。 */
+interface BatchResult {
+    fileName: string;
+    import: SalesImport | null;
+    error: string | null;
+}
+
 const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
-const selectedFile = ref<File | null>(null);
+const selectedFiles = ref<File[]>([]);
 const isUploading = ref(false);
-const uploadError = ref<string | null>(null);
+const uploadingIndex = ref(0);
+const batchResults = ref<BatchResult[]>([]);
 
 const current = ref<SalesImport | null>(null);
 const history = ref<Paginated<SalesImport> | null>(null);
@@ -33,31 +43,49 @@ async function loadHistory(): Promise<void> {
 }
 
 function onFileChange(event: Event): void {
-    selectedFile.value = (event.target as HTMLInputElement).files?.[0] ?? null;
-    uploadError.value = null;
+    // ファイル名の順（「2025年10月」「2025年11月」…）に取り込む
+    selectedFiles.value = Array.from((event.target as HTMLInputElement).files ?? []).sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
+    batchResults.value = [];
 }
 
 async function upload(): Promise<void> {
-    if (!selectedFile.value || isUploading.value) {
+    if (selectedFiles.value.length === 0 || isUploading.value) {
         return;
     }
     isUploading.value = true;
-    uploadError.value = null;
+    batchResults.value = [];
     try {
-        current.value = await uploadSalesImport(selectedFile.value);
-        selectedFile.value = null;
+        for (const [index, file] of selectedFiles.value.entries()) {
+            uploadingIndex.value = index;
+            try {
+                const result = await uploadSalesImport(file);
+                batchResults.value.push({ fileName: file.name, import: result, error: null });
+                current.value = result;
+            } catch (error) {
+                const message = error instanceof ApiError && error.isValidationError ? (Object.values(error.errors).flat()[0] ?? error.message) : "送信できませんでした。";
+                batchResults.value.push({ fileName: file.name, import: null, error: message });
+            }
+        }
+        selectedFiles.value = [];
         if (fileInput.value) {
             fileInput.value.value = "";
         }
         historyPage.value = 1;
         await loadHistory();
-    } catch (error) {
-        if (error instanceof ApiError && error.isValidationError) {
-            uploadError.value = Object.values(error.errors).flat()[0] ?? error.message;
-        }
     } finally {
         isUploading.value = false;
     }
+}
+
+function batchTone(result: BatchResult): "danger" | "warning" | "positive" {
+    if (!result.import || result.import.status === "failed") {
+        return "danger";
+    }
+    return (result.import.error_row_count ?? 0) > 0 ? "warning" : "positive";
+}
+
+function batchLabel(result: BatchResult): string {
+    return { danger: "取り込めませんでした", warning: "エラーあり", positive: "取り込みました" }[batchTone(result)];
 }
 
 async function showImport(id: number): Promise<void> {
@@ -88,7 +116,7 @@ const resultCounts = computed(() => {
         { label: "データ行", value: result.row_count },
         { label: "新しく登録", value: result.created_line_count },
         { label: "上書き", value: result.updated_line_count },
-        { label: "重複で対象外", value: result.skipped_line_count },
+        { label: result.source === "amazon" ? "未出荷などで対象外" : "重複で対象外", value: result.skipped_line_count },
         { label: "エラーで未登録", value: result.error_row_count, tone: (result.error_row_count ?? 0) > 0 ? "text-red-700" : "" },
         { label: "CrossWalkerに無いSKU", value: result.created_sku_count },
     ];
@@ -100,34 +128,79 @@ const resultCounts = computed(() => {
         <header class="flex flex-col gap-1">
             <h1 class="text-xl font-bold tracking-tight text-stone-900">販売実績の取込</h1>
             <p class="text-sm text-stone-500">
-                BOSSの受注実績一覧から出力したCSV（「完了」の受注実績）を取り込みます。楽天市場・Yahoo!ショッピング・au PAY
-                マーケットの販売実績が対象です。同じ注文を取り込み直すと上書きされ、二重にはなりません。
+                BOSSの受注実績一覧から出力したCSV（楽天市場・Yahoo!ショッピング・au PAY マーケット）と、Amazonの全注文レポート（テキスト）を取り込みます。
+                どちらのファイルかは自動で判定します。複数のファイルをまとめて選べます。同じ注文を取り込み直すと上書きされ、二重にはなりません。
             </p>
         </header>
 
-        <form class="flex flex-col gap-3 rounded-lg border border-stone-200 bg-white p-4 sm:flex-row sm:items-center" @submit.prevent="upload">
-            <label for="sales-file" class="text-sm font-semibold text-stone-700">BOSS受注実績のCSV</label>
-            <input
-                id="sales-file"
-                ref="fileInput"
-                type="file"
-                accept=".csv"
-                class="min-w-0 flex-1 text-sm text-stone-700 file:mr-3 file:rounded-md file:border file:border-stone-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-stone-700 hover:file:bg-stone-100"
-                @change="onFileChange"
-            />
-            <button
-                type="submit"
-                class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="!selectedFile || isUploading"
-            >
-                {{ isUploading ? "取込中…" : "取り込む" }}
-            </button>
+        <form class="flex flex-col gap-3 rounded-lg border border-stone-200 bg-white p-4" @submit.prevent="upload">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <label for="sales-file" class="text-sm font-semibold text-stone-700">販売実績のファイル</label>
+                <input
+                    id="sales-file"
+                    ref="fileInput"
+                    type="file"
+                    accept=".csv,.txt,.tsv"
+                    multiple
+                    class="min-w-0 flex-1 text-sm text-stone-700 file:mr-3 file:rounded-md file:border file:border-stone-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-stone-700 hover:file:bg-stone-100"
+                    :disabled="isUploading"
+                    @change="onFileChange"
+                />
+                <button
+                    type="submit"
+                    class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold whitespace-nowrap text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    :disabled="selectedFiles.length === 0 || isUploading"
+                >
+                    {{ isUploading ? `取込中…（${uploadingIndex + 1}/${selectedFiles.length}）` : selectedFiles.length > 1 ? `${selectedFiles.length}ファイルを取り込む` : "取り込む" }}
+                </button>
+            </div>
+            <p v-if="isUploading" class="text-sm text-stone-600" role="status">{{ selectedFiles[uploadingIndex]?.name }} を取り込んでいます…</p>
         </form>
-        <p v-if="uploadError" class="-mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{{ uploadError }}</p>
+
+        <section v-if="batchResults.length > 1" class="overflow-hidden rounded-lg border border-stone-200 bg-white" aria-label="まとめて取り込んだ結果">
+            <h2 class="border-b border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700">まとめて取り込んだ結果（{{ batchResults.length }}ファイル）</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="border-b border-stone-200 bg-stone-50 text-xs font-semibold text-stone-500">
+                        <tr>
+                            <th scope="col" class="px-4 py-2.5">ファイル</th>
+                            <th scope="col" class="px-4 py-2.5">取込元</th>
+                            <th scope="col" class="px-4 py-2.5">結果</th>
+                            <th scope="col" class="px-4 py-2.5 text-right">新規</th>
+                            <th scope="col" class="px-4 py-2.5 text-right">上書き</th>
+                            <th scope="col" class="px-4 py-2.5 text-right">エラー</th>
+                            <th scope="col" class="px-4 py-2.5"><span class="sr-only">詳細</span></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-stone-100">
+                        <tr v-for="(result, index) in batchResults" :key="index" data-testid="batch-row">
+                            <td class="px-4 py-2.5 text-stone-900">{{ result.fileName }}</td>
+                            <td class="px-4 py-2.5 text-stone-700">{{ result.import?.source_label ?? "—" }}</td>
+                            <td class="px-4 py-2.5">
+                                <StatusBadge :tone="batchTone(result)" :label="batchLabel(result)" />
+                                <span v-if="result.error" class="ml-2 text-xs text-red-700">{{ result.error }}</span>
+                            </td>
+                            <td class="px-4 py-2.5 text-right text-stone-700 tabular-nums">{{ result.import?.created_line_count ?? "—" }}</td>
+                            <td class="px-4 py-2.5 text-right text-stone-700 tabular-nums">{{ result.import?.updated_line_count ?? "—" }}</td>
+                            <td class="px-4 py-2.5 text-right tabular-nums" :class="(result.import?.error_row_count ?? 0) > 0 ? 'font-semibold text-red-700' : 'text-stone-700'">
+                                {{ result.import?.error_row_count ?? "—" }}
+                            </td>
+                            <td class="px-4 py-2.5 text-right">
+                                <button v-if="result.import" type="button" class="rounded px-2 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-100" @click="showImport(result.import.id)">
+                                    詳細
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <p v-else-if="batchResults.length === 1 && batchResults[0]?.error" class="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{{ batchResults[0].error }}</p>
 
         <section v-if="current" class="flex flex-col gap-4 rounded-lg border border-stone-200 bg-white p-4" aria-label="取込の結果">
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h2 class="text-base font-semibold text-stone-900">{{ current.file_name }}</h2>
+                <span class="rounded bg-stone-100 px-1.5 py-0.5 text-xs font-semibold text-stone-600">{{ current.source_label }}</span>
                 <StatusBadge
                     :tone="current.status === 'failed' ? 'danger' : errorCount > 0 ? 'warning' : 'positive'"
                     :label="current.status === 'failed' ? '取り込めませんでした' : errorCount > 0 ? 'エラーあり' : '取り込みました'"
@@ -188,6 +261,7 @@ const resultCounts = computed(() => {
                         <tr>
                             <th scope="col" class="px-4 py-2.5">取込日時</th>
                             <th scope="col" class="px-4 py-2.5">ファイル</th>
+                            <th scope="col" class="px-4 py-2.5">取込元</th>
                             <th scope="col" class="px-4 py-2.5">結果</th>
                             <th scope="col" class="px-4 py-2.5 text-right">新規</th>
                             <th scope="col" class="px-4 py-2.5 text-right">上書き</th>
@@ -200,6 +274,7 @@ const resultCounts = computed(() => {
                         <tr v-for="item in history.data" :key="item.id" :class="current?.id === item.id ? 'bg-stone-50' : ''">
                             <td class="px-4 py-2.5 whitespace-nowrap text-stone-600 tabular-nums">{{ formatDateTime(item.finished_at) }}</td>
                             <td class="px-4 py-2.5 text-stone-900">{{ item.file_name }}</td>
+                            <td class="px-4 py-2.5 text-stone-700">{{ item.source_label }}</td>
                             <td class="px-4 py-2.5">
                                 <StatusBadge v-if="item.status === 'failed'" tone="danger" label="取り込めませんでした" />
                                 <StatusBadge v-else-if="(item.error_row_count ?? 0) > 0" tone="warning" label="エラーあり" />

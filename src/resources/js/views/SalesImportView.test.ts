@@ -12,6 +12,7 @@ function salesImport(overrides: Partial<SalesImport>): SalesImport {
     return {
         id: 1,
         source: "boss",
+        source_label: "BOSS",
         file_name: "BOSS受注実績.csv",
         status: "succeeded",
         status_label: "成功",
@@ -42,9 +43,9 @@ async function mountView() {
     return wrapper;
 }
 
-async function chooseFileAndSubmit(wrapper: Awaited<ReturnType<typeof mountView>>) {
+async function chooseFileAndSubmit(wrapper: Awaited<ReturnType<typeof mountView>>, names: string[] = ["BOSS受注実績.csv"]) {
     const input = wrapper.find('input[type="file"]');
-    Object.defineProperty(input.element, "files", { value: [new File(["x"], "BOSS受注実績.csv", { type: "text/csv" })], configurable: true });
+    Object.defineProperty(input.element, "files", { value: names.map((name) => new File(["x"], name)), configurable: true });
     await input.trigger("change");
     await wrapper.find("form").trigger("submit");
     await flushPromises();
@@ -125,5 +126,31 @@ describe("SalesImportView", () => {
         expect(fetchSalesImport).toHaveBeenCalledWith(7);
         expect(wrapper.find('[aria-label="取込の結果"]').text()).toContain("8月分.csv");
         expect(wrapper.text()).toContain("エラー・警告はありません。");
+    });
+
+    it("imports several files one by one in file name order and lists each result", async () => {
+        vi.mocked(uploadSalesImport).mockImplementation(async (file: File) => {
+            if (file.name.includes("2025年12月")) {
+                throw new ApiError("入力内容を確認してください。", 422, { file: ["ファイルには30720 KB以下のファイルを指定してください。"] });
+            }
+            return salesImport({ id: file.name.length, source: "amazon", source_label: "Amazon", file_name: file.name, error_row_count: file.name.includes("10月") ? 2 : 0 });
+        });
+        const wrapper = await mountView();
+
+        const input = wrapper.find('input[type="file"]');
+        Object.defineProperty(input.element, "files", { value: ["全注文_2025年12月.txt", "全注文_2025年10月.txt", "全注文_2025年11月.txt"].map((name) => new File(["x"], name)), configurable: true });
+        await input.trigger("change");
+        expect(wrapper.find('button[type="submit"]').text()).toBe("3ファイルを取り込む");
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+
+        expect(vi.mocked(uploadSalesImport).mock.calls.map(([file]) => file.name)).toEqual(["全注文_2025年10月.txt", "全注文_2025年11月.txt", "全注文_2025年12月.txt"]);
+        const rows = wrapper.findAll('[data-testid="batch-row"]').map((row) => row.text());
+        expect(rows[0]).toContain("Amazon");
+        expect(rows[0]).toContain("エラーあり");
+        expect(rows[1]).toContain("取り込みました");
+        expect(rows[2]).toContain("取り込めませんでした");
+        expect(rows[2]).toContain("ファイルには30720 KB以下のファイルを指定してください。");
+        expect(fetchSalesImports).toHaveBeenCalledTimes(2);
     });
 });

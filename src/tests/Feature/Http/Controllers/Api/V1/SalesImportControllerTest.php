@@ -40,6 +40,21 @@ class SalesImportControllerTest extends TestCase
         $this->assertDatabaseHas('sales_lines', ['source_order_id' => '1001']);
     }
 
+    public function test_store_detects_an_amazon_order_report_by_its_columns(): void
+    {
+        $report = "amazon-order-id\tpurchase-date\torder-status\tfulfillment-channel\tsales-channel\tasin\tquantity\titem-price\torder-item-id \r\n"
+            ."503-0000001-0000001\t2026-08-26T14:29:25+09:00\tShipped\tAmazon\tAmazon.co.jp\tB0TEST0001\t1\t4207.0\t10000000000001\r\n";
+        $file = UploadedFile::fake()->createWithContent('Amazon全注文レポート_2026年8月.txt', $report);
+
+        $response = $this->post('/api/v1/sales-imports', ['file' => $file], ['Accept' => 'application/json']);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.source', 'amazon')
+            ->assertJsonPath('data.source_label', 'Amazon')
+            ->assertJsonPath('data.created_line_count', 1);
+        $this->assertDatabaseHas('sales_lines', ['source' => 'amazon', 'mall' => 'amazon', 'warehouse' => 'amazon_fba', 'amount' => 4207]);
+    }
+
     public function test_store_returns_201_with_the_reason_when_the_file_cannot_be_read(): void
     {
         $file = UploadedFile::fake()->createWithContent('orders.csv', "a,b\r\n1,2\r\n");

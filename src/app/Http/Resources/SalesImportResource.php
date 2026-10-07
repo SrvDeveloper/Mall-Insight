@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\Channel;
 use App\Models\SalesImport;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -21,6 +22,7 @@ class SalesImportResource extends JsonResource
         return [
             'id' => $this->id,
             'source' => $this->source,
+            'source_label' => Channel::tryFrom($this->source)?->label() ?? $this->source,
             'file_name' => $this->file_name,
             'status' => $this->status->value,
             'status_label' => $this->status->label(),

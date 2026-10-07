@@ -208,6 +208,42 @@ describe("DemandForecastView", () => {
         expect(baseAverages()).toEqual(["1.00", "0.50"]);
     });
 
+    it("draws only the rows around the visible area and swaps them while scrolling", async () => {
+        const many = [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: Array.from({ length: 300 }, (_, index) => sku(index + 1, `fl-01-${index + 1}`, [channel("boss", 1)])) }];
+        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({}, many));
+        const wrapper = await mountView();
+
+        const rendered = () => wrapper.findAll('[data-testid="sku-row"]').map((row) => row.find("td").text());
+        expect(rendered().length).toBeLessThan(80);
+        expect(rendered()[0]).toBe("fl-01-1");
+
+        const box = wrapper.find('[data-testid="forecast-scroll"]');
+        (box.element as HTMLElement).scrollTop = 37 * 200;
+        await box.trigger("scroll");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await flushPromises();
+
+        expect(rendered()).toContain("fl-01-200");
+        expect(rendered()).not.toContain("fl-01-1");
+        expect(rendered().length).toBeLessThan(80);
+    });
+
+    it("shows a SKU that is not sold on a channel as not sold instead of unpredictable", async () => {
+        const data = [
+            { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1), channel("amazon", 2)]), sku(2, "fl-01-1-15", [channel("boss", 0.5)])] },
+        ];
+        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ channels: bothChannels }, data));
+        const wrapper = await mountView();
+
+        await viewButton(wrapper, "Amazon").trigger("click");
+
+        const row = wrapper.findAll('[data-testid="sku-row"]')[1]!;
+        expect(row.find('[data-testid="base-average"]').text()).toBe("—");
+        expect(row.find('[data-testid="unpredictable-reason"]').text()).toBe("Amazonでは販売していません");
+        expect(wrapper.find('[data-testid="forecast-summary"]').text()).not.toContain("予測不能");
+        expect(wrapper.find('[data-testid="item-row"]').text()).not.toContain("予測不能を除く");
+    });
+
     it("shows each channel's windows and stockout days in a tooltip when hovering over the base average", async () => {
         const data = [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1), channel("amazon", 2)])] }];
         vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ channels: bothChannels }, data));

@@ -187,6 +187,36 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.1.unpredictable_reason_label', 'Amazon：直近180日に販売実績がありません');
     }
 
+    public function test_does_not_forecast_amazon_for_skus_without_a_child_asin(): void
+    {
+        $sku = $this->targetSku('fl-01', 'fl-01-1-10');
+        $sku->update(['child_asin' => null]);
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1);
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1, 'amazon_fba');
+        $this->sell($sku, '2026-10-06', 30);
+
+        $response = $this->getJson('/api/v1/demand-forecasts');
+
+        $response->assertJsonPath('data.0.skus.0.channels.*.channel', ['boss'])
+            ->assertJsonPath('data.0.skus.0.base_average', 0.5)
+            ->assertJsonPath('data.0.skus.0.is_partial', false)
+            ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', null);
+    }
+
+    public function test_does_not_count_today_whose_sales_are_not_final_yet(): void
+    {
+        $sku = $this->targetSku('fl-01', 'fl-01-1-10');
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1);
+        $this->sell($sku, '2026-10-06', 30);
+        $this->sell($sku, '2026-10-07', 99);
+
+        $response = $this->getJson('/api/v1/demand-forecasts');
+
+        $response->assertJsonPath('meta.channels.0.sales_data_to', '2026-10-06')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.to', '2026-10-06')
+            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.sales_quantity', 30);
+    }
+
     public function test_is_unpredictable_with_fewer_than_14_days_of_sales_data(): void
     {
         $sku = $this->targetSku('fl-01', 'fl-01-1-10');

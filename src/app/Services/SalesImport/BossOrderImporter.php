@@ -5,7 +5,6 @@ namespace App\Services\SalesImport;
 use App\Enums\ImportIssueLevel;
 use App\Enums\SyncStatus;
 use App\Models\SalesImport;
-use App\Models\SalesLine;
 use App\Models\Sku;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +22,7 @@ class BossOrderImporter
 {
     public const SOURCE = 'boss';
 
-    public function __construct(private BossOrderCsvParser $parser) {}
+    public function __construct(private BossOrderCsvParser $parser, private SalesLineReplacer $replacer) {}
 
     public function import(string $fileName, string $contents): SalesImport
     {
@@ -128,15 +127,7 @@ class BossOrderImporter
         $allLines = array_merge(...array_values($orders));
         $skuIds = $this->ensureSkus(array_values(array_unique(array_map(fn (BossOrderLine $line): string => $line->skuCode, $allLines))), $createdSkuCount);
 
-        // 取り込み直した注文は、ファイルの明細でまるごと置き換える
-        $orderIds = array_map('strval', array_keys($orders));
-        $existingLineCount = 0;
-        foreach (array_chunk($orderIds, 1000) as $chunk) {
-            $existingLineCount += SalesLine::query()->where('source', self::SOURCE)->whereIn('source_order_id', $chunk)->delete();
-        }
-
         $rows = array_map(fn (BossOrderLine $line): array => [
-            'source' => self::SOURCE,
             'source_order_id' => $line->orderId,
             'sales_date' => $line->salesDate,
             'mall' => $line->mall->value,
@@ -145,19 +136,8 @@ class BossOrderImporter
             'quantity' => $line->quantity,
             'amount' => $line->lineAmount,
         ], $allLines);
-        foreach (array_chunk($rows, 1000) as $chunk) {
-            SalesLine::insert($chunk);
-        }
 
-        $salesDates = array_column($rows, 'sales_date');
-
-        return [
-            'created_line_count' => max(0, count($rows) - $existingLineCount),
-            'updated_line_count' => min($existingLineCount, count($rows)),
-            'created_sku_count' => $createdSkuCount,
-            'sales_date_from' => min($salesDates),
-            'sales_date_to' => max($salesDates),
-        ];
+        return [...$this->replacer->replace(self::SOURCE, array_map('strval', array_keys($orders)), $rows), 'created_sku_count' => $createdSkuCount];
     }
 
     /**

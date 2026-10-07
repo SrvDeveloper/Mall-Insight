@@ -18,6 +18,7 @@ use Illuminate\Support\Collection;
  *
  * 予測はチャネル（BOSS・Amazon）ごとに行い、SKUの予測は予測できたチャネルの合計とする（K-038）。
  * チャネルは販売実績の出荷倉庫で決め、販売実績を取り込んでいないチャネルは予測しない。
+ * 子ASINの無いSKUは Amazon で売っていないものとし、Amazon の予測を出さない（K-042）。
  *
  * 期間はチャネルの販売実績の最新日から重ならずに遡る（直近30日、その前の60日＝31〜90日前、さらに前の90日＝91〜180日前）。
  * そのチャネルの最初の販売日より前の日は数えない。
@@ -41,7 +42,7 @@ class DemandForecaster
         $forecastFrom = $now->startOfDay();
         $items = $this->targetItems($selection);
         $skuIds = $items->flatMap(fn (Item $item) => $item->skus)->pluck('id')->all();
-        $channelRanges = $this->channelSalesRanges();
+        $channelRanges = $this->channelSalesRanges($forecastFrom);
 
         // チャネルごとに、期間・日別の販売数・欠品日を求める。SKUごとに日付の計算を繰り返すと遅いため、
         // 期間ごとの日付（Y-m-d）の一覧を先に1回だけ作って使い回す
@@ -70,18 +71,27 @@ class DemandForecaster
                 'item' => $item,
                 'skus' => $item->skus->map(fn (Sku $sku): SkuForecast => SkuForecast::combine($sku, array_map(
                     fn (array $data): ChannelForecast => $this->forecastChannel($data['channel'], $data['ranges'], $data['window_dates'], $data['daily_sales'][$sku->id] ?? [], $data['stockout_dates'][$sku->id] ?? [], $forecastFrom),
-                    $channelData,
+                    array_values(array_filter($channelData, fn (array $data): bool => $this->sellsOn($sku, $data['channel']))),
                 )))->all(),
             ])->values()->all(),
         );
     }
 
     /**
+     * そのSKUをチャネルで売っているか。子ASINの無いSKUは Amazon で売っていない（K-042）。
+     */
+    private function sellsOn(Sku $sku, Channel $channel): bool
+    {
+        return $channel !== Channel::Amazon || ($sku->child_asin !== null && $sku->child_asin !== '');
+    }
+
+    /**
      * チャネルごとの販売実績の最初と最後の販売日。取り込んでいないチャネルは null。
+     * 予測の開始日（今日）以降の分は1日が終わっておらず販売数が確定しないため、最後の販売日は前日までとする（K-041）。
      *
      * @return list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>
      */
-    private function channelSalesRanges(): array
+    private function channelSalesRanges(CarbonImmutable $forecastFrom): array
     {
         $byWarehouse = SalesLine::query()
             ->selectRaw('warehouse, min(sales_date) as first_date, max(sales_date) as last_date')
@@ -90,13 +100,13 @@ class DemandForecaster
             ->get()
             ->keyBy('warehouse');
 
-        return array_map(function (Channel $channel) use ($byWarehouse): array {
+        return array_map(function (Channel $channel) use ($byWarehouse, $forecastFrom): array {
             $rows = $byWarehouse->only(array_map(fn (Warehouse $warehouse): string => $warehouse->value, $channel->warehouses()));
 
             return [
                 'channel' => $channel,
                 'from' => $rows->isEmpty() ? null : CarbonImmutable::parse($rows->min('first_date'))->startOfDay(),
-                'to' => $rows->isEmpty() ? null : CarbonImmutable::parse($rows->max('last_date'))->startOfDay(),
+                'to' => $rows->isEmpty() ? null : CarbonImmutable::parse($rows->max('last_date'))->startOfDay()->min($forecastFrom->subDay()),
             ];
         }, Channel::cases());
     }

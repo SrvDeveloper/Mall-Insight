@@ -7,6 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSalesImportRequest;
 use App\Http\Resources\SalesImportResource;
 use App\Models\SalesImport;
+use App\Services\SalesImport\AmazonOrderImporter;
+use App\Services\SalesImport\AmazonOrderReportParser;
 use App\Services\SalesImport\BossOrderImporter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -36,12 +38,15 @@ class SalesImportController extends Controller
     }
 
     /**
-     * BOSS受注実績のCSVを取り込む。ファイル全体を取り込めなかった場合も、失敗の記録を 201 で返す。
+     * 販売実績のファイルを取り込む。中身から取込元を判定する（Amazon全注文レポートの列名があれば Amazon、それ以外は BOSS受注実績）。
+     * ファイル全体を取り込めなかった場合も、失敗の記録を 201 で返す。
      */
-    public function store(StoreSalesImportRequest $request, BossOrderImporter $importer): JsonResponse
+    public function store(StoreSalesImportRequest $request, BossOrderImporter $bossImporter, AmazonOrderImporter $amazonImporter): JsonResponse
     {
         $file = $request->file('file');
-        $import = $importer->import($file->getClientOriginalName(), $file->get());
+        $contents = $file->get();
+        $importer = AmazonOrderReportParser::looksLikeReport($contents) ? $amazonImporter : $bossImporter;
+        $import = $importer->import($file->getClientOriginalName(), $contents);
 
         return $this->show($import)->response()->setStatusCode(201);
     }

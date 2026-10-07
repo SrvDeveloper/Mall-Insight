@@ -10,6 +10,7 @@ enum Mall: string
     case Rakuten = 'rakuten';
     case Yahoo = 'yahoo';
     case AuPay = 'au_pay';
+    case Amazon = 'amazon';
 
     public function label(): string
     {
@@ -17,6 +18,7 @@ enum Mall: string
             self::Rakuten => '楽天市場',
             self::Yahoo => 'Yahoo!ショッピング',
             self::AuPay => 'au PAY マーケット',
+            self::Amazon => 'Amazon',
         };
     }
 

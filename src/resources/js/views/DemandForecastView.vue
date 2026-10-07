@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, shallowRef, useTemplateRef, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { fetchDemandForecasts } from "@/api/demandForecasts";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
@@ -11,6 +11,11 @@ import type { AverageWindow, DemandForecastResponse, ItemForecast, MonthlyDemand
  * 基準平均日販にマウスを乗せる（またはフォーカスする）と、使った期間・販売数・販売日数・欠品日数・平均日販・重み（計算の根拠）を
  * ツールチップで確認できる。販売数と販売日数は欠品日を除いた数（K-037）。
  * 予測はチャネル（BOSS・Amazon）ごとに出して合計する（K-038）。表示を「合計」「BOSS」「Amazon」で切り替えられる。
+ *
+ * 表は約4,000マス（100品番なら約1万5千マス）になるため、次のようにして切り替えとスクロールを軽くする。
+ * - 表示ごとの数字（整形済みの文字列）をデータを読み込んだときに一度だけ作り、切り替えでは差し替えるだけにする。
+ * - 見えている行（と前後の少し）だけを描き、スクロールに合わせて入れ替える（行の高さは固定）。
+ * - 列の幅を固定して、ブラウザが全マスから幅を計算し直さなくて済むようにする。
  */
 
 type ForecastView = "total" | "boss" | "amazon";
@@ -21,17 +26,41 @@ interface SkuFigures {
     monthly: MonthlyDemand[] | null;
     reason: string | null;
     isPartial: boolean;
+    /** そのチャネルでは売っていない（子ASINの無いSKUの Amazon、K-042）。予測不能とは区別する */
+    notSold: boolean;
+}
+
+/** 表示用に整形済みのSKUの行。 */
+interface SkuRow {
+    sku: SkuForecast;
+    figures: SkuFigures;
+    baseText: string;
+    monthTexts: string[];
+    yearText: string;
+    /** 予測不能（売っていないチャネルを除く）か、一部予測不能 */
+    needsAttention: boolean;
 }
 
 interface ItemRows {
     item: ItemForecast;
-    rows: { sku: SkuForecast; figures: SkuFigures }[];
+    rows: SkuRow[];
+    monthTotalTexts: string[];
+    yearTotalText: string;
+    hasUnpredictable: boolean;
+}
+
+interface ViewTable {
+    items: ItemRows[];
+    months: MonthlyDemand[];
+    unpredictableCount: number;
+    partialCount: number;
 }
 
 /** 販売実績の最新日からこの日数以上たっていたら、取り込みを促す。 */
 const STALE_SALES_DAYS = 7;
 
-const result = ref<DemandForecastResponse | null>(null);
+// 大きなデータのため、中身を深く監視しない（読み込むたびに丸ごと差し替える）
+const result = shallowRef<DemandForecastResponse | null>(null);
 const isLoading = ref(false);
 const hasError = ref(false);
 const onlyUnpredictable = ref(false);
@@ -43,7 +72,8 @@ const TOOLTIP_GAP_PX = 6;
 const VIEWPORT_MARGIN_PX = 8;
 
 const tooltipElement = useTemplateRef<HTMLElement>("tooltipElement");
-const tooltip = reactive<{ sku: SkuForecast | null; left: number; top: number }>({ sku: null, left: 0, top: 0 });
+// SKUのデータは大きいため、深く監視しない
+const tooltip = shallowReactive<{ sku: SkuForecast | null; left: number; top: number }>({ sku: null, left: 0, top: 0 });
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearTooltipTimer(): void {
@@ -85,7 +115,8 @@ const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo"
 const formatDateTime = (value: string): string => dateTimeFormat.format(new Date(value));
 const formatDate = (value: string): string => value.replaceAll("-", "/");
 const formatAverage = (value: number): string => value.toFixed(2);
-const formatQuantity = (value: number): string => Math.round(value).toLocaleString();
+const quantityFormat = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
+const formatQuantity = (value: number): string => quantityFormat.format(Math.round(value));
 
 async function load(): Promise<void> {
     isLoading.value = true;
@@ -106,29 +137,124 @@ const viewOptions = computed(() => [
     ...(result.value?.meta.channels ?? []).map((channel) => ({ value: channel.channel as ForecastView, label: channel.label, disabled: channel.sales_data_to === null })),
 ]);
 
-function figuresOf(sku: SkuForecast): SkuFigures {
-    if (view.value === "total") {
-        return { baseAverage: sku.base_average, monthly: sku.monthly, reason: sku.unpredictable_reason_label, isPartial: sku.is_partial };
+function figuresOf(sku: SkuForecast, forView: ForecastView = view.value): SkuFigures {
+    if (forView === "total") {
+        return { baseAverage: sku.base_average, monthly: sku.monthly, reason: sku.unpredictable_reason_label, isPartial: sku.is_partial, notSold: false };
     }
-    const channel = sku.channels.find((candidate) => candidate.channel === view.value);
-    return { baseAverage: channel?.base_average ?? null, monthly: channel?.monthly ?? null, reason: channel?.unpredictable_reason_label ?? null, isPartial: false };
+    const channel = sku.channels.find((candidate) => candidate.channel === forView);
+    if (!channel) {
+        const label = result.value?.meta.channels.find((candidate) => candidate.channel === forView)?.label ?? "";
+        return { baseAverage: null, monthly: null, reason: `${label}では販売していません`, isPartial: false, notSold: true };
+    }
+    return { baseAverage: channel.base_average, monthly: channel.monthly, reason: channel.unpredictable_reason_label, isPartial: false, notSold: false };
 }
 
-const itemRows = computed<ItemRows[]>(() => (result.value?.data ?? []).map((item) => ({ item, rows: item.skus.map((sku) => ({ sku, figures: figuresOf(sku) })) })));
+function buildTable(forView: ForecastView): ViewTable {
+    let months: MonthlyDemand[] = [];
+    let unpredictableCount = 0;
+    let partialCount = 0;
+    const items = (result.value?.data ?? []).map((item): ItemRows => {
+        const monthTotals: number[] = [];
+        let yearTotal = 0;
+        const rows = item.skus.map((sku): SkuRow => {
+            const figures = figuresOf(sku, forView);
+            let skuYear = 0;
+            const monthTexts = (figures.monthly ?? []).map((month, index) => {
+                skuYear += month.quantity;
+                monthTotals[index] = (monthTotals[index] ?? 0) + month.quantity;
+                return formatQuantity(month.quantity);
+            });
+            yearTotal += skuYear;
+            if (figures.monthly && months.length === 0) {
+                months = figures.monthly;
+            }
+            const isUnpredictable = !figures.monthly && !figures.notSold;
+            unpredictableCount += isUnpredictable ? 1 : 0;
+            partialCount += figures.isPartial ? 1 : 0;
+            return {
+                sku,
+                figures,
+                baseText: figures.baseAverage !== null ? formatAverage(figures.baseAverage) : figures.notSold ? "—" : "予測不能",
+                monthTexts,
+                yearText: formatQuantity(skuYear),
+                needsAttention: isUnpredictable || figures.isPartial,
+            };
+        });
+        return { item, rows, monthTotalTexts: monthTotals.map(formatQuantity), yearTotalText: formatQuantity(yearTotal), hasUnpredictable: rows.some((row) => row.needsAttention) };
+    });
+    return { items, months, unpredictableCount, partialCount };
+}
+
+/** 合計・チャネルごとの表。データを読み込んだときに一度だけ作り、表示の切り替えでは作り直さない。 */
+const tables = computed<Record<ForecastView, ViewTable>>(() => ({ total: buildTable("total"), boss: buildTable("boss"), amazon: buildTable("amazon") }));
+const table = computed(() => tables.value[view.value]);
 
 /** 予測の12か月（どのSKUも同じ）。予測できたSKUが無いときは空。 */
-const months = computed(() => itemRows.value.flatMap((item) => item.rows).find((row) => row.figures.monthly)?.figures.monthly ?? []);
+const months = computed(() => (tables.value.total.months.length > 0 ? tables.value.total.months : table.value.months));
 
-const skuCount = computed(() => itemRows.value.reduce((count, item) => count + item.rows.length, 0));
-const unpredictableCount = computed(() => itemRows.value.reduce((count, item) => count + item.rows.filter((row) => !row.figures.monthly).length, 0));
-const partialCount = computed(() => itemRows.value.reduce((count, item) => count + item.rows.filter((row) => row.figures.isPartial).length, 0));
+const skuCount = computed(() => table.value.items.reduce((count, item) => count + item.rows.length, 0));
+const unpredictableCount = computed(() => table.value.unpredictableCount);
+const partialCount = computed(() => table.value.partialCount);
 
 const visibleItems = computed<ItemRows[]>(() => {
     if (!onlyUnpredictable.value) {
-        return itemRows.value;
+        return table.value.items;
     }
-    return itemRows.value.map((item) => ({ ...item, rows: item.rows.filter((row) => !row.figures.monthly || row.figures.isPartial) })).filter((item) => item.rows.length > 0);
+    return table.value.items.map((item) => ({ ...item, rows: item.rows.filter((row) => row.needsAttention) })).filter((item) => item.rows.length > 0);
 });
+
+/** 描く行の高さ（px）。見えている行だけを描くため、すべての行を同じ高さにする。 */
+const ROW_HEIGHT = 37;
+/** 見えている範囲の前後に余分に描く行数。速くスクロールしても空白が見えにくいようにする。 */
+const OVERSCAN_ROWS = 15;
+/** 枠の高さが測れないとき（テストなど）の高さ。 */
+const FALLBACK_VIEWPORT_PX = 800;
+
+type FlatRow = { kind: "item"; key: string; group: ItemRows } | { kind: "sku"; key: string; row: SkuRow };
+
+/** 品番の行とSKUの行を1列に並べたもの。 */
+const flatRows = computed<FlatRow[]>(() =>
+    visibleItems.value.flatMap((group): FlatRow[] => [
+        { kind: "item", key: `item-${group.item.item_no}`, group },
+        ...group.rows.map((row): FlatRow => ({ kind: "sku", key: `sku-${row.sku.sku_id}`, row })),
+    ]),
+);
+
+const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
+const scrollTop = ref(0);
+const viewportHeight = ref(FALLBACK_VIEWPORT_PX);
+let scrollFrame = 0;
+
+function measureScrollBox(): void {
+    const element = scrollBox.value;
+    if (element) {
+        scrollTop.value = element.scrollTop;
+        viewportHeight.value = element.clientHeight || FALLBACK_VIEWPORT_PX;
+    }
+}
+
+/** スクロールのたびに描く行を入れ替える。1回の描画につき1回だけ測る。 */
+function onScroll(): void {
+    hideTooltip();
+    if (scrollFrame === 0) {
+        scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            measureScrollBox();
+        });
+    }
+}
+
+watch(scrollBox, () => nextTick(measureScrollBox));
+onBeforeUnmount(() => cancelAnimationFrame(scrollFrame));
+
+const renderRange = computed(() => {
+    const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS);
+    const end = Math.min(flatRows.value.length, start + Math.ceil(viewportHeight.value / ROW_HEIGHT) + OVERSCAN_ROWS * 2);
+    return { start, end };
+});
+const renderedRows = computed(() => flatRows.value.slice(renderRange.value.start, renderRange.value.end));
+const topSpacerHeight = computed(() => renderRange.value.start * ROW_HEIGHT);
+const bottomSpacerHeight = computed(() => (flatRows.value.length - renderRange.value.end) * ROW_HEIGHT);
 
 /** チャネルの販売実績の最新日から、予測の開始日（今日）までの日数。 */
 function salesDataAgeDays(salesDataTo: string): number {
@@ -137,22 +263,6 @@ function salesDataAgeDays(salesDataTo: string): number {
 
 function monthLabel(month: string): string {
     return `${month.slice(2, 4)}/${Number(month.slice(5, 7))}`;
-}
-
-function yearTotal(monthly: MonthlyDemand[] | null): number {
-    return monthly?.reduce((total, month) => total + month.quantity, 0) ?? 0;
-}
-
-function itemMonthTotal(item: ItemRows, index: number): number {
-    return item.rows.reduce((total, row) => total + (row.figures.monthly?.[index]?.quantity ?? 0), 0);
-}
-
-function itemYearTotal(item: ItemRows): number {
-    return item.rows.reduce((total, row) => total + yearTotal(row.figures.monthly), 0);
-}
-
-function hasUnpredictable(item: ItemRows): boolean {
-    return item.rows.some((row) => !row.figures.monthly || row.figures.isPartial);
 }
 
 /** ツールチップに出すチャネル。合計の表示ではすべてのチャネル、チャネルの表示ではそのチャネルだけ。 */
@@ -259,8 +369,14 @@ function windowRange(window: AverageWindow): string {
                 </div>
 
                 <!-- 表は画面の高さに収まる枠の中でスクロールさせ、横スクロールバーが常に見え、列見出しが上に残るようにする -->
-                <div v-else class="max-h-[calc(100dvh-5rem)] overflow-auto" :class="isLoading ? 'opacity-60' : ''" data-testid="forecast-scroll" @scroll="hideTooltip">
-                    <table class="w-full text-left text-sm">
+                <div v-else ref="scrollBox" class="max-h-[calc(100dvh-5rem)] overflow-auto" :class="isLoading ? 'opacity-60' : ''" data-testid="forecast-scroll" @scroll="onScroll">
+                    <table class="w-full min-w-[86rem] table-fixed text-left text-sm">
+                        <colgroup>
+                            <col class="w-60" />
+                            <col class="w-30" />
+                            <col v-for="month in months" :key="month.month" class="w-19" />
+                            <col class="w-24" />
+                        </colgroup>
                         <thead class="text-xs font-semibold text-stone-500 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-stone-50 [&_th]:shadow-[inset_0_-1px_0_var(--color-stone-200)]">
                             <tr>
                                 <th scope="col" class="left-0 z-30! px-3 py-2.5">品番・SKU</th>
@@ -272,47 +388,68 @@ function windowRange(window: AverageWindow): string {
                                 <th scope="col" class="px-3 py-2.5 text-right whitespace-nowrap">12か月計</th>
                             </tr>
                         </thead>
-                        <tbody v-for="{ item, rows } in visibleItems" :key="item.item_no" class="border-b border-stone-200">
-                            <tr class="bg-stone-100/60" data-testid="item-row">
-                                <th scope="rowgroup" class="sticky left-0 z-10 bg-stone-100 px-3 py-2 text-left whitespace-nowrap">
-                                    <span class="font-mono font-semibold text-stone-900">{{ item.item_no }}</span>
-                                    <span class="ml-2 text-xs font-normal text-stone-500">{{ item.brand }}・{{ item.category }}</span>
-                                </th>
-                                <td class="px-3 py-2 text-right text-xs text-stone-500">
-                                    <span v-if="hasUnpredictable({ item, rows })">予測不能を除く</span>
-                                </td>
-                                <td v-for="(month, index) in months" :key="month.month" class="px-2 py-2 text-right font-semibold text-stone-900 tabular-nums">
-                                    {{ formatQuantity(itemMonthTotal({ item, rows }, index)) }}
-                                </td>
-                                <td class="px-3 py-2 text-right font-semibold text-stone-900 tabular-nums">{{ formatQuantity(itemYearTotal({ item, rows })) }}</td>
+                        <tbody>
+                            <!-- 見えていない行の分の高さ。スクロールバーの長さと位置を、全行を描いたときと同じにする -->
+                            <tr v-if="topSpacerHeight > 0" aria-hidden="true" :style="{ height: `${topSpacerHeight}px` }">
+                                <td :colspan="months.length + 3" class="p-0" />
                             </tr>
-                            <tr v-for="{ sku, figures } in rows" :key="sku.sku_id" class="group border-t border-stone-100 hover:bg-stone-50" data-testid="sku-row">
-                                <!-- 横スクロールで下の列が透けないよう、固定した列には不透明な背景を付け、行のハイライトに合わせて色を変える -->
-                                <td class="sticky left-0 z-10 bg-white px-3 py-2 whitespace-nowrap group-hover:bg-stone-50">
-                                    <span class="font-mono text-stone-800">{{ sku.sku_code }}</span>
-                                    <StatusBadge v-if="sku.status === 'inactive'" class="ml-2" tone="neutral" :label="sku.status_label ?? ''" />
-                                </td>
-                                <td class="px-3 py-2 text-right whitespace-nowrap">
-                                    <span
-                                        tabindex="0"
-                                        class="cursor-help underline decoration-stone-300 decoration-dotted underline-offset-4 tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900"
-                                        :class="figures.baseAverage !== null ? 'text-stone-700' : 'font-semibold text-amber-800'"
-                                        :aria-describedby="tooltip.sku === sku ? 'average-tooltip' : undefined"
-                                        data-testid="base-average"
-                                        @mouseenter="showTooltip($event, sku)"
-                                        @mouseleave="hideTooltip"
-                                        @focus="showTooltip($event, sku, 0)"
-                                        @blur="hideTooltip"
+                            <template v-for="entry in renderedRows" :key="entry.key">
+                                <tr v-if="entry.kind === 'item'" class="h-[37px] bg-stone-100 shadow-[inset_0_1px_0_var(--color-stone-200)]" data-testid="item-row">
+                                    <th
+                                        scope="rowgroup"
+                                        class="sticky left-0 z-10 truncate bg-stone-100 px-3 py-2 text-left"
+                                        :title="`${entry.group.item.item_no} ${entry.group.item.brand}・${entry.group.item.category}`"
                                     >
-                                        {{ figures.baseAverage !== null ? formatAverage(figures.baseAverage) : "予測不能" }}
-                                    </span>
-                                    <span v-if="figures.isPartial" class="ml-1 text-[11px] font-semibold text-amber-700" data-testid="partial">一部</span>
-                                </td>
-                                <template v-if="figures.monthly">
-                                    <td v-for="month in figures.monthly" :key="month.month" class="px-2 py-2 text-right text-stone-700 tabular-nums">{{ formatQuantity(month.quantity) }}</td>
-                                    <td class="px-3 py-2 text-right text-stone-700 tabular-nums">{{ formatQuantity(yearTotal(figures.monthly)) }}</td>
-                                </template>
-                                <td v-else :colspan="months.length + 1" class="px-2 py-2 text-amber-800" data-testid="unpredictable-reason">{{ figures.reason }}</td>
+                                        <span class="font-mono font-semibold text-stone-900">{{ entry.group.item.item_no }}</span>
+                                        <span class="ml-2 text-xs font-normal text-stone-500">{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span>
+                                    </th>
+                                    <td class="truncate px-3 py-2 text-right text-xs text-stone-500">
+                                        <span v-if="entry.group.hasUnpredictable">予測不能を除く</span>
+                                    </td>
+                                    <td v-for="(month, index) in months" :key="month.month" class="px-2 py-2 text-right font-semibold text-stone-900 tabular-nums">
+                                        {{ entry.group.monthTotalTexts[index] ?? "0" }}
+                                    </td>
+                                    <td class="px-3 py-2 text-right font-semibold text-stone-900 tabular-nums">{{ entry.group.yearTotalText }}</td>
+                                </tr>
+                                <tr v-else class="group h-[37px] shadow-[inset_0_1px_0_var(--color-stone-100)] hover:bg-stone-50" data-testid="sku-row">
+                                    <!-- 横スクロールで下の列が透けないよう、固定した列には不透明な背景を付け、行のハイライトに合わせて色を変える -->
+                                    <td class="sticky left-0 z-10 truncate bg-white px-3 py-2 group-hover:bg-stone-50" :title="entry.row.sku.sku_code">
+                                        <span class="font-mono text-stone-800">{{ entry.row.sku.sku_code }}</span>
+                                        <StatusBadge v-if="entry.row.sku.status === 'inactive'" class="ml-2" tone="neutral" :label="entry.row.sku.status_label ?? ''" />
+                                    </td>
+                                    <td class="px-3 py-2 text-right whitespace-nowrap">
+                                        <span
+                                            tabindex="0"
+                                            class="cursor-help underline decoration-stone-300 decoration-dotted underline-offset-4 tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900"
+                                            :class="entry.row.figures.baseAverage !== null ? 'text-stone-700' : entry.row.figures.notSold ? 'text-stone-400' : 'font-semibold text-amber-800'"
+                                            :aria-describedby="tooltip.sku?.sku_id === entry.row.sku.sku_id ? 'average-tooltip' : undefined"
+                                            data-testid="base-average"
+                                            @mouseenter="showTooltip($event, entry.row.sku)"
+                                            @mouseleave="hideTooltip"
+                                            @focus="showTooltip($event, entry.row.sku, 0)"
+                                            @blur="hideTooltip"
+                                        >
+                                            {{ entry.row.baseText }}
+                                        </span>
+                                        <span v-if="entry.row.figures.isPartial" class="ml-1 text-[11px] font-semibold text-amber-700" data-testid="partial">一部</span>
+                                    </td>
+                                    <template v-if="entry.row.figures.monthly">
+                                        <td v-for="(text, index) in entry.row.monthTexts" :key="index" class="px-2 py-2 text-right text-stone-700 tabular-nums">{{ text }}</td>
+                                        <td class="px-3 py-2 text-right text-stone-700 tabular-nums">{{ entry.row.yearText }}</td>
+                                    </template>
+                                    <td
+                                        v-else
+                                        :colspan="months.length + 1"
+                                        class="truncate px-2 py-2"
+                                        :class="entry.row.figures.notSold ? 'text-stone-400' : 'text-amber-800'"
+                                        data-testid="unpredictable-reason"
+                                    >
+                                        {{ entry.row.figures.reason }}
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr v-if="bottomSpacerHeight > 0" aria-hidden="true" :style="{ height: `${bottomSpacerHeight}px` }">
+                                <td :colspan="months.length + 3" class="p-0" />
                             </tr>
                         </tbody>
                     </table>
