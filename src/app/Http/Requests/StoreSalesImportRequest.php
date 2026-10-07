@@ -23,7 +23,7 @@ class StoreSalesImportRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'file' => ['required', 'file', 'max:10240', 'extensions:csv'],
+            'file' => ['required', 'file', 'max:30720', 'extensions:csv'],
         ];
     }
 }

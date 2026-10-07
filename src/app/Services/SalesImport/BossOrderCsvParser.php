@@ -32,38 +32,48 @@ class BossOrderCsvParser
      */
     public function parse(string $contents): array
     {
-        $records = $this->readRecords($this->toUtf8($contents));
-        $header = array_map(fn (string $name): string => trim($name), array_shift($records) ?? []);
+        // 1年分（約16MB）でもメモリに収まるよう、1行ずつ読み、必要な列だけを残す
+        $stream = fopen('php://temp/maxmemory:1048576', 'r+');
+        fwrite($stream, $this->toUtf8($contents));
+        rewind($stream);
 
-        $missing = array_values(array_diff(self::REQUIRED_COLUMNS, $header));
-        if ($missing !== []) {
-            throw new SalesImportFileException('必要な列がありません：'.implode('、', $missing).'。BOSS受注実績一覧から出力したCSVか確認してください。');
+        try {
+            $header = array_map(fn (?string $name): string => trim((string) $name), $this->readRecord($stream) ?? []);
+            $missing = array_values(array_diff(self::REQUIRED_COLUMNS, $header));
+            if ($missing !== []) {
+                throw new SalesImportFileException('必要な列がありません：'.implode('、', $missing).'。BOSS受注実績一覧から出力したCSVか確認してください。');
+            }
+
+            $columnIndex = array_flip($header);
+            $lines = [];
+            $issues = [];
+            $rowCount = 0;
+            while (($record = $this->readRecord($stream)) !== null) {
+                $rowCount++;
+                $rowNumber = $rowCount + 1;
+                $values = [];
+                foreach (self::REQUIRED_COLUMNS as $column) {
+                    $values[$column] = trim((string) ($record[$columnIndex[$column]] ?? ''));
+                }
+
+                $error = $this->validate($values);
+                if ($error !== null) {
+                    $issues[] = ['row_number' => $rowNumber, 'source_order_id' => $values['注文ID'] ?: null, 'sku_code' => $values['SKUコード'] ?: null, 'message' => $error];
+
+                    continue;
+                }
+
+                $lines[] = $this->toLine($rowNumber, $values);
+            }
+        } finally {
+            fclose($stream);
         }
-        if ($records === []) {
+
+        if ($rowCount === 0) {
             throw new SalesImportFileException('データの行がありません。');
         }
 
-        $columnIndex = array_flip($header);
-        $lines = [];
-        $issues = [];
-        foreach ($records as $index => $record) {
-            $rowNumber = $index + 2;
-            $values = [];
-            foreach (self::REQUIRED_COLUMNS as $column) {
-                $values[$column] = trim($record[$columnIndex[$column]] ?? '');
-            }
-
-            $error = $this->validate($values);
-            if ($error !== null) {
-                $issues[] = ['row_number' => $rowNumber, 'source_order_id' => $values['注文ID'] ?: null, 'sku_code' => $values['SKUコード'] ?: null, 'message' => $error];
-
-                continue;
-            }
-
-            $lines[] = $this->toLine($rowNumber, $values);
-        }
-
-        return ['lines' => $lines, 'issues' => $issues, 'row_count' => count($records)];
+        return ['lines' => $lines, 'issues' => $issues, 'row_count' => $rowCount];
     }
 
     private function toUtf8(string $contents): string
@@ -83,23 +93,20 @@ class BossOrderCsvParser
     }
 
     /**
-     * @return list<list<string>>
+     * 次の1行を返す。空行は飛ばし、ファイルの終わりなら null。
+     *
+     * @param  resource  $stream
+     * @return list<?string>|null
      */
-    private function readRecords(string $utf8): array
+    private function readRecord($stream): ?array
     {
-        $stream = fopen('php://temp', 'r+');
-        fwrite($stream, $utf8);
-        rewind($stream);
-        $records = [];
         while (($record = fgetcsv($stream, escape: '')) !== false) {
-            if ($record === [null]) {
-                continue;
+            if ($record !== [null]) {
+                return $record;
             }
-            $records[] = array_map(fn (?string $value): string => (string) $value, $record);
         }
-        fclose($stream);
 
-        return $records;
+        return null;
     }
 
     /**
@@ -151,7 +158,7 @@ class BossOrderCsvParser
             rowNumber: $rowNumber,
             orderId: $values['注文ID'],
             mall: Mall::fromBossShopId($values['ショップID']),
-            orderedAt: $this->toDateTime($values['モール注文日時']),
+            salesDate: $this->toDateTime($values['モール注文日時'])->toDateString(),
             itemTotal: (int) $values['商品合計金額'],
             lineId: $values['商品ID'],
             skuCode: $values['SKUコード'],

@@ -138,7 +138,7 @@ class BossOrderImporter
         $rows = array_map(fn (BossOrderLine $line): array => [
             'source' => self::SOURCE,
             'source_order_id' => $line->orderId,
-            'sales_date' => $line->orderedAt->toDateString(),
+            'sales_date' => $line->salesDate,
             'mall' => $line->mall->value,
             'sku_id' => $skuIds[$line->skuCode],
             'warehouse' => $line->warehouse->value,
