@@ -28,7 +28,7 @@ class SkuForecastResource extends JsonResource
             'sku_id' => $this->sku->id,
             'sku_code' => $this->sku->sku_code,
             'status' => $this->sku->status?->value,
-            'status_label' => $this->sku->status?->label(),
+            'status_label' => $this->sku->status?->skuLabel(),
             'base_average' => $this->roundAverage($this->baseAverage),
             'monthly' => $this->monthly($this->monthly),
             'is_partial' => $this->isPartial,

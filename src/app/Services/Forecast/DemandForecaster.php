@@ -2,6 +2,7 @@
 
 namespace App\Services\Forecast;
 
+use App\Enums\ActiveStatus;
 use App\Enums\Channel;
 use App\Enums\Warehouse;
 use App\Models\Inventory;
@@ -10,6 +11,8 @@ use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
 /**
@@ -113,6 +116,7 @@ class DemandForecaster
 
     /**
      * 対象品番（CrossWalker に残っているもの）を、選定の順（売上順位の高い順）で返す。
+     * 無効（廃番）のSKUは今後売らず発注もしないため、予測の対象から外す（K-053）。在庫推移からも外れる。
      *
      * @return Collection<int, Item>
      */
@@ -122,7 +126,11 @@ class DemandForecaster
             return collect();
         }
         $itemNos = $selection->items->pluck('item_no');
-        $items = Item::query()->with('skus')->whereIn('item_no', $itemNos)->get()->keyBy('item_no');
+        $items = Item::query()
+            ->with(['skus' => fn (HasMany $query) => $query->where(fn (Builder $query) => $query->whereNull('status')->orWhere('status', '!=', ActiveStatus::Inactive->value))])
+            ->whereIn('item_no', $itemNos)
+            ->get()
+            ->keyBy('item_no');
 
         return $itemNos->map(fn (string $itemNo) => $items->get($itemNo))->filter()->values();
     }
@@ -332,7 +340,7 @@ class DemandForecaster
     }
 
     /**
-     * 予測の開始日の月から12か月分。初月は開始日から月末までの日数分とする。
+     * 予測の開始日の月から12か月分。初月（今月）も、ほかの月と同じく1か月すべての日数分とする（K-052）。
      *
      * @return list<MonthlyDemand>
      */
@@ -341,8 +349,7 @@ class DemandForecaster
         $months = [];
         for ($index = 0; $index < self::MONTHS; $index++) {
             $month = $forecastFrom->startOfMonth()->addMonthsNoOverflow($index);
-            $days = $index === 0 ? $month->daysInMonth - $forecastFrom->day + 1 : $month->daysInMonth;
-            $months[] = new MonthlyDemand($month, $days, $baseAverage * $days);
+            $months[] = new MonthlyDemand($month, $month->daysInMonth, $baseAverage * $month->daysInMonth);
         }
 
         return $months;

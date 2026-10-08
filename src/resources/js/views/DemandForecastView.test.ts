@@ -9,7 +9,7 @@ vi.mock("@/api/demandForecasts", () => ({ fetchDemandForecasts: vi.fn() }));
 
 const months = Array.from({ length: 12 }, (_, index) => {
     const date = new Date(2026, 9 + index, 1);
-    return { month: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`, days: index === 0 ? 25 : 30 };
+    return { month: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`, days: index === 0 ? 31 : 30 };
 });
 
 function monthly(baseAverage: number): MonthlyDemand[] {
@@ -147,9 +147,11 @@ describe("DemandForecastView", () => {
 
         const wrapper = await mountView();
 
-        const basis = wrapper.find('[data-testid="forecast-basis"]').text();
-        expect(basis).toContain("2026/10/07 10:00");
-        expect(basis).toContain("1品番（2026/10/07 09:00 確定）");
+        expect(wrapper.find('[data-testid="calculated-at"]').text()).toBe("計算日時 2026/10/07 10:00");
+        const selection = wrapper.find('[data-testid="selection"]').text();
+        expect(selection).toContain("1品番・3 SKU");
+        expect(selection).toContain("2026/10/07 09:00 に確定");
+        expect(wrapper.find('[data-testid="sales-range-boss"]').text()).toContain("2026年10月6日まで");
         expect(wrapper.find('[data-testid="sales-range-boss"]').text()).toContain("2025/10/07 〜 2026/10/06");
         expect(wrapper.find('[data-testid="sales-range-amazon"]').text()).toContain("まだ取り込まれていません");
         expect(wrapper.find('[data-testid="stale-sales"]').exists()).toBe(false);
@@ -161,23 +163,29 @@ describe("DemandForecastView", () => {
 
         const wrapper = await mountView();
 
-        const headers = wrapper.findAll("thead th").map((th) => th.text());
-        expect(headers[2]).toBe("26/10 25日分");
+        const headers = wrapper
+            .findAll("thead tr")[1]!
+            .findAll("th")
+            .map((th) => th.text());
+        // 今月も1か月分の需要（K-052）
+        expect(headers[2]).toBe("26/10 今月");
         expect(headers[4]).toBe("26/12");
+        expect(headers.at(-1)).toBe("12か月計");
         const skuRows = wrapper.findAll('[data-testid="sku-row"]');
         const cells = skuRows[0]!.findAll("td").map((td) => td.text());
         expect(cells[1]).toBe("1.75");
-        expect(cells[2]).toBe("44");
+        expect(cells[2]).toBe("54");
         expect(cells[3]).toBe("53");
         const itemCells = wrapper
             .find('[data-testid="item-row"]')
             .findAll("td")
             .map((td) => td.text());
         expect(itemCells[0]).toBe("予測不能を除く");
-        expect(itemCells[1]).toBe("56");
+        expect(itemCells[1]).toBe("70");
         expect(skuRows[2]!.text()).toContain("予測不能");
         expect(skuRows[2]!.find('[data-testid="unpredictable-reason"]').text()).toBe(`BOSS：${NO_SALES}`);
-        expect(wrapper.find('[data-testid="forecast-summary"]').text()).toContain("予測不能 1件");
+        expect(wrapper.find('[data-testid="item-unpredictable"]').text()).toBe("予測不能 1/3");
+        expect(wrapper.find('[data-testid="filter-unpredictable"]').text()).toBe("予測不能 1");
     });
 
     it("switches between the total and each channel and marks partly unpredictable SKUs", async () => {
@@ -195,7 +203,7 @@ describe("DemandForecastView", () => {
         const baseAverages = () => wrapper.findAll('[data-testid="base-average"]').map((cell) => cell.text());
         expect(baseAverages()).toEqual(["3.00", "0.50"]);
         expect(wrapper.findAll('[data-testid="sku-row"]')[1]!.find('[data-testid="partial"]').exists()).toBe(true);
-        expect(wrapper.find('[data-testid="forecast-summary"]').text()).toContain("一部予測不能 1件");
+        expect(wrapper.find('[data-testid="filter-partial"]').text()).toBe("一部予測不能 1");
 
         await viewButton(wrapper, "Amazon").trigger("click");
 
@@ -218,7 +226,7 @@ describe("DemandForecastView", () => {
         expect(rendered()[0]).toBe("fl-01-1");
 
         const box = wrapper.find('[data-testid="forecast-scroll"]');
-        (box.element as HTMLElement).scrollTop = 37 * 200;
+        (box.element as HTMLElement).scrollTop = 40 * 200;
         await box.trigger("scroll");
         await new Promise((resolve) => setTimeout(resolve, 50));
         await flushPromises();
@@ -240,37 +248,40 @@ describe("DemandForecastView", () => {
         const row = wrapper.findAll('[data-testid="sku-row"]')[1]!;
         expect(row.find('[data-testid="base-average"]').text()).toBe("—");
         expect(row.find('[data-testid="unpredictable-reason"]').text()).toBe("Amazonでは販売していません");
-        expect(wrapper.find('[data-testid="forecast-summary"]').text()).not.toContain("予測不能");
+        expect(wrapper.find('[data-testid="filter-unpredictable"]').text()).toBe("予測不能 0");
+        expect(wrapper.find('[data-testid="item-unpredictable"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="item-row"]').text()).not.toContain("予測不能を除く");
     });
 
-    it("shows each channel's windows and stockout days in a tooltip when hovering over the base average", async () => {
+    it("shows each channel's windows and stockout days in a compact tooltip when hovering over the base average cell", async () => {
         const data = [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1), channel("amazon", 2)])] }];
         vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ channels: bothChannels }, data));
         const wrapper = await mountView();
         vi.useFakeTimers();
 
         try {
-            const average = wrapper.find('[data-testid="base-average"]');
+            const average = wrapper.find('[data-testid="base-average-td"]');
             await average.trigger("mouseenter");
             expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
             await vi.advanceTimersByTimeAsync(200);
 
             const tooltip = wrapper.find('[role="tooltip"]');
-            expect(tooltip.text()).toContain("fl-01-1-10 の基準平均日販 3.00");
+            expect(tooltip.classes()).toContain("w-72");
+            expect(tooltip.text()).toContain("fl-01-1-10");
+            expect(tooltip.text()).toContain("基準平均日販 3.00");
             expect(tooltip.find('[data-testid="tooltip-boss"]').text()).toContain("BOSS 1.00");
             expect(tooltip.find('[data-testid="tooltip-amazon"]').text()).toContain("Amazon 2.00");
-            const row = tooltip.find('[data-testid="tooltip-boss"]').findAll("tbody tr")[1]!;
+            const row = tooltip.find('[data-testid="tooltip-boss"]').findAll('[data-testid="tooltip-window"]')[1]!;
             expect(row.text()).toContain("31〜90日前");
-            expect(row.text()).toContain("2026/07/09 〜 2026/09/06");
-            expect(row.findAll("td")[4]!.text()).toBe("3");
+            expect(row.text()).toContain("7/9〜9/6");
+            expect(row.text()).toContain("欠品3日");
             expect(average.attributes("aria-describedby")).toBe("average-tooltip");
 
             await average.trigger("mouseleave");
             expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
 
             await viewButton(wrapper, "Amazon").trigger("click");
-            await wrapper.find('[data-testid="base-average"]').trigger("mouseenter");
+            await wrapper.find('[data-testid="base-average-td"]').trigger("mouseenter");
             await vi.advanceTimersByTimeAsync(200);
             expect(wrapper.find('[data-testid="tooltip-boss"]').exists()).toBe(false);
             expect(wrapper.find('[data-testid="tooltip-amazon"]').exists()).toBe(true);
@@ -283,9 +294,8 @@ describe("DemandForecastView", () => {
         vi.mocked(fetchDemandForecasts).mockResolvedValue(response());
         const wrapper = await mountView();
 
-        const average = wrapper.findAll('[data-testid="base-average"]')[2]!;
-        expect(average.text()).toBe("予測不能");
-        await average.trigger("focus");
+        expect(wrapper.findAll('[data-testid="base-average"]')[2]!.text()).toBe("予測不能");
+        await wrapper.findAll('[data-testid="base-average-td"]')[2]!.trigger("focus");
         await flushPromises();
         await new Promise((resolve) => setTimeout(resolve, 0));
         await flushPromises();
@@ -293,13 +303,18 @@ describe("DemandForecastView", () => {
         expect(wrapper.find('[role="tooltip"]').text()).toContain(NO_SALES);
     });
 
-    it("can show only SKUs that are wholly or partly unpredictable", async () => {
+    it("filters to unpredictable SKUs and by keyword", async () => {
         vi.mocked(fetchDemandForecasts).mockResolvedValue(response());
         const wrapper = await mountView();
 
-        await wrapper.find('input[type="checkbox"]').setValue(true);
+        await wrapper.find('[data-testid="filter-unpredictable"]').trigger("click");
 
         expect(wrapper.findAll('[data-testid="sku-row"]').map((row) => row.text())).toEqual([expect.stringContaining("fl-01-1-20")]);
+
+        await wrapper.find('[data-testid="filter-all"]').trigger("click");
+        await wrapper.find('input[type="search"]').setValue("1-15");
+
+        expect(wrapper.findAll('[data-testid="sku-row"]').map((row) => row.find("td").text())).toEqual(["fl-01-1-15"]);
     });
 
     it("warns when a channel's latest sales data is a week old", async () => {

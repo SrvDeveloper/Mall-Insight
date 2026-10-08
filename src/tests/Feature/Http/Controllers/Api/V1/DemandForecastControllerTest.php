@@ -66,7 +66,8 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.base_average', 1.5)
             ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', null)
             ->assertJsonCount(12, 'data.0.skus.0.monthly')
-            ->assertJsonPath('data.0.skus.0.monthly.0', ['month' => '2026-10', 'days' => 25, 'quantity' => 37.5])
+            // 今月（10月）も1か月分（31日）
+            ->assertJsonPath('data.0.skus.0.monthly.0', ['month' => '2026-10', 'days' => 31, 'quantity' => 46.5])
             ->assertJsonPath('data.0.skus.0.monthly.1', ['month' => '2026-11', 'days' => 30, 'quantity' => 45])
             ->assertJsonPath('data.0.skus.0.monthly.11', ['month' => '2027-09', 'days' => 30, 'quantity' => 45]);
     }
@@ -182,7 +183,8 @@ class DemandForecastControllerTest extends TestCase
             // Amazon は 54÷25×0.5 + 0 + 0。合計は 0.5 + 1.08
             ->assertJsonPath('data.0.skus.0.channels.1.base_average', 1.08)
             ->assertJsonPath('data.0.skus.0.base_average', 1.58)
-            ->assertJsonPath('data.0.skus.0.monthly.0.quantity', 39.5)
+            // 今月（10月）は1か月分：1.58 × 31日
+            ->assertJsonPath('data.0.skus.0.monthly.0.quantity', 48.98)
             ->assertJsonPath('data.0.skus.0.is_partial', false)
             // Amazon で売れていない SKU は、BOSS の予測だけを合計に入れ、一部予測不能とする
             ->assertJsonPath('data.0.skus.1.base_average', 0.25)
@@ -205,6 +207,19 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.base_average', 0.5)
             ->assertJsonPath('data.0.skus.0.is_partial', false)
             ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', null);
+    }
+
+    public function test_leaves_out_discontinued_skus_from_the_forecast_and_the_inventory_trend(): void
+    {
+        $sku = $this->targetSku('fl-01', 'fl-01-1-10');
+        $discontinued = Sku::factory()->create(['item_id' => $sku->item_id, 'sku_code' => 'fl-01-1-15', 'position' => 1, 'status' => 'inactive']);
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1);
+        $this->sell($sku, '2026-10-06', 30);
+        $this->sell($discontinued, '2026-10-06', 30);
+        Inventory::create(['stock_date' => '2026-10-06', 'sku_id' => $discontinued->id, 'warehouse' => 'boss_own', 'quantity' => 0]);
+
+        $this->getJson('/api/v1/demand-forecasts')->assertJsonPath('data.0.skus.*.sku_code', ['fl-01-1-10']);
+        $this->getJson('/api/v1/inventory-trends')->assertJsonPath('data.0.skus.*.sku_code', ['fl-01-1-10']);
     }
 
     public function test_does_not_count_today_whose_sales_are_not_final_yet(): void

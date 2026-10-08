@@ -13,7 +13,7 @@ use Carbon\CarbonImmutable;
  * 12か月在庫推移の計算（バックログ B-008）。結果は保存せず、開くたびに最新の在庫・需要予測・入荷予定から計算する（原則5）。
  *
  * - 月初在庫は、最新の在庫基準日の6区分の合計（K-028）。以降は前月の月末在庫。
- * - 需要は需要予測（チャネルの合計、K-038）。今月は今日から月末までの日数分。
+ * - 需要は需要予測（チャネルの合計、K-038）。需要予測の今月は1か月分のため、今日から月末までの日数分に按分する（K-044・K-052）。
  * - 入荷は入荷済みでない入荷予定（K-043）。未割り振りの分は、その品番のSKUの基準平均日販の比率で仮に割り振る。
  *   入荷予定月を過ぎた入荷予定は、今月の入荷として数える。
  * - 月末在庫＝MAX(0, 月初在庫＋入荷－需要)、未充足需要＝MAX(0, 需要－月初在庫－入荷)（K-026）。
@@ -35,6 +35,8 @@ class InventoryTrendCalculator
         $stockDate = $this->latestStockDate();
         $stocks = $stockDate === null ? [] : $this->stocks($skuIds, $stockDate);
         [$inbound, $provisional, $unassignable, $overdueCount] = $this->inbound($forecast->items, $currentMonth);
+        // 今月は今日（予測の開始日）から月末までの日数分だけ数える
+        $remainingDays = $currentMonth->daysInMonth - $forecast->forecastFrom->day + 1;
 
         return new InventoryTrend(
             calculatedAt: $now,
@@ -43,7 +45,7 @@ class InventoryTrendCalculator
             settings: $settings,
             items: array_map(fn (array $entry): array => [
                 'item' => $entry['item'],
-                'skus' => array_map(fn (SkuForecast $sku): SkuTrend => $this->trend($sku, $stocks[$sku->sku->id] ?? null, $inbound[$sku->sku->id] ?? [], $provisional[$sku->sku->id] ?? [], $settings), $entry['skus']),
+                'skus' => array_map(fn (SkuForecast $sku): SkuTrend => $this->trend($sku, $stocks[$sku->sku->id] ?? null, $inbound[$sku->sku->id] ?? [], $provisional[$sku->sku->id] ?? [], $settings, $remainingDays), $entry['skus']),
                 'unassignableInbound' => $unassignable[$entry['item']->item_no] ?? 0,
             ], $forecast->items),
             overdueInboundCount: $overdueCount,
@@ -146,8 +148,9 @@ class InventoryTrendCalculator
      * @param  array<string, int>|null  $stock
      * @param  array<int, float>  $inbound  [月の位置 => 入荷数]
      * @param  array<int, float>  $provisional  [月の位置 => 仮の入荷数]
+     * @param  int  $remainingDays  今月の、今日から月末までの日数
      */
-    private function trend(SkuForecast $forecast, ?array $stock, array $inbound, array $provisional, TrendSettings $settings): SkuTrend
+    private function trend(SkuForecast $forecast, ?array $stock, array $inbound, array $provisional, TrendSettings $settings, int $remainingDays): SkuTrend
     {
         if ($stock === null) {
             return new SkuTrend($forecast->sku, $forecast, TrendStatus::NoStock, null);
@@ -160,10 +163,11 @@ class InventoryTrendCalculator
         $months = [];
         $level = $openingStock;
         foreach ($forecast->monthly as $index => $month) {
+            [$days, $demand] = $index === 0 ? [$remainingDays, $month->quantity * $remainingDays / $month->days] : [$month->days, $month->quantity];
             $arriving = ($inbound[$index] ?? 0) + ($provisional[$index] ?? 0);
-            $ending = max(0.0, $level + $arriving - $month->quantity);
-            $shortfall = max(0.0, $month->quantity - $level - $arriving);
-            $months[] = new MonthTrend($month->month, $month->days, $level, $month->quantity, $inbound[$index] ?? 0.0, $provisional[$index] ?? 0.0, $ending, $shortfall);
+            $ending = max(0.0, $level + $arriving - $demand);
+            $shortfall = max(0.0, $demand - $level - $arriving);
+            $months[] = new MonthTrend($month->month, $days, $level, $demand, $inbound[$index] ?? 0.0, $provisional[$index] ?? 0.0, $ending, $shortfall);
             $level = $ending;
         }
         $checkMonth = $months[min($settings->checkMonthOffset, count($months) - 1)];

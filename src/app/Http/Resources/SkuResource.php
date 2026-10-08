@@ -23,7 +23,7 @@ class SkuResource extends JsonResource
             'sku_code' => $this->sku_code,
             'child_asin' => $this->child_asin,
             'status' => $this->status?->value,
-            'status_label' => $this->status?->label(),
+            'status_label' => $this->status?->skuLabel(),
             'tq_item_no' => $this->tq_item_no,
             'tq_color_no' => $this->tq_color_no,
             'tq_size' => $this->tq_size,

@@ -25,7 +25,7 @@ const item: Item = {
     crosswalker_updated_at: "2026-09-08T07:08:16+00:00",
     skus: [
         { id: 10, sku_code: "fisi-05-1-10", child_asin: "B09EXAMPLE1", status: "active", status_label: "有効", tq_item_no: "FISI05", tq_color_no: "1", tq_size: "10" },
-        { id: 11, sku_code: "fisi-05-1-15", child_asin: null, status: "inactive", status_label: "無効", tq_item_no: "FISI05", tq_color_no: "1", tq_size: "15" },
+        { id: 11, sku_code: "fisi-05-1-15", child_asin: null, status: "inactive", status_label: "廃番", tq_item_no: "FISI05", tq_color_no: "1", tq_size: "15" },
     ],
 };
 
@@ -88,7 +88,7 @@ describe("ItemListView", () => {
         const skuTable = wrapper.find("#skus-1");
         expect(skuTable.text()).toContain("fisi-05-1-10");
         expect(skuTable.text()).toContain("fisi-05-1-15");
-        expect(skuTable.text()).toContain("無効");
+        expect(skuTable.text()).toContain("廃番");
     });
 
     it("passes the URL query to the API and updates it when filtering by status", async () => {
