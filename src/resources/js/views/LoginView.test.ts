@@ -69,6 +69,18 @@ describe("LoginView", () => {
         expect(router.currentRoute.value.name).toBe("login");
     });
 
+    it("shows and hides the password", async () => {
+        const { wrapper } = await mountView("/login");
+        const input = () => wrapper.find('[data-testid="login-password"]');
+
+        expect(input().attributes("type")).toBe("password");
+        await wrapper.find('[data-testid="toggle-password"]').trigger("click");
+        expect(input().attributes("type")).toBe("text");
+        expect(wrapper.find('[data-testid="toggle-password"]').attributes("aria-label")).toBe("パスワードを隠す");
+        await wrapper.find('[data-testid="toggle-password"]').trigger("click");
+        expect(input().attributes("type")).toBe("password");
+    });
+
     it("tells that the login expired", async () => {
         const auth = useAuthStore();
         auth.user = USER;
