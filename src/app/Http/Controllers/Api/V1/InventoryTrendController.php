@@ -40,9 +40,7 @@ class InventoryTrendController extends Controller
                     'confirmed_at' => $forecast->selection->confirmed_at->toIso8601String(),
                     'item_count' => $forecast->selection->items->count(),
                 ],
-                'settings' => [
-                    'check_month_offset' => $settings->checkMonthOffset,
-                ],
+                'settings' => $settings->toArray(),
                 'check_month' => $forecast->forecastFrom->startOfMonth()->addMonthsNoOverflow($settings->checkMonthOffset)->format('Y-m'),
                 'overdue_inbound_count' => $trend->overdueInboundCount,
             ],

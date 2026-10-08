@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import InventoryTrendView from "@/views/InventoryTrendView.vue";
-import { fetchInventoryTrends } from "@/api/inventoryTrends";
+import { fetchInventoryTrends, saveInventoryTrendSettings } from "@/api/inventoryTrends";
+import { ApiError } from "@/api/client";
 import type { InventoryTrendResponse, MonthTrend, SkuTrend } from "@/types/api";
 
-vi.mock("@/api/inventoryTrends", () => ({ fetchInventoryTrends: vi.fn() }));
+vi.mock("@/api/inventoryTrends", () => ({ fetchInventoryTrends: vi.fn(), saveInventoryTrendSettings: vi.fn() }));
 
 const MONTHS = ["2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06", "2027-07", "2027-08", "2027-09"];
 
@@ -73,7 +74,7 @@ function response(overrides: Partial<InventoryTrendResponse["meta"]> = {}): Inve
                 { channel: "amazon", label: "Amazon", sales_data_to: "2026-10-06" },
             ],
             selection: { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1 },
-            settings: { check_month_offset: 6 },
+            settings: { check_month_offset: 6, changed_at: null },
             check_month: "2027-04",
             overdue_inbound_count: 0,
             ...overrides,
@@ -102,9 +103,48 @@ describe("InventoryTrendView", () => {
         expect(wrapper.find('[data-testid="fact-forecast"]').text()).toContain("BOSS・Amazon");
         expect(wrapper.find('[data-testid="fact-forecast"]').text()).toContain("BOSS 10/6・Amazon 10/6 まで");
         expect(wrapper.find('[data-testid="fact-check"]').text()).toContain("2027年4月");
+        expect(wrapper.find('[data-testid="check-month-note"]').text()).toBe("6か月後・初期値");
         expect(wrapper.find('[data-testid="fact-selection"]').text()).toContain("1品番・3 SKU");
         expect(wrapper.find('[data-testid="fact-warning"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="calculated-at"]').text()).toContain("2026/10/07 10:00");
+    });
+
+    it("changes the check month from the screen and recalculates", async () => {
+        vi.mocked(saveInventoryTrendSettings).mockResolvedValue({ check_month_offset: 3, changed_at: "2026-10-08T10:00:00+09:00" });
+        const { wrapper } = await mountView();
+        vi.mocked(fetchInventoryTrends).mockResolvedValue(response({ settings: { check_month_offset: 3, changed_at: "2026-10-08T10:00:00+09:00" }, check_month: "2027-01" }));
+
+        await wrapper.find('[data-testid="check-month-edit"]').trigger("click");
+        const select = wrapper.find('[data-testid="check-month-select"]');
+        const options = select.findAll("option");
+        expect(options).toHaveLength(11);
+        expect(options[0]!.text()).toBe("1か月後（2026年11月）");
+        expect(options[10]!.text()).toBe("11か月後（2027年9月）");
+        expect((select.element as HTMLSelectElement).value).toBe("6");
+
+        await select.setValue("3");
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+
+        expect(saveInventoryTrendSettings).toHaveBeenCalledWith(3);
+        expect(fetchInventoryTrends).toHaveBeenCalledTimes(2);
+        expect(wrapper.find('[data-testid="check-month-select"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="fact-check"]').text()).toContain("2027年1月");
+        expect(wrapper.find('[data-testid="check-month-note"]').text()).toBe("3か月後・10/8 10:00 に変更");
+        expect(wrapper.findAll("thead tr")[1]!.findAll("th")[5]!.text()).toBe("27/1 判定");
+    });
+
+    it("keeps the form open with the reason when the check month cannot be saved", async () => {
+        vi.mocked(saveInventoryTrendSettings).mockRejectedValue(new ApiError("入力内容に誤りがあります。", 422, { check_month_offset: ["判定する月には、1から11までの数値を指定してください。"] }));
+        const { wrapper } = await mountView();
+
+        await wrapper.find('[data-testid="check-month-edit"]').trigger("click");
+        await wrapper.find('[data-testid="check-month-select"]').setValue("2");
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="check-month-error"]').text()).toBe("判定する月には、1から11までの数値を指定してください。");
+        expect(fetchInventoryTrends).toHaveBeenCalledTimes(1);
     });
 
     it("warns about old stock and overdue inbound plans", async () => {

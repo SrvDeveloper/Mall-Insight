@@ -2,10 +2,11 @@
 import { computed, onMounted, ref, shallowRef } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { fetchInventoryTrends } from "@/api/inventoryTrends";
+import CheckMonthSetting from "@/components/inventoryTrend/CheckMonthSetting.vue";
 import TrendGraph from "@/components/inventoryTrend/TrendGraph.vue";
 import TrendTable from "@/components/inventoryTrend/TrendTable.vue";
 import TrendTimeline from "@/components/inventoryTrend/TrendTimeline.vue";
-import { COVER_COLORS, COVER_LEGEND, buildItemRows, longMonthLabel, type ItemRows } from "@/components/inventoryTrend/trendRows";
+import { COVER_COLORS, COVER_LEGEND, buildItemRows, type ItemRows } from "@/components/inventoryTrend/trendRows";
 import type { InventoryTrendResponse, SkuTrend } from "@/types/api";
 
 /**
@@ -13,6 +14,8 @@ import type { InventoryTrendResponse, SkuTrend } from "@/types/api";
  * 入荷予定（K-043）を足して、月ごとの月末在庫と足りない数を表示する。判定する月（6か月後）の欠品（K-005）は、
  * 警告の列を設けず、色と絞り込みで示す。過剰在庫は判定せず（K-046）、推奨発注数も出さない（K-045）。
  * 結果は保存せず、開くたびに最新のデータで計算する（原則5）。
+ *
+ * 判定する月は画面から変えられ（B-011、K-050）、変えたら計算し直す。
  *
  * 見せ方は「表」「タイムライン」「グラフ」をタブで切り替える（K-047）。選んだ見せ方は URL に持たせ、再読み込みしても変わらない。
  * 表示用のデータはデータを読み込んだときに一度だけ作り、切り替えや絞り込みでは作り直さない。
@@ -145,7 +148,8 @@ const facts = computed(() => {
             note: channels.length > 0 ? `販売実績は ${channels.map((channel) => `${channel.label} ${shortDate(channel.sales_data_to!)}`).join("・")} まで` : "販売実績を取り込んでください",
             warn: channels.length === 0,
         },
-        { key: "check", label: "判定する月", value: longMonthLabel(meta.check_month), note: `${meta.settings.check_month_offset}か月後`, warn: false },
+        // 判定する月は CheckMonthSetting で表示・変更する（B-011）
+        { key: "check", label: "判定する月", value: "", note: "", warn: false },
         {
             key: "selection",
             label: "対象品番",
@@ -198,9 +202,18 @@ const facts = computed(() => {
                     :class="index > 0 ? 'border-stone-200 max-lg:odd:border-t max-lg:even:border-l lg:border-l' : ''"
                     :data-testid="`fact-${fact.key}`"
                 >
-                    <span class="text-[11px] tracking-wide text-stone-500">{{ fact.label }}</span>
-                    <span class="text-base font-semibold text-stone-900 tabular-nums">{{ fact.value }}</span>
-                    <span class="text-xs" :class="fact.warn ? 'font-medium text-amber-700' : 'text-stone-400'" :data-testid="fact.warn ? 'fact-warning' : undefined">{{ fact.note }}</span>
+                    <CheckMonthSetting
+                        v-if="fact.key === 'check'"
+                        :settings="result.meta.settings"
+                        :check-month="result.meta.check_month"
+                        :current-month="result.meta.forecast_from.slice(0, 7)"
+                        @saved="load"
+                    />
+                    <template v-else>
+                        <span class="text-[11px] tracking-wide text-stone-500">{{ fact.label }}</span>
+                        <span class="text-base font-semibold text-stone-900 tabular-nums">{{ fact.value }}</span>
+                        <span class="text-xs" :class="fact.warn ? 'font-medium text-amber-700' : 'text-stone-400'" :data-testid="fact.warn ? 'fact-warning' : undefined">{{ fact.note }}</span>
+                    </template>
                 </div>
             </section>
 

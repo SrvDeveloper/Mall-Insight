@@ -325,6 +325,12 @@ export interface ItemTrend {
     skus: SkuTrend[];
 }
 
+/** 在庫推移の判定の基準（B-011）。changed_at は画面で変更した日時で、初期値のままなら null。 */
+export interface InventoryTrendSettings {
+    check_month_offset: number;
+    changed_at: string | null;
+}
+
 export interface InventoryTrendResponse {
     data: ItemTrend[];
     meta: {
@@ -333,7 +339,7 @@ export interface InventoryTrendResponse {
         forecast_from: string;
         sales_channels: { channel: "boss" | "amazon"; label: string; sales_data_to: string | null }[];
         selection: { confirmed_at: string; item_count: number } | null;
-        settings: { check_month_offset: number };
+        settings: InventoryTrendSettings;
         /** 判定する月（YYYY-MM） */
         check_month: string;
         overdue_inbound_count: number;

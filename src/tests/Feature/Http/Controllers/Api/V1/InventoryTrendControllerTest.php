@@ -4,6 +4,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Models\InboundPlan;
 use App\Models\Inventory;
+use App\Models\InventoryTrendSetting;
 use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\SalesLine;
@@ -84,7 +85,7 @@ class InventoryTrendControllerTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('meta.stock_date', '2026-10-07')
             ->assertJsonPath('meta.check_month', '2027-04')
-            ->assertJsonPath('meta.settings', ['check_month_offset' => 6])
+            ->assertJsonPath('meta.settings', ['check_month_offset' => 6, 'changed_at' => null])
             ->assertJsonPath('data.0.skus.0.status', 'calculated')
             ->assertJsonPath('data.0.skus.0.opening_stock', 100)
             ->assertJsonPath('data.0.skus.0.stock_by_warehouse.1', ['warehouse' => 'amazon_fba', 'label' => 'Amazon FBA', 'quantity' => 50])
@@ -182,5 +183,23 @@ class InventoryTrendControllerTest extends TestCase
         $this->plan('2026-11', 30);
 
         $this->getJson('/api/v1/inventory-trends')->assertJsonPath('data.0.unassignable_inbound', 30);
+    }
+
+    public function test_judges_shortages_in_the_month_set_on_the_screen(): void
+    {
+        // 1月から足りなくなる SKU（1つ目のテストと同じ）
+        $sku = $this->sku('fl-01-1-10', 1.0);
+        $this->stock($sku, ['boss_own' => 100]);
+        InventoryTrendSetting::create(['check_month_offset' => 6]);
+        $this->travel(1)->minutes();
+        InventoryTrendSetting::create(['check_month_offset' => 2]);
+
+        $this->getJson('/api/v1/inventory-trends')
+            ->assertOk()
+            ->assertJsonPath('meta.settings', ['check_month_offset' => 2, 'changed_at' => '2026-10-07T09:01:00+09:00'])
+            ->assertJsonPath('meta.check_month', '2026-12')
+            ->assertJsonPath('data.0.skus.0.warning', 'none')
+            // 欠品する月は判定する月によらない
+            ->assertJsonPath('data.0.skus.0.first_shortage_month', '2027-01');
     }
 }
