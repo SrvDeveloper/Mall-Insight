@@ -157,6 +157,18 @@ describe("InventoryTrendView", () => {
         expect(wrapper.findAll('[data-testid="sku-row"]')[2]!.find('[data-testid="status"]').text()).toBe("在庫の記録が無いため、在庫推移を計算できません");
     });
 
+    it("tells that inbound plans could not be allocated in every view", async () => {
+        vi.mocked(fetchInventoryTrends).mockResolvedValue({ ...response(), data: [{ ...response().data[0]!, unassignable_inbound: 200 }] });
+
+        for (const view of ["table", "timeline", "graph"]) {
+            const { wrapper } = await mountView(`/inventory-trends?view=${view}`);
+
+            const notice = wrapper.find('[data-testid="unassignable-inbound"]');
+            expect(notice.text(), view).toBe("入荷を割り振れません");
+            wrapper.unmount();
+        }
+    });
+
     it("shows the month's breakdown in a tooltip when hovering over the cell", async () => {
         const { wrapper } = await mountView();
         vi.useFakeTimers();

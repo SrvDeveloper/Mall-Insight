@@ -78,6 +78,14 @@ function columnTint(index: number): string {
                     <div class="sticky left-0 z-10 flex h-full items-center gap-2 truncate bg-stone-50 px-5">
                         <span class="font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>
                         <span class="truncate rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span>
+                        <span
+                            v-if="entry.group.item.unassignable_inbound > 0"
+                            class="min-w-0 truncate text-[11px] text-amber-700"
+                            :title="`需要予測の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
+                            data-testid="unassignable-inbound"
+                        >
+                            入荷を割り振れません
+                        </span>
                     </div>
                     <div v-for="(inbound, index) in entry.group.monthInbounds" :key="index" class="flex h-full items-center justify-center px-0.5" :class="columnTint(index)">
                         <span

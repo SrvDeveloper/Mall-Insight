@@ -108,6 +108,7 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                                     v-if="entry.group.item.unassignable_inbound > 0"
                                     class="min-w-0 truncate text-[11px] text-amber-700"
                                     :title="`需要予測の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
+                                    data-testid="unassignable-inbound"
                                 >
                                     入荷を割り振れません
                                 </span>

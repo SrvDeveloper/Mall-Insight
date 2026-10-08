@@ -43,7 +43,7 @@ const checkPosition = computed(() => `${((props.checkMonthIndex + 1) / Math.max(
                         {{ monthLabel(months[index]!.month) }} {{ inbound.text }}
                     </span>
                 </template>
-                <span v-if="group.item.unassignable_inbound > 0" class="text-xs text-amber-700">入荷を割り振れません</span>
+                <span v-if="group.item.unassignable_inbound > 0" class="text-xs text-amber-700" data-testid="unassignable-inbound">入荷を割り振れません</span>
             </div>
 
             <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(min(100%, 14.5rem), 1fr))" data-testid="graph-grid">
