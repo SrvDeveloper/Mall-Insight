@@ -1,9 +1,26 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import { useRouter } from "vue-router";
 import { navigation } from "@/data/navigation";
 import AppLogo from "@/components/layout/AppLogo.vue";
+import { useAuthStore } from "@/stores/auth";
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
+
+const auth = useAuthStore();
+const router = useRouter();
+const isLoggingOut = ref(false);
+
+async function logout(): Promise<void> {
+    isLoggingOut.value = true;
+    try {
+        await auth.logout();
+        await router.replace({ name: "login" });
+    } finally {
+        isLoggingOut.value = false;
+    }
+}
 </script>
 
 <template>
@@ -37,5 +54,22 @@ const emit = defineEmits<{ close: [] }>();
                 </router-link>
             </div>
         </nav>
+
+        <div v-if="auth.user" class="flex items-center gap-2.5 border-t border-stone-200 px-4 py-3.5" data-testid="current-user">
+            <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs font-semibold text-stone-700" aria-hidden="true">{{ auth.user.name.slice(0, 1) }}</span>
+            <span class="flex min-w-0 flex-1 flex-col leading-tight">
+                <span class="truncate text-[13px] font-medium text-stone-900">{{ auth.user.name }}</span>
+                <span class="truncate text-[11px] text-stone-500">{{ auth.user.email }}</span>
+            </span>
+            <button
+                type="button"
+                class="shrink-0 rounded-md px-2 py-1 text-xs text-stone-600 hover:bg-stone-100 hover:text-stone-900 disabled:cursor-wait disabled:opacity-60"
+                :disabled="isLoggingOut"
+                data-testid="logout"
+                @click="logout"
+            >
+                ログアウト
+            </button>
+        </div>
     </aside>
 </template>

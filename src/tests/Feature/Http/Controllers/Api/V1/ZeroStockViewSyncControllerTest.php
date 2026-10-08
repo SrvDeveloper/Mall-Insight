@@ -4,6 +4,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Enums\SyncStatus;
 use App\Enums\SyncTrigger;
+use App\Models\User;
 use App\Models\ZeroStockViewSync;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -17,6 +18,9 @@ class ZeroStockViewSyncControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
 
         config(['services.zerostockview.mock' => true]);
         Http::preventStrayRequests();

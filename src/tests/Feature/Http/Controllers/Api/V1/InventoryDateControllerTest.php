@@ -4,12 +4,21 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Models\Inventory;
 use App\Models\Sku;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class InventoryDateControllerTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
+    }
 
     public function test_lists_stored_stock_dates_newest_first_with_sku_counts(): void
     {

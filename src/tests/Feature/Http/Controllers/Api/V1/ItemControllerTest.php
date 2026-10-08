@@ -4,12 +4,21 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Models\Item;
 use App\Models\Sku;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ItemControllerTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
+    }
 
     public function test_returns_items_with_skus_ordered_by_item_no_and_sku_position(): void
     {

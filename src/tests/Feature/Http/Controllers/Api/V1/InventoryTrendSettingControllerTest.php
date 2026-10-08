@@ -11,6 +11,14 @@ class InventoryTrendSettingControllerTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
+    }
+
     public function test_records_a_new_check_month_and_keeps_the_previous_one(): void
     {
         $this->travelTo('2026-10-08 10:00:00');

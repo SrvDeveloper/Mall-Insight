@@ -18,6 +18,9 @@ class ItemSelectionControllerTest extends TestCase
     {
         parent::setUp();
 
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
+
         $this->travelTo('2026-10-07 09:00:00');
     }
 
@@ -64,7 +67,8 @@ class ItemSelectionControllerTest extends TestCase
         $this->item('a-01', 1000);
         $user = User::factory()->create(['name' => '在庫 担当']);
 
-        $this->postJson('/api/v1/item-selections', ['item_nos' => ['a-01']])->assertJsonPath('data.confirmed_by', null);
+        // ログイン（B-009）より前に確定した選定は、確定した人が記録されていない
+        ItemSelection::create(['confirmed_at' => now()->subDay(), 'ranking_from' => '2025-10-01', 'ranking_to' => '2026-09-30']);
         $this->actingAs($user)->postJson('/api/v1/item-selections', ['item_nos' => ['a-01']])->assertJsonPath('data.confirmed_by', '在庫 担当');
 
         $this->getJson('/api/v1/item-selections')->assertJsonPath('data.*.confirmed_by', ['在庫 担当', null]);

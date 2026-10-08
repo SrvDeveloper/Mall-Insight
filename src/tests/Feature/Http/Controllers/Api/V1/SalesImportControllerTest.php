@@ -3,6 +3,7 @@
 namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Models\SalesImport;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
@@ -10,6 +11,14 @@ use Tests\TestCase;
 class SalesImportControllerTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
+    }
 
     private function bossCsv(string $status = '完了'): string
     {

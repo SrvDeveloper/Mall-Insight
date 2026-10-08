@@ -74,4 +74,20 @@ export function createApiClient(onError: (error: ApiError) => void): AxiosInstan
     return client;
 }
 
-export const apiClient = createApiClient((error) => useNotificationStore().notifyError(error.message));
+let unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * 401（ログインしていない・ログインの有効期限が切れた）を受けたときの処理を登録する（B-009）。
+ * 401 は全体通知に出さず、この処理でログイン画面へ移す。
+ */
+export function onUnauthorized(handler: () => void): void {
+    unauthorizedHandler = handler;
+}
+
+export const apiClient = createApiClient((error) => {
+    if (error.status === 401) {
+        unauthorizedHandler?.();
+        return;
+    }
+    useNotificationStore().notifyError(error.message);
+});

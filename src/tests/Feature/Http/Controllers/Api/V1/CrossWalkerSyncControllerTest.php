@@ -5,6 +5,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 use App\Enums\SyncStatus;
 use App\Enums\SyncTrigger;
 use App\Models\CrossWalkerSync;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -17,6 +18,9 @@ class CrossWalkerSyncControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
 
         config(['services.crosswalker.mock' => true]);
         Http::preventStrayRequests();

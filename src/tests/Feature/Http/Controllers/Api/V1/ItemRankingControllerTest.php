@@ -5,6 +5,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 use App\Models\Item;
 use App\Models\SalesLine;
 use App\Models\Sku;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -15,6 +16,9 @@ class ItemRankingControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
 
         $this->travelTo('2026-10-07 09:00:00');
     }

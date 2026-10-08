@@ -33,6 +33,8 @@ php artisan migrate              # マイグレーション実行（.env.example
 php artisan crosswalker:sync-items   # CrossWalkerから品番・SKUを取得（CROSSWALKER_MOCK=true ならサンプルを使う）
 php artisan zerostockview:sync-inventory   # ZeroStockViewから日次在庫を取得（ZEROSTOCKVIEW_MOCK=true なら生成したサンプルを使う）
 php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得、10時のZeroStockView取得）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
+php artisan user:create {email} {name}   # ログインできる利用者を登録する（パスワードは対話で入力。管理画面は B-117 で作る）
+php artisan user:reset-password {email}  # 利用者のパスワードを設定し直す
 ```
 
 ### JS / Vue

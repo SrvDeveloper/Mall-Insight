@@ -345,3 +345,10 @@ export interface InventoryTrendResponse {
         overdue_inbound_count: number;
     };
 }
+
+/** ログインしている利用者（B-009）。 */
+export interface AuthUser {
+    id: number;
+    name: string;
+    email: string;
+}

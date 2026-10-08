@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from "axios";
-import { ApiError, createApiClient, toApiError } from "@/api/client";
+import { createPinia, setActivePinia } from "pinia";
+import { ApiError, apiClient, createApiClient, onUnauthorized, toApiError } from "@/api/client";
+import { useNotificationStore } from "@/stores/notifications";
 
 function responseError(status: number, data: unknown = {}): AxiosError {
     const config = { headers: new AxiosHeaders() } as InternalAxiosRequestConfig;
@@ -52,5 +54,23 @@ describe("createApiClient", () => {
 
         await expect(client.get("/items")).rejects.toMatchObject({ status: 422 });
         expect(onError).not.toHaveBeenCalled();
+    });
+});
+
+describe("apiClient", () => {
+    it("hands 401 to the login handler instead of showing a notification", async () => {
+        setActivePinia(createPinia());
+        const handler = vi.fn();
+        onUnauthorized(handler);
+        const adapter = apiClient.defaults.adapter;
+        apiClient.defaults.adapter = () => Promise.reject(responseError(401));
+
+        try {
+            await expect(apiClient.get("/items")).rejects.toMatchObject({ status: 401 });
+        } finally {
+            apiClient.defaults.adapter = adapter;
+        }
+        expect(handler).toHaveBeenCalledOnce();
+        expect(useNotificationStore().notifications).toEqual([]);
     });
 });

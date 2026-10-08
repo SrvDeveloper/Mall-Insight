@@ -9,6 +9,7 @@ use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Models\Sku;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -21,6 +22,9 @@ class InventoryTrendControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
 
         // 今日は 2026-10-07。今月（10月）は残り25日、判定する月は6か月後の 2027-04
         $this->travelTo('2026-10-07 09:00:00');

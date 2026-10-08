@@ -7,6 +7,7 @@ use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Models\Sku;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -18,6 +19,9 @@ class DemandForecastControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
 
         $this->travelTo('2026-10-07 09:00:00');
     }

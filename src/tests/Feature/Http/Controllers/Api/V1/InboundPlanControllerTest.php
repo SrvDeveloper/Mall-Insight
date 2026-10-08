@@ -5,6 +5,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 use App\Models\InboundPlan;
 use App\Models\Item;
 use App\Models\Sku;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -20,6 +21,9 @@ class InboundPlanControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // ログインしていないとAPIを呼べない（B-009）
+        $this->actingAs(User::factory()->create());
 
         $this->travelTo('2026-10-07 09:00:00');
         $this->item = Item::factory()->create(['item_no' => 'fisi-05', 'brand' => 'SHIORI', 'category' => '老眼鏡']);
