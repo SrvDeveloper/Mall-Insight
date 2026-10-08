@@ -13,10 +13,10 @@
     <rect width="64" height="64" rx="16" fill="url(#bg)" />
     <rect width="64" height="64" rx="16" fill="url(#glow)" />
     <g fill="#fff">
-        <rect x="12" y="12" width="17" height="17" rx="4" fill-opacity=".38" />
-        <rect x="35" y="12" width="17" height="17" rx="4" fill-opacity=".52" />
-        <rect x="12" y="35" width="17" height="17" rx="4" fill-opacity=".52" />
-        <rect x="35" y="35" width="17" height="17" rx="4" fill-opacity=".38" />
+        <rect x="12" y="12" width="17" height="17" rx="4" fill-opacity=".32" />
+        <rect x="35" y="12" width="17" height="17" rx="4" fill-opacity=".5" />
+        <rect x="12" y="35" width="17" height="17" rx="4" fill-opacity=".18" />
+        <rect x="35" y="35" width="17" height="17" rx="4" fill-opacity=".32" />
     </g>
     <path d="M13 46 24 36l9 6 14-21" stroke="#1c1917" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
     <circle cx="48" cy="20" r="8.5" fill="#1c1917" />
