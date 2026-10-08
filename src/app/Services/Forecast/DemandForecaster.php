@@ -39,11 +39,14 @@ class DemandForecaster
 
     public const MONTHS = 12;
 
-    public function forecast(CarbonImmutable $now): DemandForecast
+    /**
+     * @param  list<string>|null  $itemNos  予測する品番。null なら対象品番（最新の選定）。入荷予定の自動割り振り（K-054）では、対象品番でない品番も予測する
+     */
+    public function forecast(CarbonImmutable $now, ?array $itemNos = null): DemandForecast
     {
         $selection = ItemSelection::current()?->load('items');
         $forecastFrom = $now->startOfDay();
-        $items = $this->targetItems($selection);
+        $items = $this->items(collect($itemNos ?? $selection?->items->pluck('item_no')->all() ?? []));
         $skuIds = $items->flatMap(fn (Item $item) => $item->skus)->pluck('id')->all();
         $channelRanges = $this->channelSalesRanges($forecastFrom);
 
@@ -115,17 +118,17 @@ class DemandForecaster
     }
 
     /**
-     * 対象品番（CrossWalker に残っているもの）を、選定の順（売上順位の高い順）で返す。
+     * 品番（CrossWalker に残っているもの）を、渡した順（対象品番なら選定の順＝売上順位の高い順）で返す。
      * 無効（廃番）のSKUは今後売らず発注もしないため、予測の対象から外す（K-053）。在庫推移からも外れる。
      *
+     * @param  Collection<int, string>  $itemNos
      * @return Collection<int, Item>
      */
-    private function targetItems(?ItemSelection $selection): Collection
+    private function items(Collection $itemNos): Collection
     {
-        if ($selection === null) {
+        if ($itemNos->isEmpty()) {
             return collect();
         }
-        $itemNos = $selection->items->pluck('item_no');
         $items = Item::query()
             ->with(['skus' => fn (HasMany $query) => $query->where(fn (Builder $query) => $query->whereNull('status')->orWhere('status', '!=', ActiveStatus::Inactive->value))])
             ->whereIn('item_no', $itemNos)

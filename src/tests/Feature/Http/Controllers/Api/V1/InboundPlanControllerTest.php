@@ -116,9 +116,12 @@ class InboundPlanControllerTest extends TestCase
         $this->getJson('/api/v1/inbound-plans')
             ->assertOk()
             ->assertJsonPath('data.*.arrival_month', ['2026-09', '2026-12'])
-            ->assertJsonPath('data.*.is_overdue', [true, false]);
+            ->assertJsonPath('data.*.is_overdue', [true, false])
+            // まとめは入荷前の2件（12月は300を割り振り済み、9月は割り振りなし）と入荷済みの1件
+            ->assertJsonPath('meta.summary', ['pending_count' => 2, 'pending_quantity' => 2420, 'unallocated_quantity' => 2120, 'overdue_count' => 1, 'received_count' => 1]);
         $this->getJson('/api/v1/inbound-plans?include_received=1')->assertJsonPath('data.*.arrival_month', ['2026-09', '2026-10', '2026-12']);
-        $this->getJson('/api/v1/inbound-plans?keyword=none')->assertJsonPath('data', []);
+        // まとめは絞り込みによらない
+        $this->getJson('/api/v1/inbound-plans?keyword=none')->assertJsonPath('data', [])->assertJsonPath('meta.summary.pending_count', 2);
 
         $this->deleteJson("/api/v1/inbound-plans/{$received}/receipt")->assertOk()->assertJsonPath('data.received_at', null);
         $this->assertCount(3, $this->getJson('/api/v1/inbound-plans')->json('data'));

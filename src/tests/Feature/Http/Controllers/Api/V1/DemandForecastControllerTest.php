@@ -222,6 +222,21 @@ class DemandForecastControllerTest extends TestCase
         $this->getJson('/api/v1/inventory-trends')->assertJsonPath('data.0.skus.*.sku_code', ['fl-01-1-10']);
     }
 
+    public function test_forecasts_only_the_given_item_even_if_it_is_not_a_target_item(): void
+    {
+        $this->targetSku('fl-01', 'fl-01-1-10');
+        $other = Item::factory()->create(['item_no' => 'other-01']);
+        $otherSku = Sku::factory()->create(['item_id' => $other->id, 'sku_code' => 'other-01-1', 'position' => 0]);
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1);
+        $this->sell($otherSku, '2026-10-06', 30);
+
+        $this->getJson('/api/v1/demand-forecasts?item_no=other-01')
+            ->assertOk()
+            ->assertJsonPath('data.*.item_no', ['other-01'])
+            ->assertJsonPath('data.0.skus.0.base_average', 0.5);
+        $this->getJson('/api/v1/demand-forecasts?item_no=unknown')->assertOk()->assertJsonPath('data', []);
+    }
+
     public function test_does_not_count_today_whose_sales_are_not_final_yet(): void
     {
         $sku = $this->targetSku('fl-01', 'fl-01-1-10');

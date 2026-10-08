@@ -18,6 +18,7 @@ class InboundPlanController extends Controller
 {
     /**
      * 入荷予定の一覧（入荷予定月の古い順）。入荷済みは、指定したときだけ含める。
+     * meta.summary に、絞り込みによらない入荷前の入荷予定のまとめ（件数・数量・未割り振り・予定月を過ぎた件数）と入荷済みの件数を付ける。
      */
     public function index(InboundPlanIndexRequest $request): AnonymousResourceCollection
     {
@@ -33,7 +34,26 @@ class InboundPlanController extends Controller
             ->paginate(50)
             ->withQueryString();
 
-        return InboundPlanResource::collection($plans);
+        return InboundPlanResource::collection($plans)->additional(['meta' => ['summary' => $this->summary()]]);
+    }
+
+    /**
+     * 入荷前の入荷予定のまとめと、入荷済みの件数。
+     *
+     * @return array{pending_count: int, pending_quantity: int, unallocated_quantity: int, overdue_count: int, received_count: int}
+     */
+    private function summary(): array
+    {
+        $pending = InboundPlan::query()->with('allocations')->whereNull('received_at')->get();
+        $currentMonth = today()->startOfMonth();
+
+        return [
+            'pending_count' => $pending->count(),
+            'pending_quantity' => (int) $pending->sum('quantity'),
+            'unallocated_quantity' => (int) $pending->sum(fn (InboundPlan $plan): int => max(0, $plan->quantity - $plan->allocatedQuantity())),
+            'overdue_count' => $pending->filter(fn (InboundPlan $plan): bool => $plan->arrival_month->lt($currentMonth))->count(),
+            'received_count' => InboundPlan::query()->whereNotNull('received_at')->count(),
+        ];
     }
 
     public function store(SaveInboundPlanRequest $request): JsonResponse

@@ -7,6 +7,7 @@ use App\Http\Resources\SkuForecastResource;
 use App\Services\Forecast\DemandForecaster;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class DemandForecastController extends Controller
 {
@@ -14,10 +15,13 @@ class DemandForecastController extends Controller
      * 対象品番のSKUの需要予測（バックログ B-006）。チャネルごとに予測して合計する（決定記録 K-038）。
      * 開くたびに最新の販売実績から計算する（K-035）。
      * 対象品番が未確定なら data は空。
+     * item_no を指定すると、対象品番かどうかによらず、その品番だけを予測する（入荷予定の自動割り振り、K-054）。
      */
-    public function index(DemandForecaster $forecaster): JsonResponse
+    public function index(Request $request, DemandForecaster $forecaster): JsonResponse
     {
-        $forecast = $forecaster->forecast(CarbonImmutable::now());
+        $request->validate(['item_no' => ['nullable', 'string', 'max:255']]);
+        $itemNo = $request->string('item_no')->toString();
+        $forecast = $forecaster->forecast(CarbonImmutable::now(), $itemNo === '' ? null : [$itemNo]);
 
         return response()->json([
             'data' => array_map(fn (array $entry): array => [

@@ -1,5 +1,5 @@
 import { apiClient } from "@/api/client";
-import type { InboundPlan, InboundPlanPayload, Paginated } from "@/types/api";
+import type { InboundPlan, InboundPlanPage, InboundPlanPayload } from "@/types/api";
 
 export interface InboundPlanQuery {
     keyword?: string;
@@ -7,8 +7,8 @@ export interface InboundPlanQuery {
     page?: number;
 }
 
-export async function fetchInboundPlans(query: InboundPlanQuery): Promise<Paginated<InboundPlan>> {
-    const { data } = await apiClient.get<Paginated<InboundPlan>>("/inbound-plans", { params: { ...query, include_received: query.include_received ? 1 : undefined } });
+export async function fetchInboundPlans(query: InboundPlanQuery): Promise<InboundPlanPage> {
+    const { data } = await apiClient.get<InboundPlanPage>("/inbound-plans", { params: { ...query, include_received: query.include_received ? 1 : undefined } });
     return data;
 }
 

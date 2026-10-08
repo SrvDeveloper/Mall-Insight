@@ -278,6 +278,19 @@ export interface InboundPlan {
     allocations: InboundPlanAllocation[];
 }
 
+/** 入荷前の入荷予定のまとめ（絞り込みによらない）と入荷済みの件数。 */
+export interface InboundPlanSummary {
+    pending_count: number;
+    pending_quantity: number;
+    unallocated_quantity: number;
+    overdue_count: number;
+    received_count: number;
+}
+
+export interface InboundPlanPage extends Paginated<InboundPlan> {
+    meta: Paginated<InboundPlan>["meta"] & { summary: InboundPlanSummary };
+}
+
 export interface InboundPlanPayload {
     item_no: string;
     arrival_month: string;
