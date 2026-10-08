@@ -51,9 +51,9 @@ async function mountView() {
 
 function checkedItemNos(wrapper: Awaited<ReturnType<typeof mountView>>): string[] {
     return wrapper
-        .findAll("tbody tr")
+        .findAll('[data-testid="rank-row"]')
         .filter((row) => (row.find('input[type="checkbox"]').element as HTMLInputElement).checked)
-        .map((row) => row.findAll("td")[2]!.text());
+        .map((row) => row.find('[data-testid="item-no"]').text());
 }
 
 describe("TargetItemSelectionView", () => {
@@ -68,9 +68,13 @@ describe("TargetItemSelectionView", () => {
 
         const wrapper = await mountView();
 
-        expect(wrapper.find('[data-testid="current-selection"]').text()).toContain("対象品番がまだ確定されていません。");
+        expect(wrapper.find('[data-testid="selection-warning"]').text()).toContain("対象品番がまだ確定されていません。");
+        expect(wrapper.find('[data-testid="fact-current"]').text()).toContain("未確定");
         expect(checkedItemNos(wrapper)).toEqual(["a-01", "b-01"]);
-        expect(wrapper.find("tbody tr:last-child").text()).toContain("実績なし");
+        expect(wrapper.findAll('[data-testid="change"]').map((change) => change.text())).toEqual(["対象にする", "対象にする"]);
+        expect(wrapper.findAll('[data-testid="rank-row"]').at(-1)!.text()).toContain("実績なし");
+        // 上位の候補（2位まで）の下に区切りを引く
+        expect(wrapper.text()).toContain("ここまで上位2位");
         expect(wrapper.text()).toContain("2025/10/08 〜 2026/10/07");
     });
 
@@ -79,10 +83,11 @@ describe("TargetItemSelectionView", () => {
 
         const wrapper = await mountView();
 
-        const status = wrapper.find('[data-testid="current-selection"]').text();
-        expect(status).toContain("2026年度の対象品番がまだ確定されていません。");
-        expect(status).toContain("2品番（2026/03/31 10:00 在庫 担当 確定）");
-        expect(status).toContain("gone-01");
+        const warning = wrapper.find('[data-testid="selection-warning"]').text();
+        expect(warning).toContain("2026年度の対象品番がまだ確定されていません。");
+        expect(warning).toContain("gone-01");
+        expect(wrapper.find('[data-testid="fact-current"]').text()).toContain("2品番2026/03/31 10:00 在庫 担当 が確定");
+        expect(wrapper.find('[data-testid="fact-fiscal-year"]').text()).toContain("2026年度の見直し未確定");
         expect(checkedItemNos(wrapper)).toEqual(["c-01"]);
     });
 
@@ -91,16 +96,17 @@ describe("TargetItemSelectionView", () => {
 
         const wrapper = await mountView();
 
-        expect(wrapper.find('[data-testid="current-selection"]').text()).not.toContain("まだ確定されていません");
+        expect(wrapper.find('[data-testid="selection-warning"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="fact-fiscal-year"]').text()).toContain("確定済み");
     });
 
     it("blocks confirming more than the maximum number of items", async () => {
         vi.mocked(fetchCurrentItemSelection).mockResolvedValue(currentWith(null));
         const wrapper = await mountView();
 
-        await wrapper.findAll("tbody tr")[2]!.trigger("click");
+        await wrapper.findAll('[data-testid="rank-row"]')[2]!.trigger("click");
         expect(wrapper.find('button[type="submit"]').attributes("disabled")).toBeUndefined();
-        await wrapper.findAll("tbody tr")[3]!.trigger("click");
+        await wrapper.findAll('[data-testid="rank-row"]')[3]!.trigger("click");
 
         expect(wrapper.find('[data-testid="selection-summary"]').text()).toContain("3品番以内にしてください。");
         expect(wrapper.find('button[type="submit"]').attributes("disabled")).toBeDefined();
@@ -111,15 +117,16 @@ describe("TargetItemSelectionView", () => {
         vi.mocked(confirmItemSelection).mockResolvedValue(selection(["a-01", "c-01"], "2026-10-07T10:00:00+09:00"));
         const wrapper = await mountView();
 
-        await wrapper.findAll("tbody tr")[2]!.trigger("click");
+        await wrapper.findAll('[data-testid="rank-row"]')[2]!.trigger("click");
         expect(wrapper.find('[data-testid="selection-summary"]').text()).toContain("追加 1・外す 0");
+        expect(wrapper.findAll('[data-testid="change"]').map((change) => change.text())).toEqual(["対象", "追加"]);
         await wrapper.find("#selection-note").setValue(" 新商品が好調 ");
         await wrapper.find("form").trigger("submit");
         await flushPromises();
 
         expect(confirmItemSelection).toHaveBeenCalledWith(["a-01", "c-01"], "新商品が好調");
         expect(wrapper.text()).toContain("対象品番を確定しました（2品番）。");
-        expect(wrapper.find('[data-testid="current-selection"]').text()).toContain("2品番（2026/10/07 10:00 在庫 担当 確定）");
+        expect(wrapper.find('[data-testid="fact-current"]').text()).toContain("2品番2026/10/07 10:00 在庫 担当 が確定");
     });
 
     it("opens the history in a modal from the current selection and closes it with Escape", async () => {
@@ -135,8 +142,7 @@ describe("TargetItemSelectionView", () => {
         const wrapper = await mountView();
         expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
 
-        const historyButton = wrapper.findAll('[data-testid="current-selection"] button').find((button) => button.text() === "確定履歴");
-        await historyButton!.trigger("click");
+        await wrapper.find('[data-testid="open-history"]').trigger("click");
         await flushPromises();
 
         const dialog = wrapper.find('[role="dialog"]');
@@ -160,11 +166,26 @@ describe("TargetItemSelectionView", () => {
         expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     });
 
+    it("filters to the selected items or by keyword and marks items to remove", async () => {
+        vi.mocked(fetchCurrentItemSelection).mockResolvedValue(currentWith(selection(["a-01", "b-01"], "2026-04-10T10:00:00+09:00")));
+        const wrapper = await mountView();
+
+        await wrapper.findAll('[data-testid="rank-row"]')[1]!.trigger("click");
+        expect(wrapper.findAll('[data-testid="change"]').map((change) => change.text())).toEqual(["対象", "外す"]);
+
+        await wrapper.find('[data-testid="filter-selected"]').trigger("click");
+        expect(wrapper.findAll('[data-testid="item-no"]').map((cell) => cell.text())).toEqual(["a-01"]);
+
+        await wrapper.find('[data-testid="filter-all"]').trigger("click");
+        await wrapper.find('input[type="search"]').setValue("c-0");
+        expect(wrapper.findAll('[data-testid="item-no"]').map((cell) => cell.text())).toEqual(["c-01"]);
+    });
+
     it("does not offer the history before anything is confirmed", async () => {
         vi.mocked(fetchCurrentItemSelection).mockResolvedValue(currentWith(null));
 
         const wrapper = await mountView();
 
-        expect(wrapper.find('[data-testid="current-selection"]').text()).not.toContain("確定履歴");
+        expect(wrapper.find('[data-testid="open-history"]').exists()).toBe(false);
     });
 });

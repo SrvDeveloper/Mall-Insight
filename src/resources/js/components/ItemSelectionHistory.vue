@@ -58,10 +58,10 @@ function isLatest(selection: ItemSelection): boolean {
 </script>
 
 <template>
-    <section class="overflow-hidden rounded-lg border border-stone-200 bg-white" :aria-busy="isLoading">
+    <section class="bg-white" :aria-busy="isLoading">
         <div v-if="hasError" class="flex flex-col items-center gap-3 px-6 py-16 text-center">
             <p class="text-sm text-stone-600">確定の履歴を表示できませんでした。</p>
-            <button type="button" class="rounded-md border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load()">再読み込み</button>
+            <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load()">再読み込み</button>
         </div>
 
         <div v-else-if="!result" class="px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
@@ -70,10 +70,10 @@ function isLatest(selection: ItemSelection): boolean {
 
         <template v-else>
             <div class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-stone-200 bg-stone-50 text-xs font-semibold text-stone-500">
+                <table class="w-full border-separate border-spacing-0 text-left text-[13px]">
+                    <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-300 [&_th]:bg-white">
                         <tr>
-                            <th scope="col" class="w-10 px-3 py-2.5"><span class="sr-only">内容を表示</span></th>
+                            <th scope="col" class="w-12 py-2.5 pl-4"><span class="sr-only">内容を表示</span></th>
                             <th scope="col" class="px-3 py-2.5 whitespace-nowrap">確定日時</th>
                             <th scope="col" class="px-3 py-2.5 whitespace-nowrap">確定した人</th>
                             <th scope="col" class="px-3 py-2.5 text-right">品番数</th>
@@ -81,13 +81,17 @@ function isLatest(selection: ItemSelection): boolean {
                             <th scope="col" class="px-3 py-2.5">メモ</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-stone-100">
+                    <tbody>
                         <template v-for="selection in result.data" :key="selection.id">
-                            <tr class="cursor-pointer hover:bg-stone-50" :class="expandedIds.has(selection.id) ? 'bg-stone-50' : ''" @click="toggle(selection.id)">
-                                <td class="px-3 py-2.5">
+                            <tr
+                                class="h-11 cursor-pointer hover:bg-stone-50 [&>*]:border-t [&>*]:border-stone-100"
+                                :class="expandedIds.has(selection.id) ? 'bg-stone-50' : ''"
+                                @click="toggle(selection.id)"
+                            >
+                                <td class="py-2 pl-4">
                                     <button
                                         type="button"
-                                        class="flex size-6 items-center justify-center rounded text-stone-500 hover:bg-stone-200 hover:text-stone-900"
+                                        class="flex size-7 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-200 hover:text-stone-900"
                                         :aria-expanded="expandedIds.has(selection.id)"
                                         :aria-controls="`selection-${selection.id}`"
                                         :aria-label="`${formatDateTime(selection.confirmed_at)} の確定内容を${expandedIds.has(selection.id) ? '閉じる' : '表示'}`"
@@ -110,7 +114,7 @@ function isLatest(selection: ItemSelection): boolean {
                                 </td>
                                 <td class="px-3 py-2.5 whitespace-nowrap text-stone-900 tabular-nums">
                                     {{ formatDateTime(selection.confirmed_at) }}
-                                    <span v-if="isLatest(selection)" class="ml-2 rounded-full bg-stone-900 px-2 py-0.5 text-xs font-semibold text-white">今の対象</span>
+                                    <span v-if="isLatest(selection)" class="ml-2 rounded-full bg-stone-900 px-2 py-0.5 text-[11px] font-semibold text-white">今の対象</span>
                                 </td>
                                 <td class="px-3 py-2.5 whitespace-nowrap" data-testid="confirmed-by">
                                     <span v-if="selection.confirmed_by" class="text-stone-700">{{ selection.confirmed_by }}</span>
@@ -130,10 +134,10 @@ function isLatest(selection: ItemSelection): boolean {
                             <tr v-if="expandedIds.has(selection.id)" :id="`selection-${selection.id}`" class="bg-stone-50">
                                 <td />
                                 <td colspan="5" class="px-3 pt-1 pb-4">
-                                    <p class="mb-2 text-xs text-stone-500 tabular-nums">売上の集計期間：{{ formatDate(selection.ranking_from) }} 〜 {{ formatDate(selection.ranking_to) }}</p>
-                                    <div class="overflow-x-auto rounded-md border border-stone-200 bg-white">
+                                    <p class="mb-2 text-[11px] text-stone-500 tabular-nums">売上の集計期間：{{ formatDate(selection.ranking_from) }} 〜 {{ formatDate(selection.ranking_to) }}</p>
+                                    <div class="overflow-x-auto rounded-lg border border-stone-200 bg-white">
                                         <table class="w-full text-left text-[13px]" :aria-label="`${formatDateTime(selection.confirmed_at)} に確定した品番`">
-                                            <thead class="border-b border-stone-200 bg-stone-50 text-xs text-stone-500">
+                                            <thead class="border-b border-stone-200 text-xs text-stone-500">
                                                 <tr>
                                                     <th scope="col" class="px-3 py-2 text-right font-medium whitespace-nowrap">確定時の順位</th>
                                                     <th scope="col" class="px-3 py-2 font-medium">品番</th>
@@ -152,7 +156,11 @@ function isLatest(selection: ItemSelection): boolean {
                                                         <span v-if="item.sales_amount !== null" class="text-stone-700">¥{{ item.sales_amount.toLocaleString() }}</span>
                                                         <span v-else class="text-stone-400">実績なし</span>
                                                     </td>
-                                                    <td class="px-3 py-2 text-xs text-stone-600">{{ selection.changes?.added.includes(item.item_no) ? "追加" : "" }}</td>
+                                                    <td class="px-3 py-2">
+                                                        <span v-if="selection.changes?.added.includes(item.item_no)" class="rounded-full bg-stone-900 px-2 py-0.5 text-[11px] font-semibold text-white"
+                                                            >追加</span
+                                                        >
+                                                    </td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -167,12 +175,12 @@ function isLatest(selection: ItemSelection): boolean {
                 </table>
             </div>
 
-            <footer v-if="result.meta.last_page > 1" class="flex items-center justify-between gap-3 border-t border-stone-200 px-4 py-3 text-sm text-stone-600">
+            <footer v-if="result.meta.last_page > 1" class="flex items-center justify-between gap-3 border-t border-stone-200 px-4 py-3 text-[13px] text-stone-600">
                 <p class="tabular-nums">{{ result.meta.total }}件中 {{ result.meta.from }}–{{ result.meta.to }}件</p>
                 <div class="flex gap-2">
                     <button
                         type="button"
-                        class="rounded-md border border-stone-300 px-3 py-1.5 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        class="h-8 rounded-lg border border-stone-300 px-3 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
                         :disabled="result.meta.current_page <= 1 || isLoading"
                         @click="load(result.meta.current_page - 1)"
                     >
@@ -180,7 +188,7 @@ function isLatest(selection: ItemSelection): boolean {
                     </button>
                     <button
                         type="button"
-                        class="rounded-md border border-stone-300 px-3 py-1.5 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        class="h-8 rounded-lg border border-stone-300 px-3 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
                         :disabled="result.meta.current_page >= result.meta.last_page || isLoading"
                         @click="load(result.meta.current_page + 1)"
                     >
