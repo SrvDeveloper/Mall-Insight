@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { monthLabel, type ItemRows, type TrendMonth } from "@/components/inventoryTrend/trendRows";
+import { monthLabel, sparkCheckPercent, type ItemRows, type TrendMonth } from "@/components/inventoryTrend/trendRows";
 
 /**
  * 在庫推移の「グラフ」（K-047、デザイン案A-3）。品番ごとのカードに、SKUの12か月の在庫の増減を小さなグラフで並べる。
- * 在庫は灰色の面と線、足りない量は0の線より下の赤い面、判定する月は点線、入荷予定は ▲ で示す。
+ * 在庫は灰色の面と線、足りない量は0の線より下の赤い面、判定する月は点線、入荷予定は ▲ で示す。点線と ▲ はその月の点（月末）に置く。
  * 判定する月に欠品するSKUは、カードの枠を薄い赤にする。
  * グラフは画面の幅に合わせて自動で折り返す。
  */
@@ -18,7 +18,7 @@ const axisLabels = computed(() => {
     const last = props.months.at(-1);
     return { first: first ? monthLabel(first.month) : "", check: check ? monthLabel(check.month) : "", last: last ? monthLabel(last.month) : "" };
 });
-const checkPosition = computed(() => `${((props.checkMonthIndex + 1) / Math.max(1, props.months.length)) * 100}%`);
+const checkPosition = computed(() => `${sparkCheckPercent(props.checkMonthIndex, props.months.length)}%`);
 </script>
 
 <template>

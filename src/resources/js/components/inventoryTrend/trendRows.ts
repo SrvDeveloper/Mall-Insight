@@ -120,7 +120,16 @@ const SPARK_WIDTH = 240;
 const SPARK_HEIGHT = 72;
 const SPARK_PADDING = 6;
 
-/** ミニグラフの線と面。値は月初の在庫と、各月末の「月末在庫 − 足りない数」（足りない月はマイナス）。 */
+/** ミニグラフの横の位置。0 は月初の在庫、n は n 番目の月の月末（その月の点）。 */
+export const sparkX = (index: number, monthCount: number): number => 4 + (index * (SPARK_WIDTH - 8)) / Math.max(1, monthCount);
+
+/** 判定する月の点線の位置（グラフの幅に対する割合）。グラフの下の「判定」の文字をそろえるために使う。 */
+export const sparkCheckPercent = (checkMonthIndex: number, monthCount: number): number => (sparkX(checkMonthIndex + 1, monthCount) / SPARK_WIDTH) * 100;
+
+/**
+ * ミニグラフの線と面。値は月初の在庫と、各月末の「月末在庫 − 足りない数」（足りない月はマイナス）。
+ * 判定する月の点線と入荷予定の ▲ は、その月の点（月末）の位置に置く。入荷はその月の点に反映されるため。
+ */
 export function sparkline(sku: SkuTrend, checkMonthIndex: number): Sparkline | null {
     if (!sku.months || sku.opening_stock === null) {
         return null;
@@ -128,7 +137,7 @@ export function sparkline(sku: SkuTrend, checkMonthIndex: number): Sparkline | n
     const values = [sku.opening_stock, ...sku.months.map((month) => month.ending_stock - month.shortfall)];
     const max = Math.max(1, ...values);
     const min = Math.min(0, ...values);
-    const x = (index: number): number => 4 + (index * (SPARK_WIDTH - 8)) / sku.months!.length;
+    const x = (index: number): number => sparkX(index, sku.months!.length);
     const y = (value: number): number => SPARK_PADDING + ((max - value) * (SPARK_HEIGHT - SPARK_PADDING * 2)) / (max - min || 1);
     const zeroY = Number(y(0).toFixed(1));
     const line = `M ${values.map((value, index) => `${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" L ")}`;
@@ -137,7 +146,7 @@ export function sparkline(sku: SkuTrend, checkMonthIndex: number): Sparkline | n
         if (Math.round(month.inbound + month.provisional_inbound) < 1) {
             return [];
         }
-        const cx = x(index + 0.5);
+        const cx = x(index + 1);
         return [`M ${cx.toFixed(1)} ${SPARK_HEIGHT - 9} L ${(cx + 4).toFixed(1)} ${SPARK_HEIGHT - 2} L ${(cx - 4).toFixed(1)} ${SPARK_HEIGHT - 2} Z`];
     });
     return { line, area, zeroY, checkX: Number(x(checkMonthIndex + 1).toFixed(1)), inboundMarks };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildItemRows, sparkline, yearSpans } from "@/components/inventoryTrend/trendRows";
+import { buildItemRows, sparkCheckPercent, sparkline, yearSpans } from "@/components/inventoryTrend/trendRows";
 import type { ItemTrend, MonthTrend, SkuTrend } from "@/types/api";
 
 const MONTHS = ["2026-10", "2026-11", "2026-12", "2027-01"];
@@ -45,6 +45,15 @@ describe("trendRows", () => {
         expect(line.checkX).toBe(178);
         expect(line.inboundMarks).toHaveLength(1);
         expect(sparkline(sku({ months: null, opening_stock: null }), 2)).toBeNull();
+    });
+
+    it("puts the inbound mark of the check month right on the check line", () => {
+        // 入荷予定があるのは2番目の月（index 1）。そこを判定する月にする
+        const line = sparkline(sku(), 1)!;
+
+        expect(line.checkX).toBe(120);
+        expect(line.inboundMarks).toEqual(["M 120.0 63 L 124.0 70 L 116.0 70 Z"]);
+        expect(sparkCheckPercent(1, 4)).toBe(50);
     });
 
     it.each([
