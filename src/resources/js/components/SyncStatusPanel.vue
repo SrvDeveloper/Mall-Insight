@@ -62,47 +62,55 @@ const latestFailed = computed(() => latest.value?.status === "failed");
 
 <template>
     <section
-        class="flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        class="flex flex-col gap-3 rounded-xl border px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
         :class="latestFailed ? 'border-amber-300 bg-amber-50' : 'border-stone-200 bg-white'"
         :aria-label="`${source}からの取得状況`"
     >
-        <div class="flex min-w-0 flex-col gap-0.5 text-sm">
-            <template v-if="hasLoadError">
-                <p class="text-stone-600">取得状況を表示できませんでした。</p>
-            </template>
-            <template v-else-if="!state">
-                <p class="text-stone-500">取得状況を読み込み中…</p>
-            </template>
-            <template v-else-if="!latest">
-                <p class="font-semibold text-stone-900">{{ source }}からまだ取得していません。</p>
-                <p class="text-stone-500">「取得実行」を押すと、{{ source }}から{{ subject }}を取り込みます。以後は{{ schedule }}に自動で取得します。</p>
-            </template>
-            <template v-else-if="latestFailed">
-                <p class="font-semibold text-amber-900">{{ formatDateTime(latest.finished_at) }} の取得（{{ latest.triggered_by_label }}）に失敗しました。</p>
-                <p class="text-amber-900">{{ latest.error_message }}</p>
-                <p class="text-amber-800">
-                    {{
-                        lastSucceeded
-                            ? `表示中のデータは ${formatDateTime(lastSucceeded.finished_at)} に取得したものです。`
-                            : `まだ一度も取得に成功していないため、表示中のデータは${source}のものではありません。`
-                    }}
-                </p>
-            </template>
-            <template v-else>
-                <p class="text-stone-900">
-                    <span class="font-semibold">最終取得 {{ formatDateTime(latest.finished_at) }}</span>
-                    <span class="text-stone-500">（{{ latest.triggered_by_label }}）</span>
-                </p>
-                <p class="text-stone-500 tabular-nums">{{ summarize(latest) }}。{{ schedule }}に自動で取得します。</p>
-            </template>
+        <div class="flex min-w-0 items-start gap-3">
+            <span class="mt-1.5 size-2 shrink-0 rounded-full" :class="hasLoadError || latestFailed ? 'bg-amber-500' : latest ? 'bg-stone-900' : 'bg-stone-300'" aria-hidden="true" />
+            <div class="flex min-w-0 flex-col gap-0.5 text-[13px]">
+                <span class="text-[11px] tracking-wide text-stone-500">{{ source }}からの取得</span>
+                <template v-if="hasLoadError">
+                    <p class="text-stone-600">取得状況を表示できませんでした。</p>
+                </template>
+                <template v-else-if="!state">
+                    <p class="text-stone-500">取得状況を読み込み中…</p>
+                </template>
+                <template v-else-if="!latest">
+                    <p class="text-base font-semibold text-stone-900">{{ source }}からまだ取得していません。</p>
+                    <p class="text-xs text-stone-500">「取得実行」を押すと、{{ source }}から{{ subject }}を取り込みます。以後は{{ schedule }}に自動で取得します。</p>
+                </template>
+                <template v-else-if="latestFailed">
+                    <p class="text-base font-semibold text-amber-900">{{ formatDateTime(latest.finished_at) }} の取得（{{ latest.triggered_by_label }}）に失敗しました。</p>
+                    <p class="text-amber-900">{{ latest.error_message }}</p>
+                    <p class="text-xs text-amber-800">
+                        {{
+                            lastSucceeded
+                                ? `表示中のデータは ${formatDateTime(lastSucceeded.finished_at)} に取得したものです。`
+                                : `まだ一度も取得に成功していないため、表示中のデータは${source}のものではありません。`
+                        }}
+                    </p>
+                </template>
+                <template v-else>
+                    <p class="text-stone-900 tabular-nums">
+                        <span class="text-base font-semibold">最終取得 {{ formatDateTime(latest.finished_at) }}</span>
+                        <span class="text-stone-500">（{{ latest.triggered_by_label }}）</span>
+                    </p>
+                    <p class="text-xs text-stone-500 tabular-nums">{{ summarize(latest) }}。{{ schedule }}に自動で取得します。</p>
+                </template>
+            </div>
         </div>
 
         <button
             type="button"
-            class="shrink-0 self-start rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-800 hover:bg-stone-100 disabled:cursor-wait disabled:opacity-60 sm:self-auto"
+            class="inline-flex h-10 shrink-0 items-center gap-2 self-start rounded-lg border border-stone-300 bg-white px-4 text-[13px] font-medium text-stone-900 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-60 sm:self-auto"
             :disabled="isRunning"
             @click="run"
         >
+            <svg class="size-4" :class="isRunning ? 'animate-spin' : ''" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+                <path d="M13.5 2.5v3h-3" />
+            </svg>
             {{ isRunning ? "取得中…" : "取得実行" }}
         </button>
     </section>

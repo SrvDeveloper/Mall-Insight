@@ -91,6 +91,37 @@ describe("ItemListView", () => {
         expect(skuTable.text()).toContain("廃番");
     });
 
+    it("expands an item by clicking its row and shows how many SKUs are discontinued", async () => {
+        vi.mocked(fetchItems).mockResolvedValue(page([item]));
+        const { wrapper } = await mountAt("/items");
+
+        const row = wrapper.find("tbody tr");
+        expect(row.text()).toContain("2（廃番 1）");
+        await row.trigger("click");
+        expect(wrapper.find("#skus-1").exists()).toBe(true);
+
+        await wrapper.find("tbody tr").trigger("click");
+        expect(wrapper.find("#skus-1").exists()).toBe(false);
+    });
+
+    it("searches after typing stops", async () => {
+        vi.mocked(fetchItems).mockResolvedValue(page([item]));
+        vi.useFakeTimers();
+        try {
+            const { wrapper, router } = await mountAt("/items");
+
+            await wrapper.find("#item-keyword").setValue("fisi");
+            expect(router.currentRoute.value.query).toEqual({});
+            await vi.advanceTimersByTimeAsync(300);
+            await flushPromises();
+
+            expect(router.currentRoute.value.query).toEqual({ keyword: "fisi" });
+            expect(fetchItems).toHaveBeenLastCalledWith({ keyword: "fisi", status: "all", page: 1 });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("passes the URL query to the API and updates it when filtering by status", async () => {
         vi.mocked(fetchItems).mockResolvedValue(page([item]));
         const { wrapper, router } = await mountAt("/items?keyword=fisi&page=2");
