@@ -153,4 +153,14 @@ describe("SalesImportView", () => {
         expect(rows[2]).toContain("ファイルには30720 KB以下のファイルを指定してください。");
         expect(fetchSalesImports).toHaveBeenCalledTimes(2);
     });
+
+    it("selects the files dropped on the drop zone, leaving out other kinds of files", async () => {
+        const wrapper = await mountView();
+        const files = [new File(["x"], "全注文_2025年11月.txt"), new File(["x"], "メモ.pdf"), new File(["x"], "BOSS受注実績.CSV")];
+
+        await wrapper.find('[data-testid="drop-zone"]').trigger("drop", { dataTransfer: { files } });
+
+        expect(wrapper.findAll('[data-testid="selected-files"] li').map((item) => item.text())).toEqual(["BOSS受注実績.CSV1 KB", "全注文_2025年11月.txt1 KB"]);
+        expect(wrapper.find('button[type="submit"]').text()).toBe("2ファイルを取り込む");
+    });
 });

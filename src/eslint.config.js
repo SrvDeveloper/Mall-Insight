@@ -17,6 +17,7 @@ const browserGlobals = {
     clearInterval: "readonly",
     MouseEvent: "readonly",
     KeyboardEvent: "readonly",
+    DragEvent: "readonly",
     HTMLElement: "readonly",
     HTMLInputElement: "readonly",
     HTMLButtonElement: "readonly",

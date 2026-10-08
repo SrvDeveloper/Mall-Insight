@@ -173,66 +173,59 @@ const validationMessage = computed(() => (loadError.value?.isValidationError ? (
             @synced="reloadAfterSync"
         />
 
-        <div class="inline-flex gap-0.5 self-start rounded-[9px] bg-stone-100 p-[3px]" role="tablist" aria-label="表示する一覧">
-            <button
-                id="tab-items"
-                type="button"
-                role="tab"
-                class="inline-flex h-8 items-center rounded-[7px] px-3.5 text-[13px]"
-                :class="activeTab === 'items' ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
-                :aria-selected="activeTab === 'items'"
-                aria-controls="panel-items"
-                @click="selectTab('items')"
-            >
-                品番
-            </button>
-            <button
-                id="tab-unregistered"
-                type="button"
-                role="tab"
-                class="inline-flex h-8 items-center gap-2 rounded-[7px] px-3.5 text-[13px]"
-                :class="activeTab === 'unregistered' ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
-                :aria-selected="activeTab === 'unregistered'"
-                aria-controls="panel-unregistered"
-                @click="selectTab('unregistered')"
-            >
-                未登録SKU
-                <span
-                    v-if="unregisteredTotal !== null"
-                    class="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
-                    :class="unregisteredTotal > 0 ? 'bg-amber-100 text-amber-800' : activeTab === 'unregistered' ? 'bg-white/15 text-stone-200' : 'bg-white text-stone-500'"
-                    data-testid="unregistered-total"
-                >
-                    {{ unregisteredTotal }}件
-                </span>
-            </button>
-        </div>
-
-        <UnregisteredSkuList
-            v-show="activeTab === 'unregistered'"
-            id="panel-unregistered"
-            :key="unregisteredListKey"
-            role="tabpanel"
-            aria-labelledby="tab-unregistered"
-            @loaded="unregisteredTotal = $event"
-        />
-
-        <section v-show="activeTab === 'items'" id="panel-items" class="overflow-hidden rounded-xl border border-stone-200 bg-white" role="tabpanel" aria-labelledby="tab-items" :aria-busy="isLoading">
+        <section class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
+            <!-- 需要予測の画面と同じく、一覧の切り替えのタブと絞り込みを1行に並べる -->
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
-                <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="状態で絞り込み">
-                    <button
-                        v-for="filter in STATUS_FILTERS"
-                        :key="filter.value"
-                        type="button"
-                        class="h-8 rounded-full border bg-white px-3 text-[13px]"
-                        :class="currentQuery.status === filter.value ? 'border-stone-900 font-semibold text-stone-900' : 'border-stone-200 text-stone-600 hover:border-stone-300'"
-                        :aria-pressed="currentQuery.status === filter.value"
-                        @click="updateQuery({ status: filter.value, page: 1 })"
-                    >
-                        {{ filter.label }}
-                    </button>
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="tablist" aria-label="表示する一覧">
+                        <button
+                            id="tab-items"
+                            type="button"
+                            role="tab"
+                            class="inline-flex h-8 items-center rounded-[7px] px-3.5 text-[13px]"
+                            :class="activeTab === 'items' ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
+                            :aria-selected="activeTab === 'items'"
+                            aria-controls="panel-items"
+                            @click="selectTab('items')"
+                        >
+                            品番
+                        </button>
+                        <button
+                            id="tab-unregistered"
+                            type="button"
+                            role="tab"
+                            class="inline-flex h-8 items-center gap-2 rounded-[7px] px-3.5 text-[13px]"
+                            :class="activeTab === 'unregistered' ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
+                            :aria-selected="activeTab === 'unregistered'"
+                            aria-controls="panel-unregistered"
+                            @click="selectTab('unregistered')"
+                        >
+                            未登録SKU
+                            <span
+                                v-if="unregisteredTotal !== null"
+                                class="rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums"
+                                :class="unregisteredTotal > 0 ? 'bg-amber-100 text-amber-800' : activeTab === 'unregistered' ? 'bg-white/15 text-stone-200' : 'bg-white text-stone-500'"
+                                data-testid="unregistered-total"
+                            >
+                                {{ unregisteredTotal }}件
+                            </span>
+                        </button>
+                    </div>
+                    <div v-show="activeTab === 'items'" class="inline-flex flex-wrap gap-1.5" role="group" aria-label="状態で絞り込み">
+                        <button
+                            v-for="filter in STATUS_FILTERS"
+                            :key="filter.value"
+                            type="button"
+                            class="h-8 rounded-full border bg-white px-3 text-[13px]"
+                            :class="currentQuery.status === filter.value ? 'border-stone-900 font-semibold text-stone-900' : 'border-stone-200 text-stone-600 hover:border-stone-300'"
+                            :aria-pressed="currentQuery.status === filter.value"
+                            @click="updateQuery({ status: filter.value, page: 1 })"
+                        >
+                            {{ filter.label }}
+                        </button>
+                    </div>
                 </div>
-                <form class="w-full lg:w-72" role="search" @submit.prevent="search">
+                <form v-show="activeTab === 'items'" class="w-full lg:w-72" role="search" @submit.prevent="search">
                     <label class="flex h-9 items-center gap-2 rounded-lg border border-stone-200 px-3 text-stone-400 focus-within:border-stone-900">
                         <svg class="size-[15px] shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
                             <circle cx="7" cy="7" r="4.5" />
@@ -250,154 +243,169 @@ const validationMessage = computed(() => (loadError.value?.isValidationError ? (
                 </form>
             </div>
 
-            <p v-if="validationMessage" class="border-b border-stone-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">{{ validationMessage }}</p>
+            <UnregisteredSkuList
+                v-show="activeTab === 'unregistered'"
+                id="panel-unregistered"
+                :key="unregisteredListKey"
+                role="tabpanel"
+                aria-labelledby="tab-unregistered"
+                @loaded="unregisteredTotal = $event"
+            />
 
-            <div v-if="loadError && !loadError.isValidationError" class="flex flex-col items-center gap-3 px-6 py-16 text-center">
-                <p class="text-sm text-stone-600">一覧を表示できませんでした。</p>
-                <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load">再読み込み</button>
-            </div>
+            <div v-show="activeTab === 'items'" id="panel-items" role="tabpanel" aria-labelledby="tab-items">
+                <p v-if="validationMessage" class="border-b border-stone-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">{{ validationMessage }}</p>
 
-            <div v-else-if="!result && isLoading" class="px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
-
-            <div v-else-if="result && result.data.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
-                {{ hasFilter ? "条件に一致する品番はありません。" : "品番がまだ登録されていません。上の「取得実行」を押すと、ここに表示されます。" }}
-            </div>
-
-            <div v-else-if="result" class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">
-                <table class="w-full min-w-[52rem] border-separate border-spacing-0 text-left text-[13px]">
-                    <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-300 [&_th]:bg-white">
-                        <tr>
-                            <th scope="col" class="w-12 py-2.5 pl-4"><span class="sr-only">SKUを表示</span></th>
-                            <th scope="col" class="px-3 py-2.5">品番</th>
-                            <th scope="col" class="px-3 py-2.5">親ASIN</th>
-                            <th scope="col" class="px-3 py-2.5 text-right">SKU数</th>
-                            <th scope="col" class="px-3 py-2.5">状態</th>
-                            <th scope="col" class="px-4 py-2.5 whitespace-nowrap">CrossWalker更新日時</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template v-for="item in result.data" :key="item.id">
-                            <tr
-                                class="h-11 cursor-pointer [&>*]:border-t [&>*]:border-stone-100"
-                                :class="expandedItemIds.has(item.id) ? 'bg-stone-50' : 'hover:bg-stone-50'"
-                                @click="toggleExpanded(item.id)"
-                            >
-                                <td class="py-0 pl-4">
-                                    <button
-                                        type="button"
-                                        class="flex size-7 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-200 hover:text-stone-900"
-                                        :aria-expanded="expandedItemIds.has(item.id)"
-                                        :aria-controls="`skus-${item.id}`"
-                                        :aria-label="`${item.item_no} のSKUを${expandedItemIds.has(item.id) ? '閉じる' : '表示'}`"
-                                        @click.stop="toggleExpanded(item.id)"
-                                    >
-                                        <svg
-                                            class="size-4 transition-transform"
-                                            :class="expandedItemIds.has(item.id) ? 'rotate-90' : ''"
-                                            viewBox="0 0 20 20"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="1.8"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            aria-hidden="true"
-                                        >
-                                            <path d="m8 5 5 5-5 5" />
-                                        </svg>
-                                    </button>
-                                </td>
-                                <td class="px-3 whitespace-nowrap">
-                                    <span class="font-mono text-sm font-medium text-stone-900">{{ item.item_no }}</span>
-                                    <span class="ml-2 rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ item.brand }}・{{ item.category }}</span>
-                                </td>
-                                <td class="px-3 whitespace-nowrap">
-                                    <span v-if="item.parent_asin" class="font-mono text-[12.5px] text-stone-700">{{ item.parent_asin }}</span>
-                                    <span v-else class="text-stone-400">未設定</span>
-                                </td>
-                                <td class="px-3 text-right whitespace-nowrap tabular-nums">
-                                    <span class="text-stone-900">{{ item.skus.length }}</span>
-                                    <span v-if="discontinuedCount(item) > 0" class="ml-1 text-[11px] text-stone-500">（廃番 {{ discontinuedCount(item) }}）</span>
-                                </td>
-                                <td class="px-3">
-                                    <span class="rounded-full px-2 py-0.5 text-[11px]" :class="item.status === 'active' ? 'border border-stone-200 text-stone-600' : 'bg-stone-100 text-stone-500'">{{
-                                        item.status_label
-                                    }}</span>
-                                </td>
-                                <td class="px-4 whitespace-nowrap text-stone-500 tabular-nums">{{ formatDateTime(item.crosswalker_updated_at) }}</td>
-                            </tr>
-                            <tr v-if="expandedItemIds.has(item.id)" :id="`skus-${item.id}`" class="bg-stone-50">
-                                <td />
-                                <td colspan="5" class="px-3 pt-1 pb-4">
-                                    <div v-if="item.skus.length > 0" class="overflow-x-auto rounded-lg border border-stone-200 bg-white">
-                                        <table class="w-full border-separate border-spacing-0 text-left text-[13px]" :aria-label="`${item.item_no} のSKU`">
-                                            <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-200">
-                                                <tr>
-                                                    <th scope="col" class="px-3 py-2">SKUコード</th>
-                                                    <th scope="col" class="px-3 py-2">子ASIN</th>
-                                                    <th scope="col" class="px-3 py-2">TQ品番</th>
-                                                    <th scope="col" class="px-3 py-2">TQカラーNo</th>
-                                                    <th scope="col" class="px-3 py-2">TQサイズ</th>
-                                                    <th scope="col" class="px-3 py-2">状態</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr
-                                                    v-for="(sku, index) in item.skus"
-                                                    :key="sku.id"
-                                                    :class="[index > 0 ? '[&>*]:border-t [&>*]:border-stone-100' : '', sku.status === 'inactive' ? 'text-stone-400' : '']"
-                                                >
-                                                    <td class="px-3 py-2 font-mono text-[12.5px] whitespace-nowrap" :class="sku.status === 'inactive' ? '' : 'text-stone-900'">{{ sku.sku_code }}</td>
-                                                    <td class="px-3 py-2 whitespace-nowrap">
-                                                        <span v-if="sku.child_asin" class="font-mono text-[12.5px]" :class="sku.status === 'inactive' ? '' : 'text-stone-700'">{{
-                                                            sku.child_asin
-                                                        }}</span>
-                                                        <span v-else class="text-stone-400">未設定</span>
-                                                    </td>
-                                                    <td class="px-3 py-2 font-mono text-[12.5px] whitespace-nowrap">{{ sku.tq_item_no ?? "—" }}</td>
-                                                    <td class="px-3 py-2 font-mono text-[12.5px]">{{ sku.tq_color_no ?? "—" }}</td>
-                                                    <td class="px-3 py-2 font-mono text-[12.5px]">{{ sku.tq_size ?? "—" }}</td>
-                                                    <td class="px-3 py-2">
-                                                        <span
-                                                            v-if="sku.status"
-                                                            class="rounded-full px-2 py-0.5 text-[11px]"
-                                                            :class="sku.status === 'active' ? 'border border-stone-200 text-stone-600' : 'bg-stone-100 text-stone-500'"
-                                                            >{{ sku.status_label }}</span
-                                                        >
-                                                        <span v-else class="text-xs text-stone-400">CrossWalker未登録</span>
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <p v-else class="py-2 text-[13px] text-stone-400">所属するSKUはありません。</p>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
-
-            <footer v-if="result && result.meta.total > 0" class="flex items-center justify-between gap-3 border-t border-stone-200 px-4 py-3 text-[13px] text-stone-600">
-                <p class="tabular-nums">{{ result.meta.total }}件中 {{ result.meta.from }}–{{ result.meta.to }}件</p>
-                <div class="flex gap-2">
-                    <button
-                        type="button"
-                        class="h-8 rounded-lg border border-stone-300 px-3 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
-                        :disabled="result.meta.current_page <= 1 || isLoading"
-                        @click="updateQuery({ page: result.meta.current_page - 1 })"
-                    >
-                        前へ
-                    </button>
-                    <button
-                        type="button"
-                        class="h-8 rounded-lg border border-stone-300 px-3 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
-                        :disabled="result.meta.current_page >= result.meta.last_page || isLoading"
-                        @click="updateQuery({ page: result.meta.current_page + 1 })"
-                    >
-                        次へ
-                    </button>
+                <div v-if="loadError && !loadError.isValidationError" class="flex flex-col items-center gap-3 px-6 py-16 text-center">
+                    <p class="text-sm text-stone-600">一覧を表示できませんでした。</p>
+                    <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load">再読み込み</button>
                 </div>
-            </footer>
+
+                <div v-else-if="!result && isLoading" class="px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
+
+                <div v-else-if="result && result.data.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
+                    {{ hasFilter ? "条件に一致する品番はありません。" : "品番がまだ登録されていません。上の「取得実行」を押すと、ここに表示されます。" }}
+                </div>
+
+                <div v-else-if="result" class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">
+                    <table class="w-full min-w-[52rem] border-separate border-spacing-0 text-left text-[13px]">
+                        <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-300 [&_th]:bg-white">
+                            <tr>
+                                <th scope="col" class="w-12 py-2.5 pl-4"><span class="sr-only">SKUを表示</span></th>
+                                <th scope="col" class="px-3 py-2.5">品番</th>
+                                <th scope="col" class="px-3 py-2.5">親ASIN</th>
+                                <th scope="col" class="px-3 py-2.5 text-right">SKU数</th>
+                                <th scope="col" class="px-3 py-2.5">状態</th>
+                                <th scope="col" class="px-4 py-2.5 whitespace-nowrap">CrossWalker更新日時</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template v-for="item in result.data" :key="item.id">
+                                <tr
+                                    class="h-11 cursor-pointer [&>*]:border-t [&>*]:border-stone-100"
+                                    :class="expandedItemIds.has(item.id) ? 'bg-stone-50' : 'hover:bg-stone-50'"
+                                    @click="toggleExpanded(item.id)"
+                                >
+                                    <td class="py-0 pl-4">
+                                        <button
+                                            type="button"
+                                            class="flex size-7 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-200 hover:text-stone-900"
+                                            :aria-expanded="expandedItemIds.has(item.id)"
+                                            :aria-controls="`skus-${item.id}`"
+                                            :aria-label="`${item.item_no} のSKUを${expandedItemIds.has(item.id) ? '閉じる' : '表示'}`"
+                                            @click.stop="toggleExpanded(item.id)"
+                                        >
+                                            <svg
+                                                class="size-4 transition-transform"
+                                                :class="expandedItemIds.has(item.id) ? 'rotate-90' : ''"
+                                                viewBox="0 0 20 20"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path d="m8 5 5 5-5 5" />
+                                            </svg>
+                                        </button>
+                                    </td>
+                                    <td class="px-3 whitespace-nowrap">
+                                        <span class="font-mono text-sm font-medium text-stone-900">{{ item.item_no }}</span>
+                                        <span class="ml-2 rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ item.brand }}・{{ item.category }}</span>
+                                    </td>
+                                    <td class="px-3 whitespace-nowrap">
+                                        <span v-if="item.parent_asin" class="font-mono text-[12.5px] text-stone-700">{{ item.parent_asin }}</span>
+                                        <span v-else class="text-stone-400">未設定</span>
+                                    </td>
+                                    <td class="px-3 text-right whitespace-nowrap tabular-nums">
+                                        <span class="text-stone-900">{{ item.skus.length }}</span>
+                                        <span v-if="discontinuedCount(item) > 0" class="ml-1 text-[11px] text-stone-500">（廃番 {{ discontinuedCount(item) }}）</span>
+                                    </td>
+                                    <td class="px-3">
+                                        <span
+                                            class="rounded-full px-2 py-0.5 text-[11px]"
+                                            :class="item.status === 'active' ? 'border border-stone-200 text-stone-600' : 'bg-stone-100 text-stone-500'"
+                                            >{{ item.status_label }}</span
+                                        >
+                                    </td>
+                                    <td class="px-4 whitespace-nowrap text-stone-500 tabular-nums">{{ formatDateTime(item.crosswalker_updated_at) }}</td>
+                                </tr>
+                                <tr v-if="expandedItemIds.has(item.id)" :id="`skus-${item.id}`" class="bg-stone-50">
+                                    <td />
+                                    <td colspan="5" class="px-3 pt-1 pb-4">
+                                        <div v-if="item.skus.length > 0" class="overflow-x-auto rounded-lg border border-stone-200 bg-white">
+                                            <table class="w-full border-separate border-spacing-0 text-left text-[13px]" :aria-label="`${item.item_no} のSKU`">
+                                                <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-200">
+                                                    <tr>
+                                                        <th scope="col" class="px-3 py-2">SKUコード</th>
+                                                        <th scope="col" class="px-3 py-2">子ASIN</th>
+                                                        <th scope="col" class="px-3 py-2">TQ品番</th>
+                                                        <th scope="col" class="px-3 py-2">TQカラーNo</th>
+                                                        <th scope="col" class="px-3 py-2">TQサイズ</th>
+                                                        <th scope="col" class="px-3 py-2">状態</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr
+                                                        v-for="(sku, index) in item.skus"
+                                                        :key="sku.id"
+                                                        :class="[index > 0 ? '[&>*]:border-t [&>*]:border-stone-100' : '', sku.status === 'inactive' ? 'text-stone-400' : '']"
+                                                    >
+                                                        <td class="px-3 py-2 font-mono text-[12.5px] whitespace-nowrap" :class="sku.status === 'inactive' ? '' : 'text-stone-900'">
+                                                            {{ sku.sku_code }}
+                                                        </td>
+                                                        <td class="px-3 py-2 whitespace-nowrap">
+                                                            <span v-if="sku.child_asin" class="font-mono text-[12.5px]" :class="sku.status === 'inactive' ? '' : 'text-stone-700'">{{
+                                                                sku.child_asin
+                                                            }}</span>
+                                                            <span v-else class="text-stone-400">未設定</span>
+                                                        </td>
+                                                        <td class="px-3 py-2 font-mono text-[12.5px] whitespace-nowrap">{{ sku.tq_item_no ?? "—" }}</td>
+                                                        <td class="px-3 py-2 font-mono text-[12.5px]">{{ sku.tq_color_no ?? "—" }}</td>
+                                                        <td class="px-3 py-2 font-mono text-[12.5px]">{{ sku.tq_size ?? "—" }}</td>
+                                                        <td class="px-3 py-2">
+                                                            <span
+                                                                v-if="sku.status"
+                                                                class="rounded-full px-2 py-0.5 text-[11px]"
+                                                                :class="sku.status === 'active' ? 'border border-stone-200 text-stone-600' : 'bg-stone-100 text-stone-500'"
+                                                                >{{ sku.status_label }}</span
+                                                            >
+                                                            <span v-else class="text-xs text-stone-400">CrossWalker未登録</span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <p v-else class="py-2 text-[13px] text-stone-400">所属するSKUはありません。</p>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <footer v-if="result && result.meta.total > 0" class="flex items-center justify-between gap-3 border-t border-stone-200 px-4 py-3 text-[13px] text-stone-600">
+                    <p class="tabular-nums">{{ result.meta.total }}件中 {{ result.meta.from }}–{{ result.meta.to }}件</p>
+                    <div class="flex gap-2">
+                        <button
+                            type="button"
+                            class="h-8 rounded-lg border border-stone-300 px-3 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            :disabled="result.meta.current_page <= 1 || isLoading"
+                            @click="updateQuery({ page: result.meta.current_page - 1 })"
+                        >
+                            前へ
+                        </button>
+                        <button
+                            type="button"
+                            class="h-8 rounded-lg border border-stone-300 px-3 font-medium hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            :disabled="result.meta.current_page >= result.meta.last_page || isLoading"
+                            @click="updateQuery({ page: result.meta.current_page + 1 })"
+                        >
+                            次へ
+                        </button>
+                    </div>
+                </footer>
+            </div>
         </section>
     </div>
 </template>

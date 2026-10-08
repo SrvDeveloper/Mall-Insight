@@ -52,7 +52,8 @@ function formatRange(first: string | null, last: string | null): string | null {
 </script>
 
 <template>
-    <section class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
+    <!-- 品番・SKUの画面のカードの中に表示するため、枠は付けない -->
+    <section :aria-busy="isLoading">
         <div v-if="hasError" class="flex flex-col items-center gap-3 px-6 py-16 text-center">
             <p class="text-sm text-stone-600">未登録のSKUを表示できませんでした。</p>
             <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load()">再読み込み</button>
