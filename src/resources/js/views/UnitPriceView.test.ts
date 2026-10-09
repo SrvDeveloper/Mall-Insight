@@ -3,6 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import UnitPriceView from "@/views/UnitPriceView.vue";
 import { fetchItemUnitPrices, saveItemUnitPrices } from "@/api/itemUnitPrices";
+import { ApiError } from "@/api/client";
+import { formatDateTime } from "@/components/salesTarget/format";
 import type { ItemUnitPriceResponse, ItemUnitPriceRow } from "@/types/api";
 
 vi.mock("@/api/itemUnitPrices", () => ({ fetchItemUnitPrices: vi.fn(), saveItemUnitPrices: vi.fn() }));
@@ -57,6 +59,17 @@ describe("UnitPriceView", () => {
         wrapper.unmount();
     });
 
+    it("shows only the last changed time and the user's name in the changed column", async () => {
+        const changedOnScreen: ItemUnitPriceRow = { ...registered, item_no: "fisi-06", registered: { ...registered.registered!, source_label: "画面で変更", changed_by: "山田 太郎" } };
+        vi.mocked(fetchItemUnitPrices).mockResolvedValue({ ...response(), data: [registered, changedOnScreen] });
+        const wrapper = await mountView();
+        const changed = wrapper.findAll('[data-testid="changed"]').map((cell) => cell.text());
+
+        expect(changed[0]).toBe(formatDateTime("2026-10-08T09:00:00+09:00"));
+        expect(changed[1]).toBe(`${formatDateTime("2026-10-08T09:00:00+09:00")} 山田 太郎`);
+        wrapper.unmount();
+    });
+
     it("filters to target items, registered items and by keyword", async () => {
         const wrapper = await mountView();
         const itemNos = () => wrapper.findAll('[data-testid="price-row"] .font-mono').map((cell) => cell.text());
@@ -71,21 +84,69 @@ describe("UnitPriceView", () => {
         wrapper.unmount();
     });
 
-    it("edits the three prices of a row and leaves blank ones to the average", async () => {
+    it("edits the three prices of an item in a dialog and leaves blank ones to the average", async () => {
         vi.mocked(saveItemUnitPrices).mockResolvedValue();
         const wrapper = await mountView();
 
         await wrapper.find('[data-testid="edit-price-fisi-05"]').trigger("click");
-        const row = wrapper.findAll('[data-testid="price-row"]')[1]!;
-        expect((row.find('input[aria-label="fisi-05 の全体の単価"]').element as HTMLInputElement).value).toBe("4400");
-        expect(row.find('input[aria-label="fisi-05 のAmazonの単価"]').attributes("placeholder")).toBe("3,700");
-        await row.find('input[aria-label="fisi-05 のAmazonの単価"]').setValue("3600");
-        await row.find('[data-testid="save-price"]').trigger("click");
+        const dialog = wrapper.find('[data-testid="price-dialog"]');
+        expect(dialog.find("h2").text()).toBe("fisi-05 の単価を編集");
+        expect(wrapper.findAll('[data-testid="price-row"] input')).toHaveLength(0);
+        const allInput = dialog.find('input[aria-label="fisi-05 の全体の単価"]');
+        expect((allInput.element as HTMLInputElement).value).toBe("4400");
+        expect(document.activeElement).toBe(allInput.element);
+        expect(dialog.find('input[aria-label="fisi-05 のAmazonの単価"]').attributes("placeholder")).toBe("3,700");
+        expect(dialog.find('[data-testid="dialog-actual-boss"]').text()).toBe("平均 5,500（10個）");
+        await dialog.find('input[aria-label="fisi-05 のAmazonの単価"]').setValue("3600");
+        await dialog.find("form").trigger("submit");
         await flushPromises();
 
         expect(saveItemUnitPrices).toHaveBeenCalledWith("fisi-05", { unit_price: 4400, amazon_unit_price: 3600, boss_unit_price: null });
         expect(fetchItemUnitPrices).toHaveBeenCalledTimes(2);
+        expect(wrapper.find('[data-testid="price-dialog"]').exists()).toBe(false);
         expect(wrapper.text()).toContain("fisi-05 の単価を保存しました。");
+        wrapper.unmount();
+    });
+
+    it("keeps the dialog open with the error under the field when the input is invalid", async () => {
+        vi.mocked(saveItemUnitPrices).mockRejectedValue(new ApiError("入力内容に誤りがあります。", 422, { boss_unit_price: ["BOSSの単価には、1以上の数値を指定してください。"] }));
+        const wrapper = await mountView();
+
+        await wrapper.find('[data-testid="edit-price-aa-01"]').trigger("click");
+        expect(wrapper.find('[data-testid="price-dialog"] h2').text()).toBe("aa-01 の単価を登録");
+        await wrapper.find('input[aria-label="aa-01 のBOSSの単価"]').setValue("0");
+        await wrapper.find('[data-testid="price-dialog"] form').trigger("submit");
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="price-dialog"]').text()).toContain("BOSSの単価には、1以上の数値を指定してください。");
+        expect(fetchItemUnitPrices).toHaveBeenCalledTimes(1);
+        wrapper.unmount();
+    });
+
+    it("closes the dialog without saving by cancel, the close button, Escape and the backdrop", async () => {
+        const wrapper = await mountView();
+        const open = () => wrapper.find('[data-testid="edit-price-fisi-05"]').trigger("click");
+        const isOpen = () => wrapper.find('[data-testid="price-dialog"]').exists();
+
+        await open();
+        await wrapper
+            .findAll('[data-testid="price-dialog"] button')
+            .find((button) => button.text() === "キャンセル")!
+            .trigger("click");
+        expect(isOpen()).toBe(false);
+        await open();
+        await wrapper.find('[data-testid="price-dialog"] button[aria-label="閉じる"]').trigger("click");
+        expect(isOpen()).toBe(false);
+        await open();
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        await flushPromises();
+        expect(isOpen()).toBe(false);
+        await open();
+        await wrapper.find('[data-testid="price-dialog"]').element.parentElement!.dispatchEvent(new MouseEvent("click"));
+        await flushPromises();
+        expect(isOpen()).toBe(false);
+
+        expect(saveItemUnitPrices).not.toHaveBeenCalled();
         wrapper.unmount();
     });
 });

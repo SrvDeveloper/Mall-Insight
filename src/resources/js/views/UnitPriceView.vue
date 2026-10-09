@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, shallowRef, useTemplateRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef } from "vue";
 import { ApiError } from "@/api/client";
 import { fetchItemUnitPrices, saveItemUnitPrices } from "@/api/itemUnitPrices";
 import { formatDateTime, formatQuantity, toQuantity } from "@/components/salesTarget/format";
@@ -9,7 +9,7 @@ import type { ItemUnitPriceResponse, ItemUnitPriceRow } from "@/types/api";
  * 単価（バックログ B-110、決定記録 K-062・K-063）。品番ごとに、全体・Amazon・BOSSの単価（税込）を登録する。
  * 全体の単価はモールを分けない金額（販売目標の売上金額の概算など）に、Amazon・BOSSの単価はモール別の金額に使う。
  * 登録の無い単価は、直近12か月の販売実績の平均単価を使うため、平均単価を並べて見せる。
- * 見た目は在庫推移の画面（K-047）とそろえる。行の「編集」で、その行の3つの単価をまとめて直す。
+ * 見た目は在庫推移の画面（K-047）とそろえる。行の「編集」で開くダイアログで、その品番の3つの単価をまとめて直す。
  */
 
 type Filter = "all" | "target" | "registered" | "unregistered";
@@ -80,15 +80,21 @@ const facts = computed(() => {
     ];
 });
 
-// 行の編集
-const editingItemNo = ref<string | null>(null);
+// 単価の編集（ダイアログ）
+const editing = shallowRef<ItemUnitPriceRow | null>(null);
 const draft = ref<Record<PriceKey, number | string>>({ unit_price: "", amazon_unit_price: "", boss_unit_price: "" });
 const isSaving = ref(false);
 const errors = ref<Record<string, string[]>>({});
 const firstInput = useTemplateRef<HTMLInputElement[]>("firstInput");
 
-async function startEdit(row: ItemUnitPriceRow): Promise<void> {
-    editingItemNo.value = row.item_no;
+function onKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") {
+        closeDialog();
+    }
+}
+
+async function openDialog(row: ItemUnitPriceRow): Promise<void> {
+    editing.value = row;
     draft.value = {
         unit_price: row.registered?.unit_price ?? "",
         amazon_unit_price: row.registered?.amazon_unit_price ?? "",
@@ -96,12 +102,21 @@ async function startEdit(row: ItemUnitPriceRow): Promise<void> {
     };
     errors.value = {};
     message.value = null;
+    document.addEventListener("keydown", onKeydown);
     await nextTick();
     firstInput.value?.[0]?.focus();
 }
 
-async function save(row: ItemUnitPriceRow): Promise<void> {
-    if (isSaving.value) {
+function closeDialog(): void {
+    editing.value = null;
+    document.removeEventListener("keydown", onKeydown);
+}
+
+onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
+
+async function save(): Promise<void> {
+    const row = editing.value;
+    if (!row || isSaving.value) {
         return;
     }
     isSaving.value = true;
@@ -112,7 +127,7 @@ async function save(row: ItemUnitPriceRow): Promise<void> {
             amazon_unit_price: toQuantity(draft.value.amazon_unit_price),
             boss_unit_price: toQuantity(draft.value.boss_unit_price),
         });
-        editingItemNo.value = null;
+        closeDialog();
         message.value = `${row.item_no} の単価を保存しました。`;
         await load();
     } catch (error) {
@@ -124,7 +139,7 @@ async function save(row: ItemUnitPriceRow): Promise<void> {
     }
 }
 
-const firstError = computed(() => Object.values(errors.value).flat()[0] ?? null);
+const errorOf = (key: PriceKey): string | null => errors.value[key]?.[0] ?? null;
 </script>
 
 <template>
@@ -207,35 +222,15 @@ const firstError = computed(() => Object.values(errors.value).flat()[0] ?? null)
                             </tr>
                         </thead>
                         <tbody>
-                            <tr
-                                v-for="row in visibleRows"
-                                :key="row.item_no"
-                                class="[&>*]:border-t [&>*]:border-stone-100"
-                                :class="editingItemNo === row.item_no ? 'bg-stone-50' : 'hover:bg-stone-50'"
-                                data-testid="price-row"
-                            >
+                            <tr v-for="row in visibleRows" :key="row.item_no" class="hover:bg-stone-50 [&>*]:border-t [&>*]:border-stone-100" data-testid="price-row">
                                 <td class="px-4 py-2.5 whitespace-nowrap">
                                     <span class="font-mono text-sm font-medium text-stone-900">{{ row.item_no }}</span>
                                     <span class="ml-2 rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ row.brand }}・{{ row.category }}</span>
                                     <span v-if="row.is_target_item" class="ml-1.5 rounded-full bg-stone-900 px-2 py-px text-[11px] font-semibold text-white">対象</span>
                                     <span v-if="row.status !== 'active'" class="ml-1.5 rounded-full bg-stone-100 px-2 py-px text-[11px] text-stone-500">{{ row.status_label }}</span>
                                 </td>
-                                <td v-for="(column, index) in COLUMNS" :key="column.key" class="px-3 py-2 text-right align-top tabular-nums">
-                                    <input
-                                        v-if="editingItemNo === row.item_no"
-                                        :ref="index === 0 ? 'firstInput' : undefined"
-                                        v-model="draft[column.key]"
-                                        type="number"
-                                        min="1"
-                                        inputmode="numeric"
-                                        :placeholder="row.actual[column.actual].unit_price === null ? '—' : formatQuantity(row.actual[column.actual].unit_price!)"
-                                        class="h-8 w-full rounded-md border border-stone-300 bg-white px-2 text-right text-[13px] tabular-nums placeholder:text-stone-300 focus:border-stone-900 focus:outline-none"
-                                        :aria-label="`${row.item_no} の${column.label}の単価`"
-                                        @keydown.enter.prevent="save(row)"
-                                        @keydown.esc="editingItemNo = null"
-                                    />
+                                <td v-for="column in COLUMNS" :key="column.key" class="px-3 py-2 text-right align-top tabular-nums">
                                     <span
-                                        v-else
                                         class="block text-sm"
                                         :class="row.registered?.[column.key] != null ? 'font-semibold text-stone-900' : 'text-stone-300'"
                                         :data-testid="`registered-${column.actual}`"
@@ -248,36 +243,19 @@ const firstError = computed(() => Object.values(errors.value).flat()[0] ?? null)
                                         <template v-else>販売実績なし</template>
                                     </span>
                                 </td>
-                                <td class="px-3 py-2.5 align-top text-[11px] whitespace-nowrap text-stone-500 tabular-nums">
+                                <td class="px-3 py-2.5 align-top text-[11px] whitespace-nowrap text-stone-500 tabular-nums" data-testid="changed">
                                     <template v-if="row.registered">
                                         {{ formatDateTime(row.registered.changed_at) }}
-                                        <span class="block">{{ row.registered.changed_by ?? row.registered.source_label }}</span>
+                                        <span v-if="row.registered.changed_by" class="block">{{ row.registered.changed_by }}</span>
                                     </template>
                                     <span v-else class="text-stone-300">—</span>
                                 </td>
                                 <td class="px-4 py-2 text-right align-top whitespace-nowrap">
-                                    <div v-if="editingItemNo === row.item_no" class="inline-flex flex-col items-end gap-1">
-                                        <div class="inline-flex items-center gap-1">
-                                            <button
-                                                type="button"
-                                                class="h-8 rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white hover:bg-stone-700 disabled:opacity-40"
-                                                :disabled="isSaving"
-                                                data-testid="save-price"
-                                                @click="save(row)"
-                                            >
-                                                {{ isSaving ? "保存中…" : "保存" }}
-                                            </button>
-                                            <button type="button" class="h-8 rounded-lg px-2.5 text-xs text-stone-600 hover:bg-stone-200" @click="editingItemNo = null">取消</button>
-                                        </div>
-                                        <span v-if="firstError" class="text-[11px] text-red-700">{{ firstError }}</span>
-                                        <span v-else class="text-[11px] text-stone-400">空欄は平均単価を使います</span>
-                                    </div>
                                     <button
-                                        v-else
                                         type="button"
                                         class="h-8 rounded-lg px-2.5 text-xs font-medium text-stone-700 hover:bg-stone-200 hover:text-stone-900"
                                         :data-testid="`edit-price-${row.item_no}`"
-                                        @click="startEdit(row)"
+                                        @click="openDialog(row)"
                                     >
                                         {{ row.registered ? "編集" : "登録" }}
                                     </button>
@@ -288,5 +266,80 @@ const firstError = computed(() => Object.values(errors.value).flat()[0] ?? null)
                 </div>
             </section>
         </template>
+
+        <div v-if="editing" class="fixed inset-0 z-50 flex items-start justify-center bg-stone-900/40 p-4 sm:p-10" @click.self="closeDialog">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="price-dialog-title"
+                class="flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-black/5"
+                data-testid="price-dialog"
+            >
+                <header class="flex items-start justify-between gap-3 border-b border-stone-200 px-5 py-4">
+                    <div class="flex flex-col gap-0.5">
+                        <h2 id="price-dialog-title" class="text-base font-bold text-stone-900">
+                            <span class="font-mono">{{ editing.item_no }}</span> の単価を{{ editing.registered ? "編集" : "登録" }}
+                        </h2>
+                        <p class="text-xs text-stone-500">{{ editing.brand }}・{{ editing.category }}。税込の単価を入れます。空欄の単価は直近12か月の平均単価を使います。</p>
+                    </div>
+                    <button
+                        type="button"
+                        class="flex size-8 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+                        aria-label="閉じる"
+                        @click="closeDialog"
+                    >
+                        <svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                            <path d="m5 5 10 10M15 5 5 15" />
+                        </svg>
+                    </button>
+                </header>
+                <form class="flex flex-col gap-5 overflow-y-auto px-5 py-5" @submit.prevent="save">
+                    <div class="flex flex-col gap-4">
+                        <label v-for="(column, index) in COLUMNS" :key="column.key" class="grid grid-cols-[1fr_10rem] items-start gap-x-4 gap-y-1">
+                            <span class="flex flex-col gap-0.5 pt-2">
+                                <span class="text-[13px] font-semibold text-stone-800">{{ column.label }}</span>
+                                <span class="text-[11px] text-stone-500">{{ column.note }}</span>
+                            </span>
+                            <span class="flex flex-col gap-1">
+                                <span class="flex items-center gap-1.5">
+                                    <input
+                                        :ref="index === 0 ? 'firstInput' : undefined"
+                                        v-model="draft[column.key]"
+                                        type="number"
+                                        min="1"
+                                        inputmode="numeric"
+                                        :placeholder="editing.actual[column.actual].unit_price === null ? '—' : formatQuantity(editing.actual[column.actual].unit_price!)"
+                                        class="h-10 w-full rounded-lg border bg-white px-3 text-right text-sm tabular-nums placeholder:text-stone-300 focus:border-stone-900 focus:outline-none"
+                                        :class="errorOf(column.key) ? 'border-red-400' : 'border-stone-300'"
+                                        :aria-label="`${editing.item_no} の${column.label}の単価`"
+                                    />
+                                    <span class="text-xs text-stone-500">円</span>
+                                </span>
+                                <span class="text-right text-[11px] text-stone-500 tabular-nums" :data-testid="`dialog-actual-${column.actual}`">
+                                    <template v-if="editing.actual[column.actual].unit_price !== null"
+                                        >平均 {{ formatQuantity(editing.actual[column.actual].unit_price!) }}（{{ formatQuantity(editing.actual[column.actual].quantity) }}個）</template
+                                    >
+                                    <template v-else>販売実績なし</template>
+                                </span>
+                                <span v-if="errorOf(column.key)" class="text-xs text-red-700">{{ errorOf(column.key) }}</span>
+                            </span>
+                        </label>
+                    </div>
+                    <div class="flex justify-end gap-2 border-t border-stone-200 pt-4">
+                        <button type="button" class="h-10 rounded-lg border border-stone-300 bg-white px-4 text-[13px] font-medium text-stone-700 hover:bg-stone-100" @click="closeDialog">
+                            キャンセル
+                        </button>
+                        <button
+                            type="submit"
+                            class="h-10 rounded-lg bg-stone-900 px-5 text-[13px] font-semibold text-white hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            :disabled="isSaving"
+                            data-testid="save-price"
+                        >
+                            {{ isSaving ? "保存中…" : "保存" }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 </template>
