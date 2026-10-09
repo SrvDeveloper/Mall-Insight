@@ -146,7 +146,7 @@ describe("InventoryTrendView", () => {
         expect(wrapper.find('[data-testid="check-month-select"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="fact-check"]').text()).toContain("2027年1月");
         expect(wrapper.find('[data-testid="check-month-note"]').text()).toBe("3か月後・10/8 10:00 に変更");
-        expect(wrapper.findAll("thead tr")[1]!.findAll("th")[5]!.text()).toBe("27/1 判定");
+        expect(wrapper.findAll("thead tr")[0]!.findAll("th")[5]!.text()).toBe("27/1 判定");
     });
 
     it("keeps the form open with the reason when the check month cannot be saved", async () => {
@@ -176,19 +176,19 @@ describe("InventoryTrendView", () => {
 
         expect(wrapper.find('[data-testid="trend-table"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="view-table"]').attributes("aria-selected")).toBe("true");
-        const headers = wrapper.findAll("thead tr")[1]!.findAll("th");
+        const headers = wrapper.findAll("thead tr")[0]!.findAll("th");
         expect(headers[8]!.text()).toBe("27/4 判定");
-        expect(
-            wrapper
-                .findAll("thead tr")[0]!
-                .findAll("th")
-                .map((th) => th.text()),
-        ).toEqual(["", "2026", "2027"]);
+        expect(headers[2]!.text()).toBe("26/10 今月");
+        expect(wrapper.findAll("thead tr")).toHaveLength(1);
+        expect(headers[1]!.text()).toBe("現在庫 10/7時点");
+        expect(wrapper.findAll('[data-testid="stock-td"]')[0]!.text()).toBe("100");
 
         const cells = wrapper.findAll('[data-testid="sku-row"]')[0]!.findAll('[data-testid="month-cell"]');
         expect(cells[2]!.text()).toBe("15");
         expect(cells[3]!.text()).toBe("−15");
-        expect(cells[3]!.classes()).toEqual(expect.arrayContaining(["rounded-full", "bg-red-100", "text-red-700"]));
+        expect(cells[3]!.classes()).toEqual(expect.arrayContaining(["rounded-md", "bg-red-100", "text-red-700"]));
+        expect(wrapper.find('[data-testid="legend"]').text()).toContain("在庫不足");
+        expect(wrapper.find('[data-testid="legend"]').text()).not.toContain("足りない数");
         expect(wrapper.find('[data-testid="item-shortage"]').text()).toBe("欠品 1/2");
     });
 
@@ -200,7 +200,8 @@ describe("InventoryTrendView", () => {
 
         const cell = wrapper.find('[data-testid="sku-row"]').findAll('[data-testid="month-cell"]')[3]!;
         expect(cell.text()).toBe("0");
-        expect(cell.classes()).toContain("bg-amber-100");
+        // 在庫0も、足りない数と同じ赤い札
+        expect(cell.classes()).toEqual(expect.arrayContaining(["bg-red-100", "text-red-700"]));
         expect(wrapper.find('[data-testid="item-row"]').findAll("td")[4]!.text()).toBe("0");
     });
 
@@ -474,5 +475,55 @@ describe("InventoryTrendView", () => {
                 vi.useRealTimers();
             }
         });
+    });
+
+    it("opens the list in full screen and back, and fills the screen with the table", async () => {
+        Object.defineProperty(document, "fullscreenEnabled", { value: true, configurable: true });
+        let fullscreenElement: Element | null = null;
+        const enterFullscreen = (element: Element): Promise<void> => {
+            fullscreenElement = element;
+            document.dispatchEvent(new Event("fullscreenchange"));
+            return Promise.resolve();
+        };
+        Object.defineProperty(document, "fullscreenElement", { get: () => fullscreenElement, configurable: true });
+        HTMLElement.prototype.requestFullscreen = vi.fn(function (this: HTMLElement) {
+            return enterFullscreen(this);
+        });
+        document.exitFullscreen = vi.fn(() => {
+            fullscreenElement = null;
+            document.dispatchEvent(new Event("fullscreenchange"));
+            return Promise.resolve();
+        });
+
+        try {
+            const { wrapper } = await mountView();
+            const button = wrapper.find('[data-testid="fullscreen"]');
+            expect(button.text()).toBe("全画面");
+
+            await button.trigger("click");
+            await flushPromises();
+
+            expect(HTMLElement.prototype.requestFullscreen).toHaveBeenCalledTimes(1);
+            expect(fullscreenElement).toBe(wrapper.find('[data-testid="trend-section"]').element);
+            expect(wrapper.find('[data-testid="fullscreen"]').text()).toBe("全画面を終わる");
+            expect(wrapper.find('[data-testid="trend-table"]').classes()).toContain("flex-1");
+
+            await wrapper.find('[data-testid="fullscreen"]').trigger("click");
+            await flushPromises();
+
+            expect(document.exitFullscreen).toHaveBeenCalledTimes(1);
+            expect(wrapper.find('[data-testid="fullscreen"]').text()).toBe("全画面");
+            expect(wrapper.find('[data-testid="trend-table"]').classes()).toContain("max-h-[calc(100dvh-5rem)]");
+            wrapper.unmount();
+        } finally {
+            Reflect.deleteProperty(document, "fullscreenEnabled");
+            Reflect.deleteProperty(document, "fullscreenElement");
+        }
+    });
+
+    it("does not offer full screen when the browser cannot do it", async () => {
+        const { wrapper } = await mountView();
+
+        expect(wrapper.find('[data-testid="fullscreen"]').exists()).toBe(false);
     });
 });

@@ -98,7 +98,7 @@ describe("trendRows", () => {
 
         expect(rows!.rows[0]!.cells.map((cell) => cell.cover)).toEqual(["some", "limited", "empty", "shortage"]);
         expect(rows!.rows[0]!.status).toEqual({ label: "1月から欠品", isShortage: true });
-        expect(rows!.rows[0]!.coverText).toBe("在庫90・3.0か月分");
+        expect(rows!.rows[0]!.coverText).toBe("現在庫90・3.0か月分");
         expect(rows!.monthTexts).toEqual(["60", "30", "0", "−30"]);
         expect(rows!.monthInbounds[1]!.text).toBe("+10");
         expect(rows!.shortageCount).toBe(1);

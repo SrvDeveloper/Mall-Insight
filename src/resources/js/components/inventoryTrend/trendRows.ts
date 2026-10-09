@@ -61,7 +61,7 @@ export interface SkuRow {
     sku: SkuTrend;
     stockText: string;
     cells: MonthCell[];
-    /** 「在庫119・4.9か月分」（計算できないSKUは空） */
+    /** 「現在庫119・4.9か月分」（計算できないSKUは空） */
     coverText: string;
     /** 「1月から欠品」「12か月もつ」「3月までもつ」（計算できないSKUは null） */
     status: { label: string; isShortage: boolean } | null;
@@ -189,7 +189,7 @@ function toSkuRow(sku: SkuTrend, checkMonthIndex: number, monthCount: number): S
             tone: cellTone(month.shortfall, month.ending_stock),
             cover: coverLevel(month, sku.average_daily),
         })),
-        coverText: calculated && sku.average_daily && sku.average_daily > 0 ? `在庫${formatQuantity(sku.opening_stock!)}・${(sku.opening_stock! / (sku.average_daily * 30)).toFixed(1)}か月分` : "",
+        coverText: calculated && sku.average_daily && sku.average_daily > 0 ? `現在庫${formatQuantity(sku.opening_stock!)}・${(sku.opening_stock! / (sku.average_daily * 30)).toFixed(1)}か月分` : "",
         status: calculated ? skuStatus(sku, monthCount) : null,
         sparkline: calculated ? sparkline(sku, checkMonthIndex, monthCount) : null,
         uncalculatedSpan: sku.months ? monthCount - sku.months.length : 0,

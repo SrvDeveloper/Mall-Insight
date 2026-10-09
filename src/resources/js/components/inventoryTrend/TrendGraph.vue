@@ -74,7 +74,7 @@ const checkPosition = computed(() => `${sparkCheckPercent(props.checkMonthIndex,
                     </div>
                     <template v-if="row.sparkline">
                         <div class="flex items-baseline gap-1.5 text-[11px] text-stone-500">
-                            <span class="rounded-full bg-stone-100 px-2 py-px text-xs font-semibold text-stone-900 tabular-nums">在庫 {{ row.stockText }}</span>
+                            <span class="rounded-full bg-stone-100 px-2 py-px text-xs font-semibold text-stone-900 tabular-nums">現在庫 {{ row.stockText }}</span>
                             <span v-if="row.sku.average_daily !== null">1日 約{{ row.sku.average_daily.toFixed(2) }}個</span>
                             <span v-if="row.sku.is_partial_forecast" class="font-medium text-amber-700" :title="row.sku.forecast_reason_label ?? undefined">需要一部</span>
                         </div>

@@ -13,7 +13,7 @@ import { useVirtualRows } from "@/composables/useVirtualRows";
  * 表と同じく、見えている行だけを描く。
  */
 
-const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string; stockScope: StockScope }>();
+const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string; stockScope: StockScope; fill?: boolean }>();
 
 const ROW_HEIGHT = 44;
 
@@ -45,8 +45,8 @@ function columnTint(index: number): string {
 <template>
     <div
         ref="scrollBox"
-        class="max-h-[calc(100dvh-5rem)] overflow-auto select-none"
-        :class="isDragging ? 'cursor-grabbing' : ''"
+        class="overflow-auto select-none"
+        :class="[fill ? 'min-h-0 flex-1' : 'max-h-[calc(100dvh-5rem)]', isDragging ? 'cursor-grabbing' : '']"
         data-testid="trend-timeline"
         @scroll="onScroll"
         @pointerdown="onPointerDown"
@@ -66,7 +66,7 @@ function columnTint(index: number): string {
                     >
                         {{ shortMonthLabel(month.month) }}
                         <span class="text-[10px] font-normal" :class="index === checkMonthIndex ? 'text-stone-300' : 'text-stone-400'">{{
-                            index === 0 ? `${month.days}日分` : index === checkMonthIndex ? "判定" : "&nbsp;"
+                            index === 0 ? "今月" : index === checkMonthIndex ? "判定" : "&nbsp;"
                         }}</span>
                     </span>
                 </div>

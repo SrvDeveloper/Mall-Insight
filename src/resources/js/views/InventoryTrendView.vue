@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { fetchInventoryTrends } from "@/api/inventoryTrends";
 import CheckMonthSetting from "@/components/inventoryTrend/CheckMonthSetting.vue";
@@ -24,6 +24,9 @@ import type { DemandBasis, InventoryTrendResponse, SkuTrend, TrendScope } from "
  * 在庫は「全体」（6区分の合計）と「Amazon」「BOSS」（そのモールの在庫の区分と需要、B-121）を切り替える。モールの推移には
  * 入荷予定とフリー在庫・ECストックを入れず（K-072）、どれだけ不足するかを示す。補充の判断はしない（K-070）。
  * 品番には、今月から判定する月までの足りない数の合計を出す。選んだ在庫は URL に持たせる。
+ *
+ * 一覧（操作欄・凡例・表など）は、ブラウザの全画面表示で開ける。Esc キーか同じボタンで戻る。全画面表示に対応していない
+ * ブラウザではボタンを出さない。
  *
  * 見せ方は「表」「タイムライン」「グラフ」をタブで切り替える（K-047）。選んだ見せ方は URL に持たせ、再読み込みしても変わらない。
  * 表示用のデータはデータを読み込んだときに一度だけ作り、切り替えや絞り込みでは作り直さない。
@@ -135,6 +138,30 @@ watch([basis, scope], () => {
     filter.value = "all";
     void load();
 });
+
+// 全画面表示
+const trendSection = useTemplateRef<HTMLElement>("trendSection");
+const isFullscreen = ref(false);
+const canFullscreen = typeof document !== "undefined" && document.fullscreenEnabled === true;
+
+function onFullscreenChange(): void {
+    isFullscreen.value = document.fullscreenElement !== null && document.fullscreenElement === trendSection.value;
+}
+
+async function toggleFullscreen(): Promise<void> {
+    try {
+        if (document.fullscreenElement) {
+            await document.exitFullscreen();
+        } else {
+            await trendSection.value?.requestFullscreen();
+        }
+    } catch {
+        // 全画面表示を許可されなかったときは、そのままの表示を続ける
+    }
+}
+
+onMounted(() => document.addEventListener("fullscreenchange", onFullscreenChange));
+onBeforeUnmount(() => document.removeEventListener("fullscreenchange", onFullscreenChange));
 
 /** 推移の12か月（今月から）。 */
 const months = computed(() => result.value?.meta.months ?? []);
@@ -379,7 +406,14 @@ const facts = computed(() => {
                 対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに在庫推移が表示されます。
             </div>
 
-            <section v-else class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
+            <section
+                v-else
+                ref="trendSection"
+                class="overflow-hidden bg-white"
+                :class="isFullscreen ? 'flex h-full flex-col' : 'rounded-xl border border-stone-200'"
+                :aria-busy="isLoading"
+                data-testid="trend-section"
+            >
                 <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
                     <div class="flex flex-wrap items-center gap-3">
                         <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="tablist" aria-label="見せ方">
@@ -431,21 +465,36 @@ const facts = computed(() => {
                             </button>
                         </div>
                     </div>
-                    <label class="flex h-9 w-full items-center gap-2 rounded-lg border border-stone-200 px-3 text-stone-400 focus-within:border-stone-900 lg:w-60">
-                        <svg class="size-[15px] shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-                            <circle cx="7" cy="7" r="4.5" />
-                            <path d="m10.5 10.5 3 3" />
-                        </svg>
-                        <span class="sr-only">品番・SKUで絞り込み</span>
-                        <input v-model="keyword" type="search" placeholder="品番・SKUで絞り込み" class="w-full bg-transparent text-[13px] text-stone-900 outline-none placeholder:text-stone-400" />
-                    </label>
+                    <div class="flex w-full items-center gap-2 lg:w-auto">
+                        <label class="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-stone-200 px-3 text-stone-400 focus-within:border-stone-900 lg:w-60 lg:flex-none">
+                            <svg class="size-[15px] shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                                <circle cx="7" cy="7" r="4.5" />
+                                <path d="m10.5 10.5 3 3" />
+                            </svg>
+                            <span class="sr-only">品番・SKUで絞り込み</span>
+                            <input v-model="keyword" type="search" placeholder="品番・SKUで絞り込み" class="w-full bg-transparent text-[13px] text-stone-900 outline-none placeholder:text-stone-400" />
+                        </label>
+                        <button
+                            v-if="canFullscreen"
+                            type="button"
+                            class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-stone-200 px-3 text-[13px] text-stone-700 hover:border-stone-300 hover:text-stone-900"
+                            :aria-pressed="isFullscreen"
+                            data-testid="fullscreen"
+                            @click="toggleFullscreen"
+                        >
+                            <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path v-if="isFullscreen" d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" />
+                                <path v-else d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" />
+                            </svg>
+                            {{ isFullscreen ? "全画面を終わる" : "全画面" }}
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 見せ方ごとの色の意味 -->
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600" data-testid="legend">
                     <template v-if="view === 'table'">
-                        <span class="inline-flex items-center gap-1.5"><span class="rounded-full bg-red-100 px-2 py-px text-[11px] font-semibold text-red-700">−17</span>足りない数</span>
-                        <span class="inline-flex items-center gap-1.5"><span class="rounded-full bg-amber-100 px-2 py-px text-[11px] font-semibold text-amber-800">0</span>在庫0</span>
+                        <span class="inline-flex items-center gap-1.5"><span class="h-3 w-4.5 rounded-sm bg-red-100 ring-1 ring-red-200 ring-inset" />在庫不足</span>
                         <span class="inline-flex items-center gap-1.5">
                             <svg
                                 class="size-3.5 text-stone-400"
@@ -490,6 +539,7 @@ const facts = computed(() => {
                     :stock-date="result.meta.stock_date"
                     :demand-label="basisOption.demandLabel"
                     :stock-scope="stockScope"
+                    :fill="isFullscreen"
                 />
                 <TrendTimeline
                     v-else-if="view === 'timeline'"
@@ -499,8 +549,11 @@ const facts = computed(() => {
                     :stock-date="result.meta.stock_date"
                     :demand-label="basisOption.demandLabel"
                     :stock-scope="stockScope"
+                    :fill="isFullscreen"
                 />
-                <TrendGraph v-else :items="visibleItems" :months="months" :check-month-index="checkMonthIndex" />
+                <div v-else :class="isFullscreen ? 'min-h-0 flex-1 overflow-auto' : ''">
+                    <TrendGraph :items="visibleItems" :months="months" :check-month-index="checkMonthIndex" />
+                </div>
             </section>
         </template>
     </div>
