@@ -77,7 +77,7 @@ class DemandForecaster
                 'item' => $item,
                 'skus' => $item->skus->map(fn (Sku $sku): SkuForecast => SkuForecast::combine($sku, array_map(
                     fn (array $data): ChannelForecast => $this->forecastChannel($data['channel'], $data['ranges'], $data['window_dates'], $data['daily_sales'][$sku->id] ?? [], $data['stockout_dates'][$sku->id] ?? [], $forecastFrom),
-                    array_values(array_filter($channelData, fn (array $data): bool => $this->sellsOn($sku, $data['channel']))),
+                    array_values(array_filter($channelData, fn (array $data): bool => self::sellsOn($sku, $data['channel']))),
                 )))->all(),
             ])->values()->all(),
         );
@@ -86,7 +86,7 @@ class DemandForecaster
     /**
      * そのSKUをチャネルで売っているか。子ASINの無いSKUは Amazon で売っていない（K-042）。
      */
-    private function sellsOn(Sku $sku, Channel $channel): bool
+    public static function sellsOn(Sku $sku, Channel $channel): bool
     {
         return $channel !== Channel::Amazon || ($sku->child_asin !== null && $sku->child_asin !== '');
     }

@@ -2,6 +2,7 @@
 
 namespace App\Services\InventoryTrend;
 
+use App\Enums\Channel;
 use App\Models\InboundPlan;
 use App\Models\Inventory;
 use App\Models\Item;
@@ -9,6 +10,7 @@ use App\Models\ItemSelection;
 use App\Services\Forecast\DemandForecast;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\Forecast\SkuForecast;
+use App\Services\Pricing\UnitPriceCatalog;
 use App\Services\SalesTarget\ItemTargetPlan;
 use App\Services\SalesTarget\SalesTargetPlanner;
 use App\Services\SalesTarget\TargetPlanStatus;
@@ -27,6 +29,9 @@ use Carbon\CarbonImmutable;
  * - 判定する月（初期値は今月から6か月後。画面から変えられる、K-050）に未充足需要（整数に丸めて1個以上）があれば欠品警告（K-005）。
  * - 販売試算で、販売目標を割り振れない月（翌年度の目標が未登録など）は0とせず、その月から後を計算できないとする（原則2、K-109）。
  *   判定する月を計算できなければ、欠品警告ではなく「判定できない」とする。
+ * - Amazon・BOSSの推移（B-121）は、月初在庫をそのモールの在庫の区分の合計、需要をそのモールの需要予測（K-038）か、
+ *   SKUの目標を直近12か月のモール別の販売数の比率で分けた数とする。入荷予定は社内在庫（フリー在庫・ECストック）に入るものとし、
+ *   モールの推移には入れない（K-072）。補充（移動）の判断はしない（K-070）。
  * - 推奨発注数（K-045）・過剰在庫の判定（K-046）はしない。
  */
 class InventoryTrendCalculator
@@ -35,7 +40,7 @@ class InventoryTrendCalculator
 
     public function __construct(private DemandForecaster $forecaster, private SalesTargetPlanner $planner) {}
 
-    public function calculate(CarbonImmutable $now, ?TrendSettings $settings = null, DemandBasis $basis = DemandBasis::Forecast): InventoryTrend
+    public function calculate(CarbonImmutable $now, ?TrendSettings $settings = null, DemandBasis $basis = DemandBasis::Forecast, TrendScope $scope = TrendScope::Total): InventoryTrend
     {
         $settings ??= TrendSettings::current();
         $forecast = $this->forecaster->forecast($now);
@@ -47,20 +52,22 @@ class InventoryTrendCalculator
         }, range(0, self::MONTHS - 1));
 
         [$demands, $limits, $salesTargets] = $basis === DemandBasis::Forecast
-            ? [$this->forecastDemands($forecast), [], null]
-            : $this->targetDemands($forecast, $months, $now);
+            ? [$this->forecastDemands($forecast, $scope->channel()), [], null]
+            : $this->targetDemands($forecast, $months, $now, $scope->channel());
 
         $skus = collect($forecast->items)->flatMap(fn (array $entry) => $entry['skus']);
         $skuIds = $skus->map(fn (SkuForecast $sku): int => $sku->sku->id)->all();
         $stockDate = $this->latestStockDate();
         $stocks = $stockDate === null ? [] : $this->stocks($skuIds, $stockDate);
-        [$inbound, $provisional, $unassignable, $overdueCount] = $this->inbound($forecast->items, $demands, $limits, $currentMonth);
+        // 入荷予定は社内在庫に入るものとし、モールの推移には入れない（K-072）
+        [$inbound, $provisional, $unassignable, $overdueCount] = $scope === TrendScope::Total ? $this->inbound($forecast->items, $demands, $limits, $currentMonth) : [[], [], [], 0];
         // 今月は今日（予測の開始日）から月末までの日数分だけ数える
         $remainingDays = $currentMonth->daysInMonth - $forecast->forecastFrom->day + 1;
 
         return new InventoryTrend(
             calculatedAt: $now,
             basis: $basis,
+            scope: $scope,
             stockDate: $stockDate,
             forecast: $forecast,
             settings: $settings,
@@ -70,6 +77,7 @@ class InventoryTrendCalculator
                 'skus' => array_map(fn (SkuForecast $sku): SkuTrend => $this->trend(
                     $sku,
                     $basis,
+                    $scope,
                     $demands[$sku->sku->id],
                     $stocks[$sku->sku->id] ?? null,
                     $inbound[$sku->sku->id] ?? [],
@@ -86,15 +94,20 @@ class InventoryTrendCalculator
     }
 
     /**
-     * 需要予測の需要。仮の割り振りの比率は、どの月も基準平均日販。
+     * 需要予測の需要。全体はチャネルの合計（K-038）、モールはそのチャネルの予測。仮の割り振りの比率は、どの月も基準平均日販。
      *
      * @return array<int, SkuDemand>
      */
-    private function forecastDemands(DemandForecast $forecast): array
+    private function forecastDemands(DemandForecast $forecast, ?Channel $channel): array
     {
         $demands = [];
         foreach ($forecast->items as $entry) {
             foreach ($entry['skus'] as $sku) {
+                if ($channel !== null) {
+                    $demands[$sku->sku->id] = $this->channelForecastDemand($sku, $channel);
+
+                    continue;
+                }
                 $demands[$sku->sku->id] = $sku->monthly === null || $sku->baseAverage === null
                     ? new SkuDemand([], [], null)
                     : new SkuDemand(
@@ -109,14 +122,35 @@ class InventoryTrendCalculator
     }
 
     /**
+     * モールの需要予測の需要。そのモールで売っていない（子ASINの無いSKUのAmazon、K-042）、販売実績を取り込んでいない、
+     * 予測できないときは、0にせず理由を持つ（原則2）。
+     */
+    private function channelForecastDemand(SkuForecast $sku, Channel $channel): SkuDemand
+    {
+        if (! DemandForecaster::sellsOn($sku->sku, $channel)) {
+            return new SkuDemand([], [], null, "{$channel->label()}では販売していません", TrendStatus::NotSold);
+        }
+        $channelForecast = collect($sku->channels)->first(fn ($forecast): bool => $forecast->channel === $channel);
+        if ($channelForecast === null) {
+            return new SkuDemand([], [], null, "{$channel->label()}の販売実績がまだ取り込まれていません", TrendStatus::Unpredictable);
+        }
+        if (! $channelForecast->isPredictable()) {
+            return new SkuDemand([], [], null, "{$channel->label()}：{$channelForecast->unpredictableReason->label()}", TrendStatus::Unpredictable);
+        }
+
+        return new SkuDemand(array_map(fn ($month): float => $month->quantity, $channelForecast->monthly), [], $channelForecast->baseAverage);
+    }
+
+    /**
      * 販売試算の需要（SKUの月別の目標）。推移の12か月が入る年度（今年度と翌年度）の販売目標を割り振り、
      * 品番の目標を割り振れない月に来たら、その月から後は計算できないとする（K-109）。仮の割り振りの比率は、その月のSKUの目標（K-110）。
      *
      * @param  list<array{month: CarbonImmutable, days: int}>  $months
      * @return array{0: array<int, SkuDemand>, 1: array<string, int>, 2: list<array{fiscalYear: int, from: CarbonImmutable, to: CarbonImmutable, calculatedItemCount: int}>} [SKUごとの需要, 品番ごとの計算できる月数, 年度ごとの割り振れた品番の数]
      */
-    private function targetDemands(DemandForecast $forecast, array $months, CarbonImmutable $now): array
+    private function targetDemands(DemandForecast $forecast, array $months, CarbonImmutable $now, ?Channel $channel): array
     {
+        $sales = $channel === null ? null : UnitPriceCatalog::build(collect($forecast->items)->map(fn (array $entry): Item => $entry['item']), $now);
         $plansByYear = [];
         foreach ($months as $month) {
             $fiscalYear = ItemSelection::fiscalYearStart($month['month'])->year;
@@ -148,12 +182,13 @@ class InventoryTrendCalculator
             $days = array_sum(array_map(fn (array $month): int => $month['days'], array_slice($months, 0, $limit)));
             foreach ($entry['skus'] as $sku) {
                 $skuMonthly = $monthly[$sku->sku->id] ?? [];
-                $demands[$sku->sku->id] = new SkuDemand(
+                $demand = new SkuDemand(
                     $skuMonthly,
                     $skuMonthly,
                     $skuMonthly === [] ? null : array_sum($skuMonthly) / $days,
                     $reason ?? ($limit > 0 && $skuMonthly === [] ? '販売目標が割り振られていません' : null),
                 );
+                $demands[$sku->sku->id] = $channel === null || $skuMonthly === [] ? $demand : $this->channelTargetDemand($demand, $sku, $itemNo, $channel, $sales);
             }
         }
 
@@ -169,6 +204,31 @@ class InventoryTrendCalculator
         }
 
         return [$demands, $limits, $salesTargets];
+    }
+
+    /**
+     * SKUの目標を、直近12か月のモール別の販売数の比率でモールに分ける（K-072）。SKUに販売実績が無ければ品番の比率を使い、
+     * 品番にも無ければ0とせず、分けられないことを示す。子ASINの無いSKUは Amazon で売っていない（K-042）。
+     */
+    private function channelTargetDemand(SkuDemand $demand, SkuForecast $sku, string $itemNo, Channel $channel, UnitPriceCatalog $sales): SkuDemand
+    {
+        if (! DemandForecaster::sellsOn($sku->sku, $channel)) {
+            return new SkuDemand([], [], null, "{$channel->label()}では販売していません", TrendStatus::NotSold);
+        }
+        $share = null;
+        foreach ([fn (string $key) => $sales->skuTotal($sku->sku->id, $key), fn (string $key) => $sales->itemTotal($itemNo, $key)] as $total) {
+            $channels = array_sum(array_map(fn (Channel $each): float => $total($each->value)->quantity, Channel::cases()));
+            if ($channels > 0) {
+                $share = $total($channel->value)->quantity / $channels;
+                break;
+            }
+        }
+        if ($share === null) {
+            return new SkuDemand([], [], null, '直近12か月の販売実績が無く、販売目標をモールに分けられません', TrendStatus::NoSalesTarget);
+        }
+        $scale = fn (array $values): array => array_map(fn (float $value): float => $value * $share, $values);
+
+        return new SkuDemand($scale($demand->monthly), $scale($demand->shares), $demand->averageDaily * $share, $demand->unavailableLabel);
     }
 
     private function latestStockDate(): ?CarbonImmutable
@@ -277,18 +337,20 @@ class InventoryTrendCalculator
      * @param  list<array{month: CarbonImmutable, days: int}>  $months
      * @param  int  $remainingDays  今月の、今日から月末までの日数
      */
-    private function trend(SkuForecast $forecast, DemandBasis $basis, SkuDemand $demand, ?array $stock, array $inbound, array $provisional, array $months, TrendSettings $settings, int $remainingDays): SkuTrend
+    private function trend(SkuForecast $forecast, DemandBasis $basis, TrendScope $scope, SkuDemand $demand, ?array $stock, array $inbound, array $provisional, array $months, TrendSettings $settings, int $remainingDays): SkuTrend
     {
         $skuForecast = $basis === DemandBasis::Forecast ? $forecast : null;
         if ($stock === null) {
-            return new SkuTrend($forecast->sku, $skuForecast, $demand, TrendStatus::NoStock, null);
+            return new SkuTrend($forecast->sku, $scope, $skuForecast, $demand, TrendStatus::NoStock, null);
         }
         if ($demand->monthly === []) {
-            return new SkuTrend($forecast->sku, $skuForecast, $demand, $basis === DemandBasis::Forecast ? TrendStatus::Unpredictable : TrendStatus::NoSalesTarget, $stock);
+            $status = $demand->unavailableStatus ?? ($basis === DemandBasis::Forecast ? TrendStatus::Unpredictable : TrendStatus::NoSalesTarget);
+
+            return new SkuTrend($forecast->sku, $scope, $skuForecast, $demand, $status, $stock);
         }
 
         $trends = [];
-        $level = (float) array_sum($stock);
+        $level = (float) $scope->stockOf($stock);
         foreach ($demand->monthly as $index => $quantity) {
             $days = $months[$index]['days'];
             [$days, $quantity] = $index === 0 ? [$remainingDays, $quantity * $remainingDays / $days] : [$days, $quantity];
@@ -312,7 +374,7 @@ class InventoryTrendCalculator
             }
         }
 
-        return new SkuTrend($forecast->sku, $skuForecast, $demand, TrendStatus::Calculated, $stock, $trends, $warning, $firstShortage);
+        return new SkuTrend($forecast->sku, $scope, $skuForecast, $demand, TrendStatus::Calculated, $stock, $trends, $warning, $firstShortage);
     }
 
     /**

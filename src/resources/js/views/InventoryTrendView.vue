@@ -6,8 +6,8 @@ import CheckMonthSetting from "@/components/inventoryTrend/CheckMonthSetting.vue
 import TrendGraph from "@/components/inventoryTrend/TrendGraph.vue";
 import TrendTable from "@/components/inventoryTrend/TrendTable.vue";
 import TrendTimeline from "@/components/inventoryTrend/TrendTimeline.vue";
-import { COVER_COLORS, COVER_LEGEND, buildItemRows, longMonthLabel, type ItemRows } from "@/components/inventoryTrend/trendRows";
-import type { DemandBasis, InventoryTrendResponse, SkuTrend } from "@/types/api";
+import { COVER_COLORS, COVER_LEGEND, buildItemRows, longMonthLabel, type ItemRows, type StockScope } from "@/components/inventoryTrend/trendRows";
+import type { DemandBasis, InventoryTrendResponse, SkuTrend, TrendScope } from "@/types/api";
 
 /**
  * 12か月在庫推移（バックログ B-008、PG-730）。対象品番のSKUについて、最新の在庫（6区分の合計、K-028）から、需要予測（K-038）を引き、
@@ -20,6 +20,10 @@ import type { DemandBasis, InventoryTrendResponse, SkuTrend } from "@/types/api"
  * 需要は「需要予測」（初期値）と「販売試算」（年間販売目標どおりに売れた場合、B-122）を切り替える。どちらにもとづく推移かを
  * 見出しの説明と根拠の帯に明記する（原則1）。販売試算で目標を割り振れない月（翌年度の目標が未登録など）は、0とせず
  * 「計算できない」とし（K-109）、判定する月を計算できないSKUは「判定できない」で絞り込める。選んだ需要は URL に持たせる。
+ *
+ * 在庫は「全体」（6区分の合計）と「Amazon」「BOSS」（そのモールの在庫の区分と需要、B-121）を切り替える。モールの推移には
+ * 入荷予定とフリー在庫・ECストックを入れず（K-072）、どれだけ不足するかを示す。補充の判断はしない（K-070）。
+ * 品番には、今月から判定する月までの足りない数の合計を出す。選んだ在庫は URL に持たせる。
  *
  * 見せ方は「表」「タイムライン」「グラフ」をタブで切り替える（K-047）。選んだ見せ方は URL に持たせ、再読み込みしても変わらない。
  * 表示用のデータはデータを読み込んだときに一度だけ作り、切り替えや絞り込みでは作り直さない。
@@ -47,6 +51,12 @@ const VIEWS: { value: TrendView; label: string }[] = [
     { value: "table", label: "表" },
     { value: "timeline", label: "タイムライン" },
     { value: "graph", label: "グラフ" },
+];
+
+const SCOPES: { value: TrendScope; label: string }[] = [
+    { value: "total", label: "全体" },
+    { value: "amazon", label: "Amazon" },
+    { value: "boss", label: "BOSS" },
 ];
 
 const FILTERS: { value: TrendFilter; label: string }[] = [
@@ -81,19 +91,35 @@ function selectBasis(value: DemandBasis): void {
     void router.replace({ query: { ...route.query, basis: value === "forecast" ? undefined : value } });
 }
 
+const scope = computed<TrendScope>(() => (route.query.scope === "amazon" || route.query.scope === "boss" ? route.query.scope : "total"));
+
+function selectScope(value: TrendScope): void {
+    void router.replace({ query: { ...route.query, scope: value === "total" ? undefined : value } });
+}
+
+/** 現在庫のツールチップで、推移に数える在庫の区分。 */
+const stockScope = computed<StockScope>(() => ({
+    label: result.value?.meta.scope_label ?? "全体",
+    isTotal: (result.value?.meta.scope ?? "total") === "total",
+    warehouses: result.value?.meta.scope_warehouses.map((warehouse) => warehouse.warehouse) ?? [],
+}));
+
+/** モールの推移で、月初在庫に数える在庫の区分（「Amazon自社出荷＋Amazon FBA」）。 */
+const scopeWarehouseText = computed(() => result.value?.meta.scope_warehouses.map((warehouse) => warehouse.label).join("＋") ?? "");
+
 const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 const formatDateTime = (value: string): string => dateTimeFormat.format(new Date(value));
 const longDate = (value: string): string => `${value.slice(0, 4)}年${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日`;
 const shortDate = (value: string): string => `${Number(value.slice(5, 7))}/${Number(value.slice(8, 10))}`;
 
 async function load(): Promise<void> {
-    const requested = basis.value;
+    const [requestedBasis, requestedScope] = [basis.value, scope.value];
     isLoading.value = true;
     hasError.value = false;
     try {
-        const response = await fetchInventoryTrends(requested);
-        // 計算中に需要を切り替えたときは、古い方の結果を表示しない
-        if (requested === basis.value) {
+        const response = await fetchInventoryTrends(requestedBasis, requestedScope);
+        // 計算中に需要や在庫を切り替えたときは、古い方の結果を表示しない
+        if (requestedBasis === basis.value && requestedScope === scope.value) {
             result.value = response;
         }
     } catch {
@@ -104,7 +130,7 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
-watch(basis, () => {
+watch([basis, scope], () => {
     result.value = null;
     filter.value = "all";
     void load();
@@ -200,7 +226,13 @@ const facts = computed(() => {
             key: "stock",
             label: "在庫基準日",
             value: meta.stock_date ? longDate(meta.stock_date) : "未取得",
-            note: !meta.stock_date ? "在庫がまだ取得されていません" : isStale ? `${stockAgeDays.value}日前の在庫です。「在庫の取得」を確認してください` : "6区分の合計",
+            note: !meta.stock_date
+                ? "在庫がまだ取得されていません"
+                : isStale
+                  ? `${stockAgeDays.value}日前の在庫です。「在庫の取得」を確認してください`
+                  : meta.scope === "total"
+                    ? "6区分の合計"
+                    : scopeWarehouseText.value,
             warn: !meta.stock_date || isStale,
         },
         demandFact.value,
@@ -261,6 +293,21 @@ const facts = computed(() => {
                         {{ option.label }}
                     </button>
                 </div>
+                <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫推移の在庫">
+                    <button
+                        v-for="option in SCOPES"
+                        :key="option.value"
+                        type="button"
+                        role="tab"
+                        class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
+                        :class="scope === option.value ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:bg-stone-100 hover:text-stone-900'"
+                        :aria-selected="scope === option.value"
+                        :data-testid="`scope-${option.value}`"
+                        @click="selectScope(option.value)"
+                    >
+                        {{ option.label }}
+                    </button>
+                </div>
                 <span v-if="result" class="text-xs text-stone-500 tabular-nums" data-testid="calculated-at">計算日時 {{ formatDateTime(result.meta.calculated_at) }}</span>
                 <button
                     type="button"
@@ -307,6 +354,12 @@ const facts = computed(() => {
                     </template>
                 </div>
             </section>
+
+            <p v-if="result.meta.scope !== 'total'" class="rounded-lg border border-stone-200 bg-white px-4 py-2.5 text-sm text-stone-700" data-testid="scope-note">
+                {{ result.meta.scope_label }}の在庫（{{ scopeWarehouseText }}）から{{ result.meta.scope_label }}の{{
+                    basisOption.demandLabel
+                }}を引いた推移です。入荷予定は社内在庫に入るものとして含めず、フリー在庫・ECストックは在庫の内訳に参考として示します。
+            </p>
 
             <p v-if="result.meta.overdue_inbound_count > 0" class="rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-800" data-testid="overdue-inbound">
                 入荷予定月を過ぎた入荷予定が{{ result.meta.overdue_inbound_count }}件あり、今月の入荷として数えています。<RouterLink to="/inbound-plans" class="font-semibold underline"
@@ -436,6 +489,7 @@ const facts = computed(() => {
                     :check-month-index="checkMonthIndex"
                     :stock-date="result.meta.stock_date"
                     :demand-label="basisOption.demandLabel"
+                    :stock-scope="stockScope"
                 />
                 <TrendTimeline
                     v-else-if="view === 'timeline'"
@@ -444,6 +498,7 @@ const facts = computed(() => {
                     :check-month-index="checkMonthIndex"
                     :stock-date="result.meta.stock_date"
                     :demand-label="basisOption.demandLabel"
+                    :stock-scope="stockScope"
                 />
                 <TrendGraph v-else :items="visibleItems" :months="months" :check-month-index="checkMonthIndex" />
             </section>

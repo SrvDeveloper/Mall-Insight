@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, useTemplateRef } from "vue";
 import TrendTooltip from "@/components/inventoryTrend/TrendTooltip.vue";
-import { COVER_COLORS, shortMonthLabel, type ItemRows, type SkuRow, type TrendMonth, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
+import { COVER_COLORS, formatQuantity, isShort, shortMonthLabel, type ItemRows, type SkuRow, type TrendMonth, type StockScope, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
 import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
 import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
 import { useVirtualRows } from "@/composables/useVirtualRows";
@@ -13,7 +13,7 @@ import { useVirtualRows } from "@/composables/useVirtualRows";
  * 表と同じく、見えている行だけを描く。
  */
 
-const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string }>();
+const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string; stockScope: StockScope }>();
 
 const ROW_HEIGHT = 44;
 
@@ -79,6 +79,14 @@ function columnTint(index: number): string {
                     <div class="sticky left-0 z-10 flex h-full items-center gap-2 truncate bg-stone-50 px-5">
                         <span class="font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>
                         <span class="truncate rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600">{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span>
+                        <span
+                            v-if="isShort(entry.group.shortfallToCheck)"
+                            class="shrink-0 text-[11px] font-semibold text-red-700 tabular-nums"
+                            title="今月から判定する月までの、SKUの足りない数の合計"
+                            data-testid="item-shortfall"
+                        >
+                            判定月まで −{{ formatQuantity(entry.group.shortfallToCheck) }}
+                        </span>
                         <span
                             v-if="entry.group.item.unassignable_inbound > 0"
                             class="min-w-0 truncate text-[11px] text-amber-700"
@@ -171,7 +179,7 @@ function columnTint(index: number): string {
             class="pointer-events-none fixed z-50 w-56 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg bg-stone-900 text-left text-stone-100 shadow-xl ring-1 ring-black/20"
             :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
         >
-            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" :demand-label="demandLabel" />
+            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" :demand-label="demandLabel" :stock-scope="stockScope" />
         </div>
     </div>
 </template>

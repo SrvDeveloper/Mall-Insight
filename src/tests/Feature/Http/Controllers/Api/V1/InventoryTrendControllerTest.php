@@ -53,11 +53,12 @@ class InventoryTrendControllerTest extends TestCase
         return $sku;
     }
 
-    private function sell(Sku $sku, string $date, int $quantity): void
+    private function sell(Sku $sku, string $date, int $quantity, string $warehouse = 'boss_own'): void
     {
         static $orderId = 1;
 
-        SalesLine::create(['source' => 'boss', 'source_order_id' => (string) $orderId++, 'sales_date' => $date, 'mall' => 'rakuten', 'sku_id' => $sku->id, 'warehouse' => 'boss_own', 'quantity' => $quantity, 'amount' => 1000 * $quantity]);
+        $mall = str_starts_with($warehouse, 'amazon') ? 'amazon' : 'rakuten';
+        SalesLine::create(['source' => $mall === 'amazon' ? 'amazon' : 'boss', 'source_order_id' => (string) $orderId++, 'sales_date' => $date, 'mall' => $mall, 'sku_id' => $sku->id, 'warehouse' => $warehouse, 'quantity' => $quantity, 'amount' => 1000 * $quantity]);
     }
 
     /**
@@ -320,5 +321,111 @@ class InventoryTrendControllerTest extends TestCase
     public function test_rejects_an_unknown_basis(): void
     {
         $this->getJson('/api/v1/inventory-trends?basis=excel')->assertUnprocessable()->assertJsonValidationErrors('basis');
+    }
+
+    public function test_projects_amazon_and_boss_from_their_own_stock_and_forecast_without_inbound(): void
+    {
+        // Amazon の販売実績も 2025-10-01 から。fl-01-1-10 は BOSS 1.0・Amazon 0.5 の基準平均日販
+        $this->sell(Sku::factory()->create(['item_id' => null]), '2025-10-01', 1, 'amazon_fba');
+        $sku = $this->sku('fl-01-1-10', 1.0);
+        $this->sell($sku, '2026-10-06', 30, 'amazon_fba');
+        $this->stock($sku, ['amazon_own' => 10, 'amazon_fba' => 50, 'boss_own' => 30, 'boss_rfc' => 5, 'free_stock' => 100, 'ec_stock' => 20]);
+        // 入荷予定は社内在庫に入るものとし、モールの推移には入れない
+        $this->plan('2026-11', 999);
+        $this->plan('2026-08', 5, [$sku->id => 5]);
+
+        $this->getJson('/api/v1/inventory-trends?scope=amazon')
+            ->assertOk()
+            ->assertJsonPath('meta.scope', 'amazon')
+            ->assertJsonPath('meta.scope_label', 'Amazon')
+            ->assertJsonPath('meta.scope_warehouses.*.label', ['Amazon自社出荷', 'Amazon FBA'])
+            ->assertJsonPath('meta.overdue_inbound_count', 0)
+            ->assertJsonPath('data.0.unassignable_inbound', 0)
+            ->assertJsonPath('data.0.skus.0.opening_stock', 60)
+            // フリー在庫・ECストックは推移に含めず、内訳に参考として出す
+            ->assertJsonPath('data.0.skus.0.stock_by_warehouse.4.quantity', 100)
+            ->assertJsonPath('data.0.skus.0.average_daily', 0.5)
+            // 10月 25日分 12.5 → 47.5、11月 15 → 32.5、12月 15.5 → 17、1月 15.5 → 1.5、2月 14 → 12.5 足りない
+            ->assertJsonPath('data.0.skus.0.months.*.ending_stock', [47.5, 32.5, 17, 1.5, 0, 0, 0, 0, 0, 0, 0, 0])
+            ->assertJsonPath('data.0.skus.0.months.1.inbound', 0)
+            ->assertJsonPath('data.0.skus.0.months.1.provisional_inbound', 0)
+            ->assertJsonPath('data.0.skus.0.months.4.shortfall', 12.5)
+            ->assertJsonPath('data.0.skus.0.first_shortage_month', '2027-02')
+            ->assertJsonPath('data.0.skus.0.warning', 'shortage');
+
+        $this->getJson('/api/v1/inventory-trends?scope=boss')
+            ->assertJsonPath('meta.scope_warehouses.*.label', ['BOSS自社倉庫', 'BOSS RFC'])
+            ->assertJsonPath('data.0.skus.0.opening_stock', 35)
+            ->assertJsonPath('data.0.skus.0.average_daily', 1)
+            // 10月 25 → 10、11月 30 → 20 足りない
+            ->assertJsonPath('data.0.skus.0.months.0.ending_stock', 10)
+            ->assertJsonPath('data.0.skus.0.months.1.shortfall', 20)
+            ->assertJsonPath('data.0.skus.0.first_shortage_month', '2026-11');
+
+        // 全体は今までどおり（6区分の合計、入荷予定を足す）
+        $this->getJson('/api/v1/inventory-trends')
+            ->assertJsonPath('meta.scope', 'total')
+            ->assertJsonPath('meta.overdue_inbound_count', 1)
+            ->assertJsonPath('data.0.skus.0.opening_stock', 215)
+            ->assertJsonPath('data.0.skus.0.average_daily', 1.5)
+            ->assertJsonPath('data.0.skus.0.months.1.provisional_inbound', 999);
+    }
+
+    public function test_explains_skus_that_are_not_sold_or_cannot_be_forecast_on_the_mall(): void
+    {
+        // Amazon の販売実績は 2025-10-01 から 2026-10-06 まで（対象品番でないSKU）
+        $other = Sku::factory()->create(['item_id' => null]);
+        $this->sell($other, '2025-10-01', 1, 'amazon_fba');
+        $this->sell($other, '2026-10-06', 1, 'amazon_fba');
+        // 子ASINの無いSKUは Amazon で売っていない（K-042）。もう1つは Amazon で売っているが直近180日に売れていない
+        $noAsin = Sku::factory()->create(['item_id' => $this->item->id, 'sku_code' => 'fl-01-1-10', 'child_asin' => null]);
+        $this->sell($noAsin, '2026-10-06', 60);
+        $unsold = $this->sku('fl-01-1-15', 1.0, 1);
+        $this->stock($noAsin, ['amazon_fba' => 0, 'boss_own' => 10]);
+        $this->stock($unsold, ['amazon_fba' => 5, 'boss_own' => 10]);
+
+        $this->getJson('/api/v1/inventory-trends?scope=amazon')
+            ->assertJsonPath('data.0.skus.0.status', 'not_sold')
+            ->assertJsonPath('data.0.skus.0.status_label', 'Amazonでは販売していません')
+            ->assertJsonPath('data.0.skus.0.months', null)
+            ->assertJsonPath('data.0.skus.1.status', 'unpredictable')
+            ->assertJsonPath('data.0.skus.1.status_label', 'Amazon：直近180日に販売実績がありません');
+        $this->getJson('/api/v1/inventory-trends?scope=boss')->assertJsonPath('data.0.skus.0.status', 'calculated');
+    }
+
+    public function test_splits_the_sales_target_into_malls_by_the_sales_of_the_last_twelve_months(): void
+    {
+        // 直近12か月の販売数は BOSS 60・Amazon 20 なので、Amazon は目標の 1/4
+        $sku = $this->sku('fl-01-1-10', 1.0);
+        $this->sell($sku, '2026-09-01', 20, 'amazon_fba');
+        $this->stock($sku, ['amazon_fba' => 100, 'boss_own' => 100]);
+        $this->salesTargets(1240);
+
+        $this->getJson('/api/v1/inventory-trends?basis=sales_target&scope=amazon')
+            ->assertOk()
+            // 10月の目標 124 の 1/4 ＝ 31、今月は25日分で 25
+            ->assertJsonPath('data.0.skus.0.months.0.demand', 25)
+            ->assertJsonPath('data.0.skus.0.months.1.demand', 31)
+            ->assertJsonPath('data.0.skus.0.months.1.ending_stock', 44);
+        $this->getJson('/api/v1/inventory-trends?basis=sales_target&scope=boss')
+            ->assertJsonPath('data.0.skus.0.months.1.demand', 93);
+    }
+
+    public function test_does_not_split_the_sales_target_into_malls_without_any_sales(): void
+    {
+        $sku = Sku::factory()->create(['item_id' => $this->item->id, 'sku_code' => 'fl-01-1-10']);
+        $this->stock($sku, ['amazon_fba' => 10]);
+        $this->salesTargets();
+        SalesTarget::create(['fiscal_year' => 2026, 'item_no' => 'fl-01', 'annual_quantity' => 1200, 'sku_quantities' => [$sku->id => 1200], 'source' => ChangeSource::Screen]);
+
+        $this->getJson('/api/v1/inventory-trends?basis=sales_target&scope=amazon')
+            ->assertJsonPath('data.0.skus.0.status', 'no_sales_target')
+            ->assertJsonPath('data.0.skus.0.status_label', '直近12か月の販売実績が無く、販売目標をモールに分けられません');
+        $this->getJson('/api/v1/inventory-trends?basis=sales_target')->assertJsonPath('data.0.skus.0.status', 'calculated');
+    }
+
+    public function test_rejects_an_unknown_scope(): void
+    {
+        $this->getJson('/api/v1/inventory-trends?scope=rakuten')->assertUnprocessable()->assertJsonValidationErrors('scope');
     }
 }

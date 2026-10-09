@@ -18,6 +18,7 @@ final readonly class SkuTrend
      */
     public function __construct(
         public Sku $sku,
+        public TrendScope $scope,
         public ?SkuForecast $forecast,
         public SkuDemand $demand,
         public TrendStatus $status,
@@ -27,17 +28,22 @@ final readonly class SkuTrend
         public ?int $firstShortageIndex = null,
     ) {}
 
+    /**
+     * 月初在庫（全体は6区分、モールはそのモールの在庫の区分の合計）。在庫の記録が無ければ null。
+     */
     public function openingStock(): ?int
     {
-        return $this->stockByWarehouse === null ? null : array_sum($this->stockByWarehouse);
+        return $this->stockByWarehouse === null ? null : $this->scope->stockOf($this->stockByWarehouse);
     }
 
     /**
-     * 計算できないときは、その理由。販売目標が無いときは、どの年度の何が足りないかを示す。
+     * 計算できないときは、その理由。販売目標が無い、モールの需要予測を出せないなど、需要に理由があればそれを示す。
      */
     public function statusLabel(): string
     {
-        return $this->status === TrendStatus::NoSalesTarget ? ($this->demand->unavailableLabel ?? $this->status->label()) : $this->status->label();
+        $isDemandReason = in_array($this->status, [TrendStatus::Unpredictable, TrendStatus::NotSold, TrendStatus::NoSalesTarget], true);
+
+        return $isDemandReason ? ($this->demand->unavailableLabel ?? $this->status->label()) : $this->status->label();
     }
 
     /**

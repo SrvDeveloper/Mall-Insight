@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { monthLabel, sparkCheckPercent, type ItemRows, type TrendMonth } from "@/components/inventoryTrend/trendRows";
+import { formatQuantity, isShort, monthLabel, sparkCheckPercent, type ItemRows, type TrendMonth } from "@/components/inventoryTrend/trendRows";
 
 /**
  * 在庫推移の「グラフ」（K-047、デザイン案A-3）。品番ごとのカードに、SKUの12か月の在庫の増減を小さなグラフで並べる。
@@ -33,6 +33,13 @@ const checkPosition = computed(() => `${sparkCheckPercent(props.checkMonthIndex,
                 <span v-if="group.shortageCount > 0" class="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
                     判定する月に欠品 {{ group.shortageCount }}/{{ group.calculatedCount }} SKU
                 </span>
+                <span
+                    v-if="isShort(group.shortfallToCheck)"
+                    class="text-xs font-semibold text-red-700 tabular-nums"
+                    title="今月から判定する月までの、SKUの足りない数の合計"
+                    data-testid="item-shortfall"
+                    >判定月まで −{{ formatQuantity(group.shortfallToCheck) }}</span
+                >
                 <span v-else-if="group.undeterminedCount > 0" class="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-stone-600">判定する月は計算できません</span>
                 <template v-for="(inbound, index) in group.monthInbounds" :key="index">
                     <span v-if="inbound" class="inline-flex items-center gap-1 rounded-full border border-stone-300 px-2 py-px text-xs text-stone-700 tabular-nums" :title="inbound.label">

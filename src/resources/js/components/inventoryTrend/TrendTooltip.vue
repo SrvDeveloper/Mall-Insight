@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { formatQuantity, isShort, longMonthLabel, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
+import { formatQuantity, isShort, longMonthLabel, type StockScope, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
 
 /**
  * 在庫推移のツールチップの中身（位置と外枠は呼び出し側が決める）。表を隠しすぎないよう、小さくまとめる。
  * - 月の欄：月初在庫 ＋ 入荷予定 − 需要（需要予測か販売目標、demandLabel） ＝ 月末在庫 の計算。足りない月は、月末在庫の行に赤い札で足りない数を出す。
- * - 現在庫：6区分の在庫を Amazon・BOSS・社内在庫の順に、量に比例した細い棒を付けて並べる。
+ * - 現在庫：6区分の在庫を Amazon・BOSS・社内在庫の順に、量に比例した細い棒を付けて並べる。Amazon・BOSSの推移（B-121）では、
+ *   推移に数えない区分（社内在庫など）を薄くし、参考として示す。
  */
 
-const props = defineProps<{ content: TrendTooltipContent; stockDate: string | null; demandLabel: string }>();
+const props = defineProps<{ content: TrendTooltipContent; stockDate: string | null; demandLabel: string; stockScope: StockScope }>();
 
 const formatDate = (value: string): string => value.replaceAll("-", "/");
 
@@ -24,7 +25,10 @@ const stockGroups = computed(() => {
         return [];
     }
     const sku = props.content.sku;
-    const total = Math.max(sku.opening_stock ?? 0, 1);
+    const total = Math.max(
+        (sku.stock_by_warehouse ?? []).reduce((sum, warehouse) => sum + Math.max(0, warehouse.quantity ?? 0), 0),
+        1,
+    );
     return WAREHOUSE_GROUPS.map((group) =>
         (sku.stock_by_warehouse ?? [])
             .filter((warehouse) => group.includes(warehouse.warehouse))
@@ -33,6 +37,7 @@ const stockGroups = computed(() => {
                 label: warehouse.label,
                 text: warehouse.quantity === null ? "—" : formatQuantity(warehouse.quantity),
                 width: `${(Math.max(0, warehouse.quantity ?? 0) / total) * 100}%`,
+                inScope: props.stockScope.warehouses.includes(warehouse.warehouse),
             })),
     );
 });
@@ -81,15 +86,15 @@ const coverMonths = computed(() => {
 
     <div v-else class="flex flex-col px-3 pt-1.5 pb-2 text-xs">
         <div v-for="(group, index) in stockGroups" :key="index" class="flex flex-col gap-0.5" :class="index > 0 ? 'mt-1 border-t border-white/10 pt-1' : ''">
-            <div v-for="row in group" :key="row.key" class="grid grid-cols-[5.5rem_1fr_2.25rem] items-center gap-1.5">
+            <div v-for="row in group" :key="row.key" class="grid grid-cols-[5.5rem_1fr_2.25rem] items-center gap-1.5" :class="row.inScope ? '' : 'opacity-40'" :data-in-scope="row.inScope">
                 <span class="truncate text-[11px] text-stone-400">{{ row.label }}</span>
                 <span class="h-1 rounded-full bg-white/10"><span class="block h-full rounded-full bg-stone-300" :style="{ width: row.width }" /></span>
                 <span class="text-right tabular-nums">{{ row.text }}</span>
             </div>
         </div>
         <div class="mt-1.5 flex items-baseline justify-between border-t border-white/10 pt-1 tabular-nums">
-            <span class="text-stone-300"
-                >合計 <strong class="ml-1 font-semibold text-white">{{ formatQuantity(content.sku.opening_stock ?? 0) }}</strong></span
+            <span class="text-stone-300" data-testid="tooltip-stock-total"
+                >{{ stockScope.isTotal ? "合計" : `${stockScope.label}の在庫` }} <strong class="ml-1 font-semibold text-white">{{ formatQuantity(content.sku.opening_stock ?? 0) }}</strong></span
             >
             <span v-if="coverMonths" class="text-[11px] text-stone-400">約{{ coverMonths }}か月分</span>
         </div>

@@ -320,7 +320,7 @@ export interface MonthTrend {
 export interface SkuTrend {
     sku_id: number;
     sku_code: string;
-    status: "calculated" | "unpredictable" | "no_sales_target" | "no_stock";
+    status: "calculated" | "unpredictable" | "not_sold" | "no_sales_target" | "no_stock";
     status_label: string;
     opening_stock: number | null;
     stock_by_warehouse: { warehouse: string; label: string; quantity: number | null }[] | null;
@@ -337,6 +337,9 @@ export interface SkuTrend {
 
 /** 在庫推移の需要に何を使うか（B-122）。需要予測（初期値）か、年間販売目標どおりに売れた場合の販売試算か。 */
 export type DemandBasis = "forecast" | "sales_target";
+
+/** 在庫推移をどの在庫で見るか（B-121）。全体は6区分の合計、Amazon・BOSSはそのモールの在庫の区分と需要。 */
+export type TrendScope = "total" | "amazon" | "boss";
 
 export interface ItemTrend {
     item_no: string;
@@ -359,6 +362,10 @@ export interface InventoryTrendResponse {
         calculated_at: string;
         basis: DemandBasis;
         basis_label: string;
+        scope: TrendScope;
+        scope_label: string;
+        /** 月初在庫に数える在庫の区分 */
+        scope_warehouses: { warehouse: string; label: string }[];
         /** 推移の12か月（今月から） */
         months: { month: string; days: number }[];
         stock_date: string | null;

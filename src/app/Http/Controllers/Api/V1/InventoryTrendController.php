@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\Warehouse;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SkuTrendResource;
 use App\Services\InventoryTrend\DemandBasis;
 use App\Services\InventoryTrend\InventoryTrendCalculator;
+use App\Services\InventoryTrend\TrendScope;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,13 +17,14 @@ class InventoryTrendController extends Controller
 {
     /**
      * 対象品番のSKUの12か月在庫推移（バックログ B-008・B-122）。開くたびに最新の在庫・需要・入荷予定から計算し、保存しない。
-     * basis で需要予測（初期値）と販売試算を切り替える。
+     * basis で需要予測（初期値）と販売試算を、scope で全体（初期値）・Amazon・BOSSを切り替える。
      */
     public function index(Request $request, InventoryTrendCalculator $calculator): JsonResponse
     {
-        $request->validate(['basis' => ['nullable', Rule::enum(DemandBasis::class)]]);
+        $request->validate(['basis' => ['nullable', Rule::enum(DemandBasis::class)], 'scope' => ['nullable', Rule::enum(TrendScope::class)]]);
         $basis = $request->enum('basis', DemandBasis::class) ?? DemandBasis::Forecast;
-        $trend = $calculator->calculate(CarbonImmutable::now(), basis: $basis);
+        $scope = $request->enum('scope', TrendScope::class) ?? TrendScope::Total;
+        $trend = $calculator->calculate(CarbonImmutable::now(), basis: $basis, scope: $scope);
         $forecast = $trend->forecast;
         $settings = $trend->settings;
 
@@ -37,6 +40,9 @@ class InventoryTrendController extends Controller
                 'calculated_at' => $trend->calculatedAt->toIso8601String(),
                 'basis' => $trend->basis->value,
                 'basis_label' => $trend->basis->label(),
+                'scope' => $trend->scope->value,
+                'scope_label' => $trend->scope->label(),
+                'scope_warehouses' => array_map(fn (Warehouse $warehouse): array => ['warehouse' => $warehouse->value, 'label' => $warehouse->label()], $trend->scope->warehouses()),
                 'months' => array_map(fn (array $month): array => ['month' => $month['month']->format('Y-m'), 'days' => $month['days']], $trend->months),
                 'stock_date' => $trend->stockDate?->toDateString(),
                 'forecast_from' => $forecast->forecastFrom->toDateString(),

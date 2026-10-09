@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { computed, useTemplateRef } from "vue";
 import TrendTooltip from "@/components/inventoryTrend/TrendTooltip.vue";
-import { shortMonthLabel, yearSpans, type CellTone, type ItemRows, type SkuRow, type TrendMonth, type TrendTooltipContent } from "@/components/inventoryTrend/trendRows";
+import {
+    formatQuantity,
+    isShort,
+    shortMonthLabel,
+    yearSpans,
+    type CellTone,
+    type ItemRows,
+    type SkuRow,
+    type TrendMonth,
+    type StockScope,
+    type TrendTooltipContent,
+} from "@/components/inventoryTrend/trendRows";
 import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
 import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
 import { useVirtualRows } from "@/composables/useVirtualRows";
@@ -13,7 +24,7 @@ import { useVirtualRows } from "@/composables/useVirtualRows";
  * 表は大きくなるため、見えている行だけを描く（行の高さは ROW_HEIGHT にそろえる）。
  */
 
-const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string }>();
+const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string; stockScope: StockScope }>();
 
 const ROW_HEIGHT = 40;
 
@@ -104,6 +115,14 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                                 >
                                 <span v-if="entry.group.shortageCount > 0" class="shrink-0 rounded-full bg-red-100 px-2 py-px text-[11px] font-semibold text-red-700" data-testid="item-shortage">
                                     欠品 {{ entry.group.shortageCount }}/{{ entry.group.calculatedCount }}
+                                </span>
+                                <span
+                                    v-if="isShort(entry.group.shortfallToCheck)"
+                                    class="shrink-0 text-[11px] font-semibold text-red-700 tabular-nums"
+                                    title="今月から判定する月までの、SKUの足りない数の合計"
+                                    data-testid="item-shortfall"
+                                >
+                                    判定月まで −{{ formatQuantity(entry.group.shortfallToCheck) }}
                                 </span>
                                 <span
                                     v-if="entry.group.item.unassignable_inbound > 0"
@@ -214,7 +233,7 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
             class="pointer-events-none fixed z-50 w-56 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg bg-stone-900 text-left text-stone-100 shadow-xl ring-1 ring-black/20"
             :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
         >
-            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" :demand-label="demandLabel" />
+            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" :demand-label="demandLabel" :stock-scope="stockScope" />
         </div>
     </div>
 </template>

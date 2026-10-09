@@ -70,6 +70,16 @@ function response(overrides: Partial<InventoryTrendResponse["meta"]> = {}): Inve
             calculated_at: "2026-10-07T10:00:00+09:00",
             basis: "forecast",
             basis_label: "需要予測",
+            scope: "total",
+            scope_label: "全体",
+            scope_warehouses: [
+                { warehouse: "amazon_own", label: "Amazon自社出荷" },
+                { warehouse: "amazon_fba", label: "Amazon FBA" },
+                { warehouse: "boss_own", label: "BOSS自社倉庫" },
+                { warehouse: "boss_rfc", label: "BOSS RFC" },
+                { warehouse: "free_stock", label: "フリー在庫" },
+                { warehouse: "ec_stock", label: "ECストック" },
+            ],
             months: MONTHS.map((month, index) => ({ month, days: index === 0 ? 25 : 30 })),
             stock_date: "2026-10-07",
             forecast_from: "2026-10-07",
@@ -341,7 +351,7 @@ describe("InventoryTrendView", () => {
 
         it("switches the demand to the sales targets, keeps it in the URL and says which one the trend is based on", async () => {
             const { wrapper, router } = await mountView("/inventory-trends?view=timeline");
-            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("forecast");
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("forecast", "total");
             expect(wrapper.find('[data-testid="basis-forecast"]').attributes("aria-selected")).toBe("true");
             expect(wrapper.find('[data-testid="basis-description"]').text()).toContain("システム需要予測（販売目標ではありません）");
             vi.mocked(fetchInventoryTrends).mockResolvedValue(salesTargetResponse());
@@ -350,7 +360,7 @@ describe("InventoryTrendView", () => {
             await flushPromises();
 
             expect(router.currentRoute.value.query).toEqual({ view: "timeline", basis: "sales_target" });
-            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("sales_target");
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("sales_target", "total");
             expect(wrapper.find('[data-testid="basis-sales_target"]').attributes("aria-selected")).toBe("true");
             expect(wrapper.find('[data-testid="basis-description"]').text()).toContain("年間販売目標");
             expect(wrapper.find('[data-testid="fact-forecast"]').exists()).toBe(false);
@@ -363,14 +373,14 @@ describe("InventoryTrendView", () => {
             await wrapper.find('[data-testid="basis-forecast"]').trigger("click");
             await flushPromises();
             expect(router.currentRoute.value.query).toEqual({ view: "timeline" });
-            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("forecast");
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("forecast", "total");
         });
 
         it("shows months that cannot be calculated with the reason instead of 0 and filters SKUs that cannot be judged", async () => {
             vi.mocked(fetchInventoryTrends).mockResolvedValue(salesTargetResponse());
             const { wrapper } = await mountView("/inventory-trends?basis=sales_target");
 
-            expect(fetchInventoryTrends).toHaveBeenCalledWith("sales_target");
+            expect(fetchInventoryTrends).toHaveBeenCalledWith("sales_target", "total");
             const row = wrapper.findAll('[data-testid="sku-row"]')[0]!;
             expect(row.findAll('[data-testid="month-cell"]')).toHaveLength(6);
             const rest = row.find('[data-testid="uncalculated-months"]');
@@ -397,6 +407,69 @@ describe("InventoryTrendView", () => {
                 await vi.advanceTimersByTimeAsync(200);
 
                 expect(wrapper.find('[role="tooltip"]').text()).toContain("販売目標（30日分）");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
+
+    describe("Amazon and BOSS (B-121)", () => {
+        function amazonResponse(): InventoryTrendResponse {
+            const base = response({
+                scope: "amazon",
+                scope_label: "Amazon",
+                scope_warehouses: [
+                    { warehouse: "amazon_own", label: "Amazon自社出荷" },
+                    { warehouse: "amazon_fba", label: "Amazon FBA" },
+                ],
+            });
+            const amazonShortage = sku({ ...shortage, opening_stock: 60 });
+            const notSold = sku({ sku_id: 6, sku_code: "fl-01-1-30", status: "not_sold", status_label: "Amazonでは販売していません", months: null, average_daily: null });
+            return { ...base, data: [{ ...base.data[0]!, skus: [amazonShortage, notSold] }] };
+        }
+
+        it("switches to the stock and demand of a mall, keeps it in the URL and says what the trend leaves out", async () => {
+            const { wrapper, router } = await mountView("/inventory-trends?basis=sales_target");
+            expect(wrapper.find('[data-testid="scope-total"]').attributes("aria-selected")).toBe("true");
+            expect(wrapper.find('[data-testid="scope-note"]').exists()).toBe(false);
+            expect(wrapper.find('[data-testid="fact-stock"]').text()).toContain("6区分の合計");
+            vi.mocked(fetchInventoryTrends).mockResolvedValue(amazonResponse());
+
+            await wrapper.find('[data-testid="scope-amazon"]').trigger("click");
+            await flushPromises();
+
+            expect(router.currentRoute.value.query).toEqual({ basis: "sales_target", scope: "amazon" });
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("sales_target", "amazon");
+            expect(wrapper.find('[data-testid="fact-stock"]').text()).toContain("Amazon自社出荷＋Amazon FBA");
+            expect(wrapper.find('[data-testid="scope-note"]').text()).toContain("Amazonの在庫（Amazon自社出荷＋Amazon FBA）からAmazonの販売目標を引いた推移です。");
+            expect(wrapper.find('[data-testid="scope-note"]').text()).toContain("入荷予定は社内在庫に入るものとして含めず");
+            expect(wrapper.findAll('[data-testid="sku-row"]')[1]!.find('[data-testid="status"]').text()).toBe("Amazonでは販売していません");
+
+            await wrapper.find('[data-testid="scope-total"]').trigger("click");
+            await flushPromises();
+            expect(router.currentRoute.value.query).toEqual({ basis: "sales_target" });
+        });
+
+        it("shows how much the item runs short up to the check month", async () => {
+            const { wrapper } = await mountView();
+
+            // fl-01-1-10 は1月から −15・−45・−75・−105（判定する4月まで）
+            expect(wrapper.find('[data-testid="item-shortfall"]').text()).toBe("判定月まで −240");
+        });
+
+        it("dims the warehouses that the mall's trend does not count in the stock tooltip", async () => {
+            vi.mocked(fetchInventoryTrends).mockResolvedValue(amazonResponse());
+            const { wrapper } = await mountView("/inventory-trends?scope=amazon");
+            vi.useFakeTimers();
+
+            try {
+                await wrapper.find('[data-testid="stock"]').trigger("mouseenter");
+                await vi.advanceTimersByTimeAsync(200);
+
+                const tooltip = wrapper.find('[role="tooltip"]');
+                expect(tooltip.find('[data-testid="tooltip-stock-total"]').text()).toBe("Amazonの在庫 60");
+                expect(tooltip.findAll('[data-in-scope="true"]').map((row) => row.text())).toEqual(["Amazon FBA60"]);
+                expect(tooltip.findAll('[data-in-scope="false"]')).toHaveLength(1);
             } finally {
                 vi.useRealTimers();
             }

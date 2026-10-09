@@ -13,12 +13,14 @@ final readonly class SkuDemand
      * @param  list<float|null>  $shares  月ごとの、未割り振りの入荷予定を仮に割り振る比率（K-043・K-110）。割り振らない月は null
      * @param  float|null  $averageDaily  平均日販（在庫が持つ月数の目安に使う）
      * @param  string|null  $unavailableLabel  計算できない月の理由。すべての月を計算できれば null
+     * @param  TrendStatus|null  $unavailableStatus  1か月も計算できないときの状態。null なら需要の種類で決める（需要予測は予測不能、販売試算は販売目標なし）
      */
     public function __construct(
         public array $monthly,
         public array $shares,
         public ?float $averageDaily,
         public ?string $unavailableLabel = null,
+        public ?TrendStatus $unavailableStatus = null,
     ) {}
 
     public function shareAt(int $index): ?float

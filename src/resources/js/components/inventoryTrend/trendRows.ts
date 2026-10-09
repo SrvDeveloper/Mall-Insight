@@ -87,9 +87,18 @@ export interface ItemRows {
     /** 月ごとの品番全体の入荷予定。入荷が無い月は null */
     monthInbounds: (MonthInbound | null)[];
     shortageCount: number;
+    /** 今月から判定する月までの、SKUの足りない数の合計（計算できた月だけ） */
+    shortfallToCheck: number;
     /** 判定する月を計算できないSKUの数 */
     undeterminedCount: number;
     calculatedCount: number;
+}
+
+/** 現在庫のツールチップで、推移に数える在庫の区分（B-121）。全体なら6区分すべて。 */
+export interface StockScope {
+    label: string;
+    isTotal: boolean;
+    warehouses: string[];
 }
 
 export interface TrendMonth {
@@ -211,6 +220,7 @@ export function buildItemRows(items: ItemTrend[], months: TrendMonth[], checkMon
                 return { total, provisional, text: `+${formatQuantity(total)}`, label: `${longMonthLabel(month.month)} 入荷予定 ${formatQuantity(total)}${provisionalText}` };
             }),
             shortageCount: item.skus.filter((sku) => sku.warning === "shortage").length,
+            shortfallToCheck: calculated.reduce((total, sku) => total + sku.months!.slice(0, checkMonthIndex + 1).reduce((sum, month) => sum + month.shortfall, 0), 0),
             undeterminedCount: item.skus.filter((sku) => sku.warning === "undetermined").length,
             calculatedCount: calculated.length,
         };

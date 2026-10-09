@@ -20,6 +20,7 @@ final readonly class InventoryTrend
     public function __construct(
         public CarbonImmutable $calculatedAt,
         public DemandBasis $basis,
+        public TrendScope $scope,
         public ?CarbonImmutable $stockDate,
         public DemandForecast $forecast,
         public TrendSettings $settings,
