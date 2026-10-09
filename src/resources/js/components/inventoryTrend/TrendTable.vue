@@ -57,7 +57,7 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
         @lostpointercapture="onPointerEnd"
         @pointerleave="onPointerLeave"
     >
-        <table class="w-full min-w-[81rem] table-fixed border-separate border-spacing-0 text-left text-sm">
+        <table class="w-full min-w-324 table-fixed border-separate border-spacing-0 text-left text-sm">
             <colgroup>
                 <col class="w-62" />
                 <col class="w-22" />
@@ -90,7 +90,7 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                     <td :colspan="months.length + 2" class="p-0" />
                 </tr>
                 <template v-for="entry in renderedRows" :key="entry.key">
-                    <tr v-if="entry.kind === 'item'" class="h-[40px] bg-stone-50 [&>*]:border-t [&>*]:border-stone-200" data-testid="item-row">
+                    <tr v-if="entry.kind === 'item'" class="h-10 bg-stone-50 *:border-t *:border-stone-200" data-testid="item-row">
                         <th scope="rowgroup" class="sticky left-0 z-10 bg-stone-50 px-4 text-left font-normal">
                             <div class="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                                 <span class="shrink-0 font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>

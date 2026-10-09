@@ -6,7 +6,7 @@ import type { SalesView } from "@/components/actuals/useSalesActuals";
 import type { SalesActualsResponse, SalesUnit } from "@/types/api";
 
 /**
- * 品番別売上・SKU別売上の一覧の上の操作欄（月ごとと日ごと・数量と金額・表とグラフ・絞り込み・期間）と凡例。
+ * 品番別売上・SKU別売上の一覧の上の操作欄（月別と日別・数量と金額・表とグラフ・絞り込み・期間）と凡例。
  * 表とグラフの切り替えと絞り込みは、view・searchLabel を渡したときだけ出す（SKU別売上は1画面のため出さない）。
  */
 
@@ -15,8 +15,8 @@ const keyword = defineModel<string>("keyword", { default: "" });
 const emit = defineEmits<{ update: [changes: { unit?: SalesUnit; measure?: ActualMeasure; view?: SalesView; period?: SalesPeriod }] }>();
 
 const UNITS: { value: SalesUnit; label: string }[] = [
-    { value: "month", label: "月ごと" },
-    { value: "day", label: "日ごと" },
+    { value: "month", label: "月別" },
+    { value: "day", label: "日別" },
 ];
 
 const MEASURES: { value: ActualMeasure; label: string }[] = [
@@ -33,7 +33,7 @@ const VIEWS: { value: SalesView; label: string }[] = [
 <template>
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
         <div class="flex flex-wrap items-center gap-3">
-            <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="tablist" aria-label="月ごとと日ごと">
+            <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="tablist" aria-label="月別と日別">
                 <button
                     v-for="option in UNITS"
                     :key="option.value"
@@ -48,7 +48,7 @@ const VIEWS: { value: SalesView; label: string }[] = [
                     {{ option.label }}
                 </button>
             </div>
-            <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="group" aria-label="数量と金額">
+            <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="group" aria-label="数量と金額">
                 <button
                     v-for="option in MEASURES"
                     :key="option.value"
@@ -62,7 +62,7 @@ const VIEWS: { value: SalesView; label: string }[] = [
                     {{ option.label }}
                 </button>
             </div>
-            <div v-if="view" class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="group" aria-label="見せ方">
+            <div v-if="view" class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="group" aria-label="見せ方">
                 <button
                     v-for="option in VIEWS"
                     :key="option.value"
@@ -78,7 +78,7 @@ const VIEWS: { value: SalesView; label: string }[] = [
             </div>
         </div>
         <label v-if="searchLabel" class="flex h-9 w-full items-center gap-2 rounded-lg border border-stone-200 px-3 text-stone-400 focus-within:border-stone-900 lg:w-60">
-            <svg class="size-[15px] shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <svg class="size-3.75 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
                 <circle cx="7" cy="7" r="4.5" />
                 <path d="m10.5 10.5 3 3" />
             </svg>
