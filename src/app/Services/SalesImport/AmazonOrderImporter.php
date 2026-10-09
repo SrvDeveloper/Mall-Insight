@@ -7,6 +7,7 @@ use App\Enums\Mall;
 use App\Enums\SyncStatus;
 use App\Models\SalesImport;
 use App\Models\Sku;
+use App\Services\ImportHistoryRetention;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -24,9 +25,17 @@ class AmazonOrderImporter
 {
     public const SOURCE = 'amazon';
 
-    public function __construct(private AmazonOrderReportParser $parser, private SalesLineReplacer $replacer) {}
+    public function __construct(private AmazonOrderReportParser $parser, private SalesLineReplacer $replacer, private ImportHistoryRetention $historyRetention) {}
 
     public function import(string $fileName, string $contents): SalesImport
+    {
+        $import = $this->importFile($fileName, $contents);
+        $this->historyRetention->prune(SalesImport::query());
+
+        return $import;
+    }
+
+    private function importFile(string $fileName, string $contents): SalesImport
     {
         $startedAt = now();
 

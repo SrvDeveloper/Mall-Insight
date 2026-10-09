@@ -6,6 +6,7 @@ use App\Enums\SyncStatus;
 use App\Enums\SyncTrigger;
 use App\Models\Inventory;
 use App\Models\Sku;
+use App\Models\User;
 use App\Models\ZeroStockViewSync;
 use App\Services\SyncAlreadyRunningException;
 use App\Services\ZeroStockView\InventorySynchronizer;
@@ -14,6 +15,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 class InventorySynchronizerTest extends TestCase
@@ -154,6 +156,54 @@ class InventorySynchronizerTest extends TestCase
         $this->assertSame('ZeroStockViewのAPIキーが正しくありません。APIキーを確認してください。', $sync->error_message);
         $this->assertSame('2026-10-05', $sync->latest_stock_date->toDateString());
         $this->assertSame(1, Inventory::query()->count());
+    }
+
+    #[TestWith([SyncTrigger::Manual, true])]
+    #[TestWith([SyncTrigger::Schedule, true])]
+    #[TestWith([SyncTrigger::Manual, false])]
+    #[TestWith([SyncTrigger::Schedule, false])]
+    public function test_keeps_the_latest_twenty_syncs_and_preserves_inventory(SyncTrigger $trigger, bool $succeeds): void
+    {
+        $ids = [];
+        for ($index = 0; $index < 20; $index++) {
+            $ids[] = ZeroStockViewSync::create([
+                'status' => $index % 2 === 0 ? SyncStatus::Succeeded : SyncStatus::Failed,
+                'triggered_by' => $index % 2 === 0 ? SyncTrigger::Manual : SyncTrigger::Schedule,
+                'started_at' => now(),
+                'finished_at' => now(),
+            ])->id;
+        }
+        $sku = Sku::factory()->create(['sku_code' => 'fisi-05-1-10']);
+        $historicalInventory = Inventory::create(['stock_date' => '2026-09-16', 'sku_id' => $sku->id, 'warehouse' => 'amazon_fba', 'quantity' => 11]);
+        $recentInventory = Inventory::create(['stock_date' => '2026-10-05', 'sku_id' => $sku->id, 'warehouse' => 'amazon_fba', 'quantity' => 3]);
+        if ($succeeds) {
+            $this->apiRows = ['2026-10-06' => [$this->row('2026-10-06', 'fisi-05-1-10')]];
+            $this->fakeApi();
+        } else {
+            Http::fake(['zsv.test/*' => Http::response(['message' => 'APIキーが正しくありません。'], 401)]);
+        }
+
+        $sync = app(InventorySynchronizer::class)->sync($trigger);
+
+        $this->assertSame($succeeds ? SyncStatus::Succeeded : SyncStatus::Failed, $sync->status);
+        $this->assertSame([...array_slice($ids, 1), $sync->id], ZeroStockViewSync::query()->orderBy('id')->pluck('id')->all());
+        $this->assertDatabaseHas('inventories', ['id' => $historicalInventory->id, 'sku_id' => $sku->id, 'quantity' => 11]);
+        $this->assertDatabaseHas('inventories', ['id' => $recentInventory->id, 'sku_id' => $sku->id, 'quantity' => 3]);
+    }
+
+    public function test_keeps_the_last_succeeded_sync_beyond_twenty_while_failures_continue(): void
+    {
+        $succeededId = ZeroStockViewSync::create(['status' => SyncStatus::Succeeded, 'triggered_by' => SyncTrigger::Schedule, 'started_at' => now()->subDays(30), 'finished_at' => now()->subDays(30)])->id;
+        $failedIds = [];
+        for ($index = 0; $index < 20; $index++) {
+            $failedIds[] = ZeroStockViewSync::create(['status' => SyncStatus::Failed, 'triggered_by' => SyncTrigger::Schedule, 'started_at' => now(), 'finished_at' => now()])->id;
+        }
+        Http::fake(['zsv.test/*' => Http::response(['message' => 'APIキーが正しくありません。'], 401)]);
+
+        $sync = app(InventorySynchronizer::class)->sync(SyncTrigger::Manual);
+
+        $this->assertSame([$succeededId, ...array_slice($failedIds, 1), $sync->id], ZeroStockViewSync::query()->orderBy('id')->pluck('id')->all());
+        $this->actingAs(User::factory()->create())->getJson('/api/v1/zerostockview-syncs/latest')->assertOk()->assertJsonPath('data.latest.id', $sync->id)->assertJsonPath('data.last_succeeded.id', $succeededId);
     }
 
     public function test_does_not_retry_when_the_external_api_is_disabled(): void

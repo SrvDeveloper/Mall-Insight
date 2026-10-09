@@ -3,9 +3,12 @@
 namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Models\SalesImport;
+use App\Models\SalesLine;
+use App\Models\Sku;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 class SalesImportControllerTest extends TestCase
@@ -74,6 +77,47 @@ class SalesImportControllerTest extends TestCase
             ->assertJsonPath('data.status', 'failed')
             ->assertJsonPath('data.issues', []);
         $this->assertStringStartsWith('必要な列がありません：', $response->json('data.error_message'));
+    }
+
+    #[TestWith(['boss', false, 20])]
+    #[TestWith(['amazon', false, 20])]
+    #[TestWith(['boss', true, 20])]
+    #[TestWith(['amazon', true, 20])]
+    #[TestWith(['boss', false, 25])]
+    #[TestWith(['boss', false, 19])]
+    public function test_keeps_the_latest_twenty_imports_and_preserves_sales_data(string $source, bool $fails, int $existingCount): void
+    {
+        $ids = [];
+        for ($index = 0; $index < $existingCount; $index++) {
+            $import = SalesImport::create([
+                'source' => $index % 2 === 0 ? 'boss' : 'amazon',
+                'file_name' => "old-{$index}.csv",
+                'status' => $index % 2 === 0 ? 'succeeded' : 'failed',
+                'started_at' => now(),
+                'finished_at' => now(),
+            ]);
+            $import->issues()->create(['level' => 'warning', 'message' => '確認してください。']);
+            $ids[] = $import->id;
+        }
+        $sku = Sku::factory()->create();
+        SalesLine::create(['source' => 'boss', 'source_order_id' => 'historical-order', 'sales_date' => '2026-01-01', 'mall' => 'rakuten', 'sku_id' => $sku->id, 'warehouse' => 'boss_own', 'quantity' => 5, 'amount' => 5000]);
+        $contents = $source === 'boss'
+            ? ($fails ? "a,b\r\n1,2\r\n" : $this->bossCsv())
+            : ($fails ? "amazon-order-id\tasin\r\norder-1\tB0TEST0001\r\n"
+                : "amazon-order-id\tpurchase-date\torder-status\tfulfillment-channel\tsales-channel\tasin\tquantity\titem-price\torder-item-id\r\n503-0000001-0000001\t2026-08-26T14:29:25+09:00\tShipped\tAmazon\tAmazon.co.jp\tB0TEST0001\t1\t4207.0\t10000000000001\r\n");
+
+        $response = $this->post('/api/v1/sales-imports', ['file' => UploadedFile::fake()->createWithContent('new.csv', $contents)], ['Accept' => 'application/json']);
+
+        $response->assertCreated()->assertJsonPath('data.source', $source)->assertJsonPath('data.status', $fails ? 'failed' : 'succeeded');
+        $expectedIds = array_slice([...$ids, $response->json('data.id')], -20);
+        $this->assertSame($expectedIds, SalesImport::query()->orderBy('id')->pluck('id')->all());
+        foreach (array_diff($ids, $expectedIds) as $removedId) {
+            $this->assertDatabaseMissing('sales_import_issues', ['sales_import_id' => $removedId]);
+            $this->getJson("/api/v1/sales-imports/{$removedId}")->assertNotFound();
+        }
+        $this->assertDatabaseHas('sales_import_issues', ['sales_import_id' => $ids[array_key_last($ids)]]);
+        $this->assertDatabaseHas('sales_lines', ['source_order_id' => 'historical-order', 'quantity' => 5, 'amount' => 5000]);
+        $this->getJson('/api/v1/sales-imports')->assertOk()->assertJsonPath('meta.total', 20)->assertJsonPath('data.*.id', array_reverse($expectedIds));
     }
 
     public function test_store_returns_422_when_no_csv_file_is_attached(): void

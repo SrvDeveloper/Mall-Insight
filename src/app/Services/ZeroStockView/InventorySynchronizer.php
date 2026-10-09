@@ -8,6 +8,7 @@ use App\Enums\Warehouse;
 use App\Models\Inventory;
 use App\Models\Sku;
 use App\Models\ZeroStockViewSync;
+use App\Services\ImportHistoryRetention;
 use App\Services\SyncAlreadyRunningException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -37,7 +38,7 @@ class InventorySynchronizer
 
     private const LOCK_SECONDS = 600;
 
-    public function __construct(private ZeroStockViewClient $client) {}
+    public function __construct(private ZeroStockViewClient $client, private ImportHistoryRetention $historyRetention) {}
 
     /**
      * 取得を1回実行し、その記録を返す。取得に失敗した場合も、失敗の記録を返す（例外にしない）。
@@ -52,7 +53,11 @@ class InventorySynchronizer
         }
 
         try {
-            return $this->run($trigger);
+            $sync = $this->run($trigger);
+            // 失敗が続いても前回取得した日時を表示できるよう、最後に成功した記録は残す
+            $this->historyRetention->prune(ZeroStockViewSync::query(), ZeroStockViewSync::query()->succeeded()->latestFirst()->value('id'));
+
+            return $sync;
         } finally {
             $lock->release();
         }
