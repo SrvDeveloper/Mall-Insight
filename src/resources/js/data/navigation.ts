@@ -28,6 +28,10 @@ export const navigation: NavGroup[] = [
         ],
     },
     {
+        label: "販売実績",
+        pages: [{ name: "item-sales", label: "品番別売上", path: "/item-sales" }],
+    },
+    {
         label: "在庫試算",
         pages: [
             { name: "target-items", label: "対象品番", path: "/target-items" },
@@ -35,6 +39,7 @@ export const navigation: NavGroup[] = [
             { name: "sales-targets", label: "販売目標", path: "/sales-targets" },
             { name: "inbound-plans", label: "入荷予定", path: "/inbound-plans" },
             { name: "inventory-trends", label: "在庫推移", path: "/inventory-trends" },
+            { name: "stock-actuals", label: "在庫実績", path: "/stock-actuals" },
         ],
     },
 ];

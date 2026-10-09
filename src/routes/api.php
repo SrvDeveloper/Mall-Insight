@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\ActualController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
 use App\Http\Controllers\Api\V1\DemandForecastController;
@@ -50,6 +51,8 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/item-unit-prices', [ItemUnitPriceController::class, 'index'])->name('item-unit-prices.index');
         Route::put('/item-unit-prices/{itemNo}', [ItemUnitPriceController::class, 'update'])->name('item-unit-prices.update');
         Route::get('/inventory-trends', [InventoryTrendController::class, 'index'])->name('inventory-trends.index');
+        Route::get('/actuals/sales', [ActualController::class, 'sales'])->name('actuals.sales');
+        Route::get('/actuals/stock', [ActualController::class, 'stock'])->name('actuals.stock');
         Route::post('/inventory-trend-settings', [InventoryTrendSettingController::class, 'store'])->name('inventory-trend-settings.store');
         Route::get('/unregistered-skus', [UnregisteredSkuController::class, 'index'])->name('unregistered-skus.index');
         Route::get('/crosswalker-syncs/latest', [CrossWalkerSyncController::class, 'latest'])->name('crosswalker-syncs.latest');

@@ -522,3 +522,48 @@ export interface ItemUnitPricePayload {
     amazon_unit_price: number | null;
     boss_unit_price: number | null;
 }
+
+/** 実績（B-124）のSKUの行。quantities は列（月・日）ごとの数で、データの無い列は null。 */
+export interface ActualSku {
+    sku_id: number;
+    sku_code: string;
+    status: ActiveStatus | null;
+    status_label: string | null;
+    /** そのモールでは売っていない（子ASINの無いSKUのAmazon、K-042） */
+    not_sold: boolean;
+    quantities: (number | null)[];
+    /** 販売実績のときだけ、列ごとの金額（税込） */
+    amounts?: (number | null)[];
+}
+
+export interface ActualItem {
+    item_no: string;
+    brand: string;
+    category: string;
+    skus: ActualSku[];
+}
+
+interface ActualMeta {
+    calculated_at: string;
+    scope: TrendScope;
+    scope_label: string;
+    selection: { confirmed_at: string; item_count: number } | null;
+}
+
+/** 月ごとの販売数（直近12か月＋今月）。coverage は販売実績がそろっているか（none はデータ無し、partial は途中まで）。 */
+export interface SalesActualsResponse {
+    data: ActualItem[];
+    meta: ActualMeta & {
+        months: { month: string; coverage: "full" | "partial" | "none" }[];
+        channels: { channel: "boss" | "amazon"; label: string; sales_data_from: string | null; sales_data_to: string | null }[];
+    };
+}
+
+/** 日ごとの在庫数（直近31日）。has_data は在庫を取得した日か。 */
+export interface StockActualsResponse {
+    data: ActualItem[];
+    meta: ActualMeta & {
+        scope_warehouses: { warehouse: string; label: string }[];
+        dates: { date: string; has_data: boolean }[];
+    };
+}

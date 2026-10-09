@@ -8,8 +8,10 @@ import InventoryTrendView from "@/views/InventoryTrendView.vue";
 import InventoryImportView from "@/views/InventoryImportView.vue";
 import ItemListView from "@/views/ItemListView.vue";
 import LoginView from "@/views/LoginView.vue";
+import ItemSalesView from "@/views/ItemSalesView.vue";
 import SalesImportView from "@/views/SalesImportView.vue";
 import SalesTargetView from "@/views/SalesTargetView.vue";
+import StockActualsView from "@/views/StockActualsView.vue";
 import TargetItemSelectionView from "@/views/TargetItemSelectionView.vue";
 import UnitPriceView from "@/views/UnitPriceView.vue";
 import { useAuthStore } from "@/stores/auth";
@@ -34,10 +36,12 @@ const routes: RouteRecordRaw[] = [
             { path: "items", name: "items", component: ItemListView, meta: { title: "品番・SKU" } },
             { path: "unit-prices", name: "unit-prices", component: UnitPriceView, meta: { title: "単価" } },
             { path: "target-items", name: "target-items", component: TargetItemSelectionView, meta: { title: "対象品番" } },
+            { path: "item-sales", name: "item-sales", component: ItemSalesView, meta: { title: "品番別売上" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
             { path: "sales-targets", name: "sales-targets", component: SalesTargetView, meta: { title: "販売目標" } },
             { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },
             { path: "inventory-trends", name: "inventory-trends", component: InventoryTrendView, meta: { title: "在庫推移" } },
+            { path: "stock-actuals", name: "stock-actuals", component: StockActualsView, meta: { title: "在庫実績" } },
         ],
     },
     { path: "/:pathMatch(.*)*", redirect: { name: "items" } },
