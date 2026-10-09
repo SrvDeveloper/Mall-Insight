@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from "vue";
+import { computed, onMounted, ref, shallowRef, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { fetchInventoryTrends } from "@/api/inventoryTrends";
 import CheckMonthSetting from "@/components/inventoryTrend/CheckMonthSetting.vue";
 import TrendGraph from "@/components/inventoryTrend/TrendGraph.vue";
 import TrendTable from "@/components/inventoryTrend/TrendTable.vue";
 import TrendTimeline from "@/components/inventoryTrend/TrendTimeline.vue";
-import { COVER_COLORS, COVER_LEGEND, buildItemRows, type ItemRows } from "@/components/inventoryTrend/trendRows";
-import type { InventoryTrendResponse, SkuTrend } from "@/types/api";
+import { COVER_COLORS, COVER_LEGEND, buildItemRows, longMonthLabel, type ItemRows } from "@/components/inventoryTrend/trendRows";
+import type { DemandBasis, InventoryTrendResponse, SkuTrend } from "@/types/api";
 
 /**
  * 12か月在庫推移（バックログ B-008、PG-730）。対象品番のSKUについて、最新の在庫（6区分の合計、K-028）から、需要予測（K-038）を引き、
@@ -17,12 +17,31 @@ import type { InventoryTrendResponse, SkuTrend } from "@/types/api";
  *
  * 判定する月は画面から変えられ（B-011、K-050）、変えたら計算し直す。
  *
+ * 需要は「需要予測」（初期値）と「販売試算」（年間販売目標どおりに売れた場合、B-122）を切り替える。どちらにもとづく推移かを
+ * 見出しの説明と根拠の帯に明記する（原則1）。販売試算で目標を割り振れない月（翌年度の目標が未登録など）は、0とせず
+ * 「計算できない」とし（K-109）、判定する月を計算できないSKUは「判定できない」で絞り込める。選んだ需要は URL に持たせる。
+ *
  * 見せ方は「表」「タイムライン」「グラフ」をタブで切り替える（K-047）。選んだ見せ方は URL に持たせ、再読み込みしても変わらない。
  * 表示用のデータはデータを読み込んだときに一度だけ作り、切り替えや絞り込みでは作り直さない。
  */
 
 type TrendView = "table" | "timeline" | "graph";
-type TrendFilter = "all" | "shortage" | "uncalculated";
+type TrendFilter = "all" | "shortage" | "undetermined" | "uncalculated";
+
+const BASES: { value: DemandBasis; label: string; demandLabel: string; description: string }[] = [
+    {
+        value: "forecast",
+        label: "需要予測",
+        demandLabel: "需要予測",
+        description: "最新の在庫からシステム需要予測（販売目標ではありません）を引き、入荷予定を足した、12か月先までの月末在庫です。",
+    },
+    {
+        value: "sales_target",
+        label: "販売試算",
+        demandLabel: "販売目標",
+        description: "最新の在庫から年間販売目標（月別販売比率でSKUへ割り振った数）を引き、入荷予定を足した、目標どおりに売れた場合の12か月先までの月末在庫です。",
+    },
+];
 
 const VIEWS: { value: TrendView; label: string }[] = [
     { value: "table", label: "表" },
@@ -33,6 +52,7 @@ const VIEWS: { value: TrendView; label: string }[] = [
 const FILTERS: { value: TrendFilter; label: string }[] = [
     { value: "all", label: "すべて" },
     { value: "shortage", label: "欠品警告あり" },
+    { value: "undetermined", label: "判定できない" },
     { value: "uncalculated", label: "計算できない" },
 ];
 
@@ -54,16 +74,28 @@ function selectView(value: TrendView): void {
     void router.replace({ query: { ...route.query, view: value === "table" ? undefined : value } });
 }
 
+const basis = computed<DemandBasis>(() => (route.query.basis === "sales_target" ? "sales_target" : "forecast"));
+const basisOption = computed(() => BASES.find((option) => option.value === basis.value)!);
+
+function selectBasis(value: DemandBasis): void {
+    void router.replace({ query: { ...route.query, basis: value === "forecast" ? undefined : value } });
+}
+
 const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 const formatDateTime = (value: string): string => dateTimeFormat.format(new Date(value));
 const longDate = (value: string): string => `${value.slice(0, 4)}年${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日`;
 const shortDate = (value: string): string => `${Number(value.slice(5, 7))}/${Number(value.slice(8, 10))}`;
 
 async function load(): Promise<void> {
+    const requested = basis.value;
     isLoading.value = true;
     hasError.value = false;
     try {
-        result.value = await fetchInventoryTrends();
+        const response = await fetchInventoryTrends(requested);
+        // 計算中に需要を切り替えたときは、古い方の結果を表示しない
+        if (requested === basis.value) {
+            result.value = response;
+        }
     } catch {
         hasError.value = true;
     } finally {
@@ -72,15 +104,14 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
+watch(basis, () => {
+    result.value = null;
+    filter.value = "all";
+    void load();
+});
 
-/** 推移の12か月（計算できたどのSKUも同じ）。 */
-const months = computed(
-    () =>
-        result.value?.data
-            .flatMap((item) => item.skus)
-            .find((sku) => sku.months)
-            ?.months?.map((month) => ({ month: month.month, days: month.days })) ?? [],
-);
+/** 推移の12か月（今月から）。 */
+const months = computed(() => result.value?.meta.months ?? []);
 const checkMonthIndex = computed(() => months.value.findIndex((month) => month.month === result.value?.meta.check_month));
 
 /** 表示用のデータ。データを読み込んだときに一度だけ作る。 */
@@ -90,6 +121,7 @@ const allSkus = computed(() => result.value?.data.flatMap((item) => item.skus) ?
 const counts = computed<Record<TrendFilter, number>>(() => ({
     all: allSkus.value.length,
     shortage: allSkus.value.filter((sku) => sku.warning === "shortage").length,
+    undetermined: allSkus.value.filter((sku) => sku.warning === "undetermined").length,
     uncalculated: allSkus.value.filter((sku) => sku.status !== "calculated").length,
 }));
 
@@ -97,12 +129,17 @@ function matchesFilter(sku: SkuTrend): boolean {
     switch (filter.value) {
         case "shortage":
             return sku.warning === "shortage";
+        case "undetermined":
+            return sku.warning === "undetermined";
         case "uncalculated":
             return sku.status !== "calculated";
         default:
             return true;
     }
 }
+
+/** 「判定できない」は該当するSKUがあるとき（販売試算で判定する月を計算できないとき）だけ出す。 */
+const visibleFilters = computed(() => FILTERS.filter((option) => option.value !== "undetermined" || counts.value.undetermined > 0 || filter.value === "undetermined"));
 
 const visibleItems = computed<ItemRows[]>(() => {
     const word = keyword.value.trim().toLowerCase();
@@ -125,13 +162,38 @@ const stockAgeDays = computed(() => {
     return Math.round((Date.parse(meta.forecast_from) - Date.parse(meta.stock_date)) / 86_400_000);
 });
 
-/** 計算の根拠の帯（在庫基準日・需要予測・判定する月・対象品番）。 */
+/** 販売試算で、目標を割り振れた対象品番が1つも無い年度（翌年度の目標が未登録など）。 */
+const missingTargetYears = computed(() => result.value?.meta.sales_targets?.filter((year) => year.calculated_item_count === 0) ?? []);
+
+/** 根拠の帯の、需要の欄。需要予測は販売実績の期間、販売試算は年度ごとの目標の登録状況。 */
+const demandFact = computed(() => {
+    const meta = result.value!.meta;
+    if (meta.sales_targets) {
+        const missing = missingTargetYears.value[0];
+        return {
+            key: "sales-target",
+            label: "販売試算（販売目標）",
+            value: meta.sales_targets.map((year) => `${year.fiscal_year}年度 ${year.calculated_item_count}品番`).join("・"),
+            note: missing ? `${missing.fiscal_year}年度の目標が無いため、${longMonthLabel(missing.from)}から計算できません` : "年間販売目標×月別販売比率をSKUへ割り振った数",
+            warn: missing !== undefined,
+        };
+    }
+    const channels = meta.sales_channels.filter((channel) => channel.sales_data_to);
+    return {
+        key: "forecast",
+        label: "需要予測",
+        value: channels.length > 0 ? channels.map((channel) => channel.label).join("・") : "販売実績なし",
+        note: channels.length > 0 ? `販売実績は ${channels.map((channel) => `${channel.label} ${shortDate(channel.sales_data_to!)}`).join("・")} まで` : "販売実績を取り込んでください",
+        warn: channels.length === 0,
+    };
+});
+
+/** 計算の根拠の帯（在庫基準日・需要・判定する月・対象品番）。 */
 const facts = computed(() => {
     const meta = result.value?.meta;
     if (!meta) {
         return [];
     }
-    const channels = meta.sales_channels.filter((channel) => channel.sales_data_to);
     const isStale = stockAgeDays.value !== null && stockAgeDays.value >= STALE_STOCK_DAYS;
     return [
         {
@@ -141,13 +203,7 @@ const facts = computed(() => {
             note: !meta.stock_date ? "在庫がまだ取得されていません" : isStale ? `${stockAgeDays.value}日前の在庫です。「在庫の取得」を確認してください` : "6区分の合計",
             warn: !meta.stock_date || isStale,
         },
-        {
-            key: "forecast",
-            label: "需要予測",
-            value: channels.length > 0 ? channels.map((channel) => channel.label).join("・") : "販売実績なし",
-            note: channels.length > 0 ? `販売実績は ${channels.map((channel) => `${channel.label} ${shortDate(channel.sales_data_to!)}`).join("・")} まで` : "販売実績を取り込んでください",
-            warn: channels.length === 0,
-        },
+        demandFact.value,
         // 判定する月は CheckMonthSetting で表示・変更する（B-011）
         { key: "check", label: "判定する月", value: "", note: "", warn: false },
         {
@@ -167,9 +223,44 @@ const facts = computed(() => {
             <div class="flex flex-col gap-1.5">
                 <p class="text-xs text-stone-500">在庫試算 / 在庫推移</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫推移</h1>
-                <p class="text-[13px] text-stone-600">最新の在庫からシステム需要予測（販売目標ではありません）を引き、入荷予定を足した、12か月先までの月末在庫です。</p>
+                <p class="max-w-3xl text-[13px] text-stone-600" data-testid="basis-description">{{ basisOption.description }}</p>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+                <!-- 地（stone-100）の上に置くため、白い面と枠で浮かせる。高さは再計算のボタン（h-10）にそろえる -->
+                <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫推移の需要">
+                    <button
+                        v-for="option in BASES"
+                        :key="option.value"
+                        type="button"
+                        role="tab"
+                        class="inline-flex h-8 items-center gap-1.5 rounded-[7px] px-3 text-[13px]"
+                        :class="basis === option.value ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:bg-stone-100 hover:text-stone-900'"
+                        :aria-selected="basis === option.value"
+                        :data-testid="`basis-${option.value}`"
+                        @click="selectBasis(option.value)"
+                    >
+                        <svg
+                            v-if="option.value === 'forecast'"
+                            class="size-3.5"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M2 12.5 6 8l2.5 2.5L14 4.5" />
+                            <path d="M10.5 4.5H14V8" />
+                        </svg>
+                        <svg v-else class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                            <circle cx="8" cy="8" r="5.75" />
+                            <circle cx="8" cy="8" r="2.75" />
+                            <circle cx="8" cy="8" r="0.5" fill="currentColor" />
+                        </svg>
+                        {{ option.label }}
+                    </button>
+                </div>
                 <span v-if="result" class="text-xs text-stone-500 tabular-nums" data-testid="calculated-at">計算日時 {{ formatDateTime(result.meta.calculated_at) }}</span>
                 <button
                     type="button"
@@ -223,6 +314,14 @@ const facts = computed(() => {
                 >で、入荷済みにするか月を直してください。
             </p>
 
+            <p v-for="year in missingTargetYears" :key="year.fiscal_year" class="rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-800" data-testid="missing-target-year">
+                {{ year.fiscal_year }}年度の販売目標が登録されていないため、{{ longMonthLabel(year.from) }}から後の販売試算は計算できません。<RouterLink
+                    :to="`/sales-targets?fy=${year.fiscal_year}`"
+                    class="font-semibold underline"
+                    >販売目標</RouterLink
+                >で登録するか、前年度から引き継いでください。
+            </p>
+
             <div v-if="!result.meta.selection" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-900">
                 対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに在庫推移が表示されます。
             </div>
@@ -266,7 +365,7 @@ const facts = computed(() => {
                         </div>
                         <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="絞り込み">
                             <button
-                                v-for="option in FILTERS"
+                                v-for="option in visibleFilters"
                                 :key="option.value"
                                 type="button"
                                 class="h-8 rounded-full border bg-white px-3 text-[13px]"
@@ -330,8 +429,22 @@ const facts = computed(() => {
                 </div>
 
                 <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">条件に一致するSKUはありません。</div>
-                <TrendTable v-else-if="view === 'table'" :items="visibleItems" :months="months" :check-month-index="checkMonthIndex" :stock-date="result.meta.stock_date" />
-                <TrendTimeline v-else-if="view === 'timeline'" :items="visibleItems" :months="months" :check-month-index="checkMonthIndex" :stock-date="result.meta.stock_date" />
+                <TrendTable
+                    v-else-if="view === 'table'"
+                    :items="visibleItems"
+                    :months="months"
+                    :check-month-index="checkMonthIndex"
+                    :stock-date="result.meta.stock_date"
+                    :demand-label="basisOption.demandLabel"
+                />
+                <TrendTimeline
+                    v-else-if="view === 'timeline'"
+                    :items="visibleItems"
+                    :months="months"
+                    :check-month-index="checkMonthIndex"
+                    :stock-date="result.meta.stock_date"
+                    :demand-label="basisOption.demandLabel"
+                />
                 <TrendGraph v-else :items="visibleItems" :months="months" :check-month-index="checkMonthIndex" />
             </section>
         </template>

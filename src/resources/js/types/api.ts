@@ -312,28 +312,37 @@ export interface MonthTrend {
     shortfall: number;
 }
 
-/** SKU1件の12か月在庫推移。計算できないSKUは months が null で、status_label に理由を持つ。 */
+/**
+ * SKU1件の12か月在庫推移。計算できないSKUは months が null で、status_label に理由を持つ。
+ * 販売試算で途中の月から計算できないとき（翌年度の目標が無いなど、K-109）は、months は計算できた月までで、
+ * uncalculated_months_label にその後の月の理由を持つ。
+ */
 export interface SkuTrend {
     sku_id: number;
     sku_code: string;
-    status: "calculated" | "unpredictable" | "no_stock";
+    status: "calculated" | "unpredictable" | "no_sales_target" | "no_stock";
     status_label: string;
     opening_stock: number | null;
     stock_by_warehouse: { warehouse: string; label: string; quantity: number | null }[] | null;
     average_daily: number | null;
     is_partial_forecast: boolean;
     forecast_reason_label: string | null;
-    warning: "none" | "shortage";
+    /** undetermined は、判定する月を計算できない（販売試算） */
+    warning: "none" | "shortage" | "undetermined";
     warning_label: string;
+    uncalculated_months_label: string | null;
     first_shortage_month: string | null;
     months: MonthTrend[] | null;
 }
+
+/** 在庫推移の需要に何を使うか（B-122）。需要予測（初期値）か、年間販売目標どおりに売れた場合の販売試算か。 */
+export type DemandBasis = "forecast" | "sales_target";
 
 export interface ItemTrend {
     item_no: string;
     brand: string;
     category: string;
-    /** 需要予測の出せるSKUが無く、仮に割り振れなかった入荷予定の数 */
+    /** 需要の出せるSKUが無く、仮に割り振れなかった入荷予定の数 */
     unassignable_inbound: number;
     skus: SkuTrend[];
 }
@@ -348,6 +357,10 @@ export interface InventoryTrendResponse {
     data: ItemTrend[];
     meta: {
         calculated_at: string;
+        basis: DemandBasis;
+        basis_label: string;
+        /** 推移の12か月（今月から） */
+        months: { month: string; days: number }[];
         stock_date: string | null;
         forecast_from: string;
         sales_channels: { channel: "boss" | "amazon"; label: string; sales_data_to: string | null }[];
@@ -356,6 +369,8 @@ export interface InventoryTrendResponse {
         /** 判定する月（YYYY-MM） */
         check_month: string;
         overdue_inbound_count: number;
+        /** 販売試算のとき、推移の月が入る年度ごとの、販売目標を割り振れた対象品番の数（from・to は YYYY-MM） */
+        sales_targets: { fiscal_year: number; from: string; to: string; calculated_item_count: number }[] | null;
     };
 }
 

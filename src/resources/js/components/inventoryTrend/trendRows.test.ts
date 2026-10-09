@@ -21,6 +21,7 @@ function sku(overrides: Partial<SkuTrend> = {}): SkuTrend {
         forecast_reason_label: null,
         warning: "shortage",
         warning_label: "欠品警告",
+        uncalculated_months_label: null,
         first_shortage_month: "2027-01",
         months: [month(0, 60), month(1, 30, 0, 10), month(2, 0), month(3, 0, 30)],
         ...overrides,
@@ -101,5 +102,34 @@ describe("trendRows", () => {
         expect(rows!.monthTexts).toEqual(["60", "30", "0", "−30"]);
         expect(rows!.monthInbounds[1]!.text).toBe("+10");
         expect(rows!.shortageCount).toBe(1);
+    });
+
+    it("stops at the last month that can be calculated and leaves the rest to the reason (sales targets, K-109)", () => {
+        const partial = sku({
+            warning: "undetermined",
+            first_shortage_month: null,
+            uncalculated_months_label: "2027年度：年間販売目標が登録されていません",
+            months: [month(0, 60), month(1, 30, 0, 10)],
+        });
+        const item: ItemTrend = { item_no: "fl-01", brand: "B", category: "C", unassignable_inbound: 0, skus: [partial, sku({ sku_id: 8, months: null, opening_stock: null })] };
+        const [rows] = buildItemRows(
+            [item],
+            MONTHS.map((value) => ({ month: value, days: 30 })),
+            3,
+        );
+
+        expect(rows!.rows[0]!.uncalculatedSpan).toBe(2);
+        expect(rows!.rows[0]!.status).toEqual({ label: "11月までもつ", isShortage: false });
+        expect(rows!.rows[1]!.uncalculatedSpan).toBe(0);
+        expect(rows!.monthTexts).toEqual(["60", "30", null, null]);
+        expect(rows!.monthInbounds[1]!.text).toBe("+10");
+        expect(rows!.monthInbounds[2]).toBeNull();
+        expect(rows!.undeterminedCount).toBe(1);
+        // 線は2か月目で止め、横の位置は4か月で決める（3か月目の点から後を斜線にする）
+        const line = rows!.rows[0]!.sparkline!;
+        expect(line.line.endsWith("120.0 46.0")).toBe(true);
+        expect(line.uncalculatedX).toBe(120);
+        expect(line.checkX).toBe(236);
+        expect(sparkline(sku(), 2)!.uncalculatedX).toBeNull();
     });
 });

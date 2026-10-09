@@ -53,6 +53,8 @@ export interface Sparkline {
     zeroY: number;
     checkX: number;
     inboundMarks: string[];
+    /** 計算できない月が始まる位置（販売試算で途中の月から計算できないとき）。すべて計算できれば null */
+    uncalculatedX: number | null;
 }
 
 export interface SkuRow {
@@ -61,9 +63,11 @@ export interface SkuRow {
     cells: MonthCell[];
     /** 「在庫119・4.9か月分」（計算できないSKUは空） */
     coverText: string;
-    /** 「1月から欠品」「12か月もつ」（計算できないSKUは null） */
+    /** 「1月から欠品」「12か月もつ」「3月までもつ」（計算できないSKUは null） */
     status: { label: string; isShortage: boolean } | null;
     sparkline: Sparkline | null;
+    /** 計算できた月の後の、計算できない月の数（販売試算で翌年度の目標が無いときなど、K-109） */
+    uncalculatedSpan: number;
 }
 
 export interface MonthInbound {
@@ -77,11 +81,14 @@ export interface ItemRows {
     item: ItemTrend;
     rows: SkuRow[];
     stockText: string;
-    monthTexts: string[];
+    /** 月ごとの品番全体の月末在庫。計算できないSKUのある月は null */
+    monthTexts: (string | null)[];
     monthTones: CellTone[];
     /** 月ごとの品番全体の入荷予定。入荷が無い月は null */
     monthInbounds: (MonthInbound | null)[];
     shortageCount: number;
+    /** 判定する月を計算できないSKUの数 */
+    undeterminedCount: number;
     calculatedCount: number;
 }
 
@@ -120,7 +127,7 @@ const SPARK_WIDTH = 240;
 const SPARK_HEIGHT = 72;
 const SPARK_PADDING = 6;
 
-/** ミニグラフの横の位置。0 は月初の在庫、n は n 番目の月の月末（その月の点）。 */
+/** ミニグラフの横の位置。0 は月初の在庫、n は n 番目の月の月末（その月の点）。monthCount は推移の月数（12）。 */
 export const sparkX = (index: number, monthCount: number): number => 4 + (index * (SPARK_WIDTH - 8)) / Math.max(1, monthCount);
 
 /** 判定する月の点線の位置（グラフの幅に対する割合）。グラフの下の「判定」の文字をそろえるために使う。 */
@@ -129,15 +136,16 @@ export const sparkCheckPercent = (checkMonthIndex: number, monthCount: number): 
 /**
  * ミニグラフの線と面。値は月初の在庫と、各月末の「月末在庫 − 足りない数」（足りない月はマイナス）。
  * 判定する月の点線と入荷予定の ▲ は、その月の点（月末）の位置に置く。入荷はその月の点に反映されるため。
+ * 途中の月から計算できないときは、線は計算できた月で止め、横の位置は推移の月数（monthCount）で決める。
  */
-export function sparkline(sku: SkuTrend, checkMonthIndex: number): Sparkline | null {
+export function sparkline(sku: SkuTrend, checkMonthIndex: number, monthCount = sku.months?.length ?? 0): Sparkline | null {
     if (!sku.months || sku.opening_stock === null) {
         return null;
     }
     const values = [sku.opening_stock, ...sku.months.map((month) => month.ending_stock - month.shortfall)];
     const max = Math.max(1, ...values);
     const min = Math.min(0, ...values);
-    const x = (index: number): number => sparkX(index, sku.months!.length);
+    const x = (index: number): number => sparkX(index, monthCount);
     const y = (value: number): number => SPARK_PADDING + ((max - value) * (SPARK_HEIGHT - SPARK_PADDING * 2)) / (max - min || 1);
     const zeroY = Number(y(0).toFixed(1));
     const line = `M ${values.map((value, index) => `${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" L ")}`;
@@ -149,10 +157,19 @@ export function sparkline(sku: SkuTrend, checkMonthIndex: number): Sparkline | n
         const cx = x(index + 1);
         return [`M ${cx.toFixed(1)} ${SPARK_HEIGHT - 9} L ${(cx + 4).toFixed(1)} ${SPARK_HEIGHT - 2} L ${(cx - 4).toFixed(1)} ${SPARK_HEIGHT - 2} Z`];
     });
-    return { line, area, zeroY, checkX: Number(x(checkMonthIndex + 1).toFixed(1)), inboundMarks };
+    const uncalculatedX = sku.months.length < monthCount ? Number(x(sku.months.length).toFixed(1)) : null;
+    return { line, area, zeroY, checkX: Number(x(checkMonthIndex + 1).toFixed(1)), inboundMarks, uncalculatedX };
 }
 
-function toSkuRow(sku: SkuTrend, checkMonthIndex: number): SkuRow {
+function skuStatus(sku: SkuTrend, monthCount: number): { label: string; isShortage: boolean } {
+    if (sku.first_shortage_month) {
+        return { label: `${monthLabel(sku.first_shortage_month)}から欠品`, isShortage: true };
+    }
+    const months = sku.months!;
+    return { label: months.length < monthCount ? `${monthLabel(months.at(-1)!.month)}までもつ` : `${monthCount}か月もつ`, isShortage: false };
+}
+
+function toSkuRow(sku: SkuTrend, checkMonthIndex: number, monthCount: number): SkuRow {
     const months = sku.months ?? [];
     const calculated = sku.months !== null && sku.opening_stock !== null;
     return {
@@ -164,24 +181,29 @@ function toSkuRow(sku: SkuTrend, checkMonthIndex: number): SkuRow {
             cover: coverLevel(month, sku.average_daily),
         })),
         coverText: calculated && sku.average_daily && sku.average_daily > 0 ? `在庫${formatQuantity(sku.opening_stock!)}・${(sku.opening_stock! / (sku.average_daily * 30)).toFixed(1)}か月分` : "",
-        status: calculated ? (sku.first_shortage_month ? { label: `${monthLabel(sku.first_shortage_month)}から欠品`, isShortage: true } : { label: "12か月もつ", isShortage: false }) : null,
-        sparkline: calculated ? sparkline(sku, checkMonthIndex) : null,
+        status: calculated ? skuStatus(sku, monthCount) : null,
+        sparkline: calculated ? sparkline(sku, checkMonthIndex, monthCount) : null,
+        uncalculatedSpan: sku.months ? monthCount - sku.months.length : 0,
     };
 }
 
 export function buildItemRows(items: ItemTrend[], months: TrendMonth[], checkMonthIndex: number): ItemRows[] {
     return items.map((item) => {
         const calculated = item.skus.filter((sku) => sku.months);
-        const totals = months.map((_, index) => calculated.reduce((total, sku) => total + sku.months![index]!.ending_stock - sku.months![index]!.shortfall, 0));
+        // 品番全体の月末在庫は、計算できたSKUがすべてその月まで計算できたときだけ出す
+        const totals = months.map((_, index) =>
+            calculated.every((sku) => sku.months![index]) ? calculated.reduce((total, sku) => total + sku.months![index]!.ending_stock - sku.months![index]!.shortfall, 0) : null,
+        );
         return {
             item,
-            rows: item.skus.map((sku) => toSkuRow(sku, checkMonthIndex)),
+            rows: item.skus.map((sku) => toSkuRow(sku, checkMonthIndex, months.length)),
             stockText: formatQuantity(item.skus.reduce((total, sku) => total + (sku.opening_stock ?? 0), 0)),
-            monthTexts: totals.map((total) => (isShort(-total) ? `−${formatQuantity(-total)}` : formatQuantity(Math.max(0, total)))),
-            monthTones: totals.map((total) => (isShort(-total) ? "shortage" : "normal")),
+            monthTexts: totals.map((total) => (total === null ? null : isShort(-total) ? `−${formatQuantity(-total)}` : formatQuantity(Math.max(0, total)))),
+            monthTones: totals.map((total) => (total !== null && isShort(-total) ? "shortage" : "normal")),
             monthInbounds: months.map((month, index) => {
-                const total = calculated.reduce((sum, sku) => sum + sku.months![index]!.inbound + sku.months![index]!.provisional_inbound, 0);
-                const provisional = calculated.reduce((sum, sku) => sum + sku.months![index]!.provisional_inbound, 0);
+                const inMonth = calculated.flatMap((sku) => sku.months![index] ?? []);
+                const total = inMonth.reduce((sum, trend) => sum + trend.inbound + trend.provisional_inbound, 0);
+                const provisional = inMonth.reduce((sum, trend) => sum + trend.provisional_inbound, 0);
                 if (Math.round(total) < 1) {
                     return null;
                 }
@@ -189,6 +211,7 @@ export function buildItemRows(items: ItemTrend[], months: TrendMonth[], checkMon
                 return { total, provisional, text: `+${formatQuantity(total)}`, label: `${longMonthLabel(month.month)} 入荷予定 ${formatQuantity(total)}${provisionalText}` };
             }),
             shortageCount: item.skus.filter((sku) => sku.warning === "shortage").length,
+            undeterminedCount: item.skus.filter((sku) => sku.warning === "undetermined").length,
             calculatedCount: calculated.length,
         };
     });

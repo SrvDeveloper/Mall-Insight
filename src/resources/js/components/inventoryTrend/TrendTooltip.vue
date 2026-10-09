@@ -4,11 +4,11 @@ import { formatQuantity, isShort, longMonthLabel, type TrendTooltipContent } fro
 
 /**
  * 在庫推移のツールチップの中身（位置と外枠は呼び出し側が決める）。表を隠しすぎないよう、小さくまとめる。
- * - 月の欄：月初在庫 ＋ 入荷予定 − 需要予測 ＝ 月末在庫 の計算。足りない月は、月末在庫の行に赤い札で足りない数を出す。
+ * - 月の欄：月初在庫 ＋ 入荷予定 − 需要（需要予測か販売目標、demandLabel） ＝ 月末在庫 の計算。足りない月は、月末在庫の行に赤い札で足りない数を出す。
  * - 現在庫：6区分の在庫を Amazon・BOSS・社内在庫の順に、量に比例した細い棒を付けて並べる。
  */
 
-const props = defineProps<{ content: TrendTooltipContent; stockDate: string | null }>();
+const props = defineProps<{ content: TrendTooltipContent; stockDate: string | null; demandLabel: string }>();
 
 const formatDate = (value: string): string => value.replaceAll("-", "/");
 
@@ -67,7 +67,7 @@ const coverMonths = computed(() => {
             }}
         </dd>
         <dt class="text-stone-400">
-            需要予測<span class="text-[10px] text-stone-500">（{{ content.month.days }}日分）</span>
+            {{ demandLabel }}<span class="text-[10px] text-stone-500">（{{ content.month.days }}日分）</span>
         </dt>
         <dd class="text-right">−{{ formatQuantity(content.month.demand) }}</dd>
         <dt class="mt-1 border-t border-white/10 pt-1 text-stone-300">月末在庫</dt>

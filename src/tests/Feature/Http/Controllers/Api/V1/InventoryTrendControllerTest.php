@@ -2,12 +2,17 @@
 
 namespace Tests\Feature\Http\Controllers\Api\V1;
 
+use App\Enums\ChangeSource;
+use App\Enums\RatioCategoryCode;
 use App\Models\InboundPlan;
 use App\Models\Inventory;
 use App\Models\InventoryTrendSetting;
 use App\Models\Item;
 use App\Models\ItemSelection;
+use App\Models\MonthlySalesRatio;
+use App\Models\RatioCategory;
 use App\Models\SalesLine;
+use App\Models\SalesTarget;
 use App\Models\Sku;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -87,6 +92,10 @@ class InventoryTrendControllerTest extends TestCase
         $response = $this->getJson('/api/v1/inventory-trends');
 
         $response->assertOk()
+            ->assertJsonPath('meta.basis', 'forecast')
+            ->assertJsonPath('meta.months.0', ['month' => '2026-10', 'days' => 31])
+            ->assertJsonPath('meta.months.11', ['month' => '2027-09', 'days' => 30])
+            ->assertJsonPath('meta.sales_targets', null)
             ->assertJsonPath('meta.stock_date', '2026-10-07')
             ->assertJsonPath('meta.check_month', '2027-04')
             ->assertJsonPath('meta.settings', ['check_month_offset' => 6, 'changed_at' => null])
@@ -102,6 +111,7 @@ class InventoryTrendControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.first_shortage_month', '2027-01')
             ->assertJsonPath('data.0.skus.0.warning', 'shortage')
             ->assertJsonPath('data.0.skus.0.warning_label', '欠品警告')
+            ->assertJsonPath('data.0.skus.0.uncalculated_months_label', null)
             ->assertJsonMissingPath('data.0.skus.0.recommended_order');
     }
 
@@ -205,5 +215,110 @@ class InventoryTrendControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.warning', 'none')
             // 欠品する月は判定する月によらない
             ->assertJsonPath('data.0.skus.0.first_shortage_month', '2027-01');
+    }
+
+    /**
+     * 販売試算の前提。老眼の比率は4月～9月が5%・5%・5%・5%・10%・10%、10月～3月が各10%。fl-01 は老眼鏡（老眼の比率、K-058）。
+     * 2026年度の年間販売目標 1,240 なら、10月～3月の品番の月間販売目標は各124。
+     */
+    private function salesTargets(int ...$annualByYear): void
+    {
+        $this->item->update(['category' => '老眼鏡']);
+        MonthlySalesRatio::create([
+            'ratio_category_id' => RatioCategory::forCode(RatioCategoryCode::Reading)->id,
+            'ratios' => [500, 500, 500, 500, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
+            'source' => ChangeSource::Screen,
+        ]);
+        foreach ($annualByYear as $offset => $annual) {
+            SalesTarget::create(['fiscal_year' => 2026 + $offset, 'item_no' => 'fl-01', 'annual_quantity' => $annual, 'source' => ChangeSource::Screen]);
+        }
+    }
+
+    public function test_projects_the_stock_by_the_sales_target_and_does_not_calculate_months_of_the_next_fiscal_year_without_a_target(): void
+    {
+        // 直近12か月の販売数は 90 : 30 なので、品番の月間販売目標124を 93 と 31 に割り振る
+        $fast = $this->sku('fl-01-1-10', 1.5);
+        $slow = $this->sku('fl-01-1-15', 0.5, 1);
+        $this->stock($fast, ['boss_own' => 200]);
+        $this->stock($slow, ['boss_own' => 10]);
+        $this->salesTargets(1240);
+        // 11月の40は、11月のSKUの目標 93 : 31 で仮に割り振る（30 と 10）。2027年5月は計算できない月なので数えない
+        $this->plan('2026-11', 40);
+        $this->plan('2027-05', 50);
+
+        $response = $this->getJson('/api/v1/inventory-trends?basis=sales_target');
+
+        $response->assertOk()
+            ->assertJsonPath('meta.basis', 'sales_target')
+            ->assertJsonPath('meta.basis_label', '販売試算')
+            ->assertJsonPath('meta.check_month', '2027-04')
+            ->assertJsonPath('meta.sales_targets', [
+                ['fiscal_year' => 2026, 'from' => '2026-10', 'to' => '2027-03', 'calculated_item_count' => 1],
+                ['fiscal_year' => 2027, 'from' => '2027-04', 'to' => '2027-09', 'calculated_item_count' => 0],
+            ])
+            ->assertJsonPath('data.0.skus.0.status', 'calculated')
+            // 今月は25日分（93×25/31＝75）
+            ->assertJsonPath('data.0.skus.0.months.0.demand', 75)
+            ->assertJsonPath('data.0.skus.0.months.1.demand', 93)
+            ->assertJsonPath('data.0.skus.0.months.1.provisional_inbound', 30)
+            ->assertJsonPath('data.0.skus.1.months.1.provisional_inbound', 10)
+            // 10月 200 − 75 = 125、11月 125 + 30 − 93 = 62、12月 62 − 93 → 31 足りない
+            ->assertJsonPath('data.0.skus.0.months.*.ending_stock', [125, 62, 0, 0, 0, 0])
+            ->assertJsonPath('data.0.skus.0.months.2.shortfall', 31)
+            ->assertJsonPath('data.0.skus.0.first_shortage_month', '2026-12')
+            ->assertJsonPath('data.0.skus.0.uncalculated_months_label', '2027年度：年間販売目標が登録されていません')
+            // 判定する月（2027年4月）は計算できないため、欠品警告ではなく判定できない
+            ->assertJsonPath('data.0.skus.0.warning', 'undetermined')
+            ->assertJsonPath('data.0.skus.0.warning_label', '判定できない')
+            ->assertJsonPath('data.0.skus.0.is_partial_forecast', false)
+            ->assertJsonPath('data.0.skus.0.forecast_reason_label', null)
+            ->assertJsonPath('data.0.unassignable_inbound', 0);
+    }
+
+    public function test_projects_twelve_months_when_the_next_fiscal_year_also_has_a_target(): void
+    {
+        $fast = $this->sku('fl-01-1-10', 1.5);
+        $this->sku('fl-01-1-15', 0.5, 1);
+        $this->stock($fast, ['boss_own' => 200]);
+        // 2027年度の4月は 1,240 × 5% ＝ 62 を 46.5 と 15.5 に割り振る
+        $this->salesTargets(1240, 1240);
+
+        $response = $this->getJson('/api/v1/inventory-trends?basis=sales_target');
+
+        $response->assertJsonCount(12, 'data.0.skus.0.months')
+            ->assertJsonPath('meta.sales_targets.1.calculated_item_count', 1)
+            ->assertJsonPath('data.0.skus.0.months.6.month', '2027-04')
+            ->assertJsonPath('data.0.skus.0.months.6.demand', 46.5)
+            ->assertJsonPath('data.0.skus.0.months.6.shortfall', 46.5)
+            ->assertJsonPath('data.0.skus.0.warning', 'shortage')
+            ->assertJsonPath('data.0.skus.0.uncalculated_months_label', null)
+            // 需要予測の在庫推移は販売目標を使わない（原則1）
+            ->assertJsonPath('data.0.skus.1.status', 'no_stock');
+        $this->getJson('/api/v1/inventory-trends')->assertJsonPath('data.0.skus.0.months.1.demand', 45);
+    }
+
+    public function test_does_not_calculate_items_without_a_sales_target_this_fiscal_year(): void
+    {
+        $sku = $this->sku('fl-01-1-10', 1.0);
+        $this->stock($sku, ['boss_own' => 40]);
+        $this->salesTargets();
+        $this->plan('2026-11', 30);
+
+        $this->getJson('/api/v1/inventory-trends?basis=sales_target')
+            ->assertOk()
+            ->assertJsonPath('meta.sales_targets.0.calculated_item_count', 0)
+            ->assertJsonPath('data.0.skus.0.status', 'no_sales_target')
+            ->assertJsonPath('data.0.skus.0.status_label', '2026年度：年間販売目標が登録されていません')
+            ->assertJsonPath('data.0.skus.0.opening_stock', 40)
+            ->assertJsonPath('data.0.skus.0.months', null)
+            ->assertJsonPath('data.0.skus.0.average_daily', null)
+            ->assertJsonPath('data.0.skus.0.warning', 'none')
+            // 推移を計算できない品番の入荷予定は、割り振れない数として出さない
+            ->assertJsonPath('data.0.unassignable_inbound', 0);
+    }
+
+    public function test_rejects_an_unknown_basis(): void
+    {
+        $this->getJson('/api/v1/inventory-trends?basis=excel')->assertUnprocessable()->assertJsonValidationErrors('basis');
     }
 }

@@ -1,9 +1,9 @@
 import { apiClient } from "@/api/client";
-import type { InventoryTrendResponse, InventoryTrendSettings } from "@/types/api";
+import type { DemandBasis, InventoryTrendResponse, InventoryTrendSettings } from "@/types/api";
 
-/** 対象品番のSKUの12か月在庫推移。呼ぶたびに最新の在庫・需要予測・入荷予定から計算される。 */
-export async function fetchInventoryTrends(): Promise<InventoryTrendResponse> {
-    const { data } = await apiClient.get<InventoryTrendResponse>("/inventory-trends");
+/** 対象品番のSKUの12か月在庫推移。呼ぶたびに最新の在庫・需要（需要予測か販売目標）・入荷予定から計算される。 */
+export async function fetchInventoryTrends(basis: DemandBasis = "forecast"): Promise<InventoryTrendResponse> {
+    const { data } = await apiClient.get<InventoryTrendResponse>("/inventory-trends", { params: { basis } });
     return data;
 }
 

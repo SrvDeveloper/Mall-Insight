@@ -9,10 +9,11 @@ import { useVirtualRows } from "@/composables/useVirtualRows";
 /**
  * 在庫推移の「表」（K-047、デザイン案A-1）。月ごとの月末在庫を並べ、足りない数（赤）と在庫0（黄）は丸い札で示す。
  * 品番の行に入荷アイコンと「欠品 3/5」の札を付ける。判定する月は、見出しを墨色の札にし、列に薄い色を敷く。
+ * 途中の月から計算できないSKU（販売試算、K-109）は、その月から後を斜線の欄にまとめて理由を出す。
  * 表は大きくなるため、見えている行だけを描く（行の高さは ROW_HEIGHT にそろえる）。
  */
 
-const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null }>();
+const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string }>();
 
 const ROW_HEIGHT = 40;
 
@@ -107,7 +108,7 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                                 <span
                                     v-if="entry.group.item.unassignable_inbound > 0"
                                     class="min-w-0 truncate text-[11px] text-amber-700"
-                                    :title="`需要予測の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
+                                    :title="`需要の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
                                     data-testid="unassignable-inbound"
                                 >
                                     入荷を割り振れません
@@ -140,7 +141,8 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                                     <path d="M1.5 6.5h13" />
                                     <path d="M8 1.5v6M5.5 5 8 7.5 10.5 5" />
                                 </svg>
-                                {{ text }}
+                                <template v-if="text !== null">{{ text }}</template>
+                                <span v-else class="font-normal text-stone-300">—</span>
                             </span>
                         </td>
                     </tr>
@@ -184,6 +186,15 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
                                     {{ cell.text }}
                                 </span>
                             </td>
+                            <td
+                                v-if="entry.row.uncalculatedSpan > 0"
+                                :colspan="entry.row.uncalculatedSpan"
+                                class="truncate px-3 bg-[repeating-linear-gradient(135deg,var(--color-stone-50)_0_8px,var(--color-stone-100)_8px_16px)]"
+                                :title="entry.row.sku.uncalculated_months_label ?? undefined"
+                                data-testid="uncalculated-months"
+                            >
+                                <span class="rounded-full bg-white px-2.5 py-0.5 text-xs text-stone-500 ring-1 ring-stone-200">計算できない：{{ entry.row.sku.uncalculated_months_label }}</span>
+                            </td>
                         </template>
                         <td v-else :colspan="months.length" class="truncate px-3" :title="entry.row.sku.forecast_reason_label ?? entry.row.sku.status_label" data-testid="status">
                             <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-stone-500">{{ entry.row.sku.status_label }}</span>
@@ -203,7 +214,7 @@ function monthContent(row: SkuRow, index: number): TrendTooltipContent {
             class="pointer-events-none fixed z-50 w-56 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg bg-stone-900 text-left text-stone-100 shadow-xl ring-1 ring-black/20"
             :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
         >
-            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" />
+            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" :demand-label="demandLabel" />
         </div>
     </div>
 </template>

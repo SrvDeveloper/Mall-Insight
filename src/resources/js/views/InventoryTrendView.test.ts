@@ -40,6 +40,7 @@ function sku(overrides: Partial<SkuTrend>): SkuTrend {
         forecast_reason_label: null,
         warning: "none",
         warning_label: "警告なし",
+        uncalculated_months_label: null,
         first_shortage_month: null,
         months: months([75, 45, 15, -15, -45, -75, -105, -135, -165, -195, -225, -255]),
         ...overrides,
@@ -67,6 +68,9 @@ function response(overrides: Partial<InventoryTrendResponse["meta"]> = {}): Inve
         data: [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", unassignable_inbound: 0, skus: [shortage, plenty, noStock] }],
         meta: {
             calculated_at: "2026-10-07T10:00:00+09:00",
+            basis: "forecast",
+            basis_label: "需要予測",
+            months: MONTHS.map((month, index) => ({ month, days: index === 0 ? 25 : 30 })),
             stock_date: "2026-10-07",
             forecast_from: "2026-10-07",
             sales_channels: [
@@ -77,6 +81,7 @@ function response(overrides: Partial<InventoryTrendResponse["meta"]> = {}): Inve
             settings: { check_month_offset: 6, changed_at: null },
             check_month: "2027-04",
             overdue_inbound_count: 0,
+            sales_targets: null,
             ...overrides,
         },
     };
@@ -308,5 +313,93 @@ describe("InventoryTrendView", () => {
         await wrapper.find('[data-testid="view-graph"]').trigger("click");
         await flushPromises();
         expect(wrapper.findAll('[data-testid="graph-tile"]')).toHaveLength(1);
+    });
+
+    describe("sales targets (B-122)", () => {
+        const partial = sku({
+            sku_id: 4,
+            sku_code: "fl-01-1-25",
+            warning: "undetermined",
+            warning_label: "判定できない",
+            uncalculated_months_label: "2027年度：年間販売目標が登録されていません",
+            first_shortage_month: null,
+            months: months([75, 45, 15, 10, 5, 1]).slice(0, 6),
+        });
+        const noTarget = sku({ sku_id: 5, sku_code: "fl-01-1-30", status: "no_sales_target", status_label: "2026年度：年間販売目標が登録されていません", months: null, average_daily: null });
+
+        function salesTargetResponse(): InventoryTrendResponse {
+            const base = response({
+                basis: "sales_target",
+                basis_label: "販売試算",
+                sales_targets: [
+                    { fiscal_year: 2026, from: "2026-10", to: "2027-03", calculated_item_count: 1 },
+                    { fiscal_year: 2027, from: "2027-04", to: "2027-09", calculated_item_count: 0 },
+                ],
+            });
+            return { ...base, data: [{ ...base.data[0]!, skus: [partial, noTarget] }] };
+        }
+
+        it("switches the demand to the sales targets, keeps it in the URL and says which one the trend is based on", async () => {
+            const { wrapper, router } = await mountView("/inventory-trends?view=timeline");
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("forecast");
+            expect(wrapper.find('[data-testid="basis-forecast"]').attributes("aria-selected")).toBe("true");
+            expect(wrapper.find('[data-testid="basis-description"]').text()).toContain("システム需要予測（販売目標ではありません）");
+            vi.mocked(fetchInventoryTrends).mockResolvedValue(salesTargetResponse());
+
+            await wrapper.find('[data-testid="basis-sales_target"]').trigger("click");
+            await flushPromises();
+
+            expect(router.currentRoute.value.query).toEqual({ view: "timeline", basis: "sales_target" });
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("sales_target");
+            expect(wrapper.find('[data-testid="basis-sales_target"]').attributes("aria-selected")).toBe("true");
+            expect(wrapper.find('[data-testid="basis-description"]').text()).toContain("年間販売目標");
+            expect(wrapper.find('[data-testid="fact-forecast"]').exists()).toBe(false);
+            expect(wrapper.find('[data-testid="fact-sales-target"]').text()).toContain("2026年度 1品番・2027年度 0品番");
+            expect(wrapper.find('[data-testid="fact-sales-target"]').text()).toContain("2027年度の目標が無いため、2027年4月から計算できません");
+            const banner = wrapper.find('[data-testid="missing-target-year"]');
+            expect(banner.text()).toContain("2027年度の販売目標が登録されていないため、2027年4月から後の販売試算は計算できません。");
+            expect(banner.find("a").attributes("href")).toBe("/sales-targets?fy=2027");
+
+            await wrapper.find('[data-testid="basis-forecast"]').trigger("click");
+            await flushPromises();
+            expect(router.currentRoute.value.query).toEqual({ view: "timeline" });
+            expect(fetchInventoryTrends).toHaveBeenLastCalledWith("forecast");
+        });
+
+        it("shows months that cannot be calculated with the reason instead of 0 and filters SKUs that cannot be judged", async () => {
+            vi.mocked(fetchInventoryTrends).mockResolvedValue(salesTargetResponse());
+            const { wrapper } = await mountView("/inventory-trends?basis=sales_target");
+
+            expect(fetchInventoryTrends).toHaveBeenCalledWith("sales_target");
+            const row = wrapper.findAll('[data-testid="sku-row"]')[0]!;
+            expect(row.findAll('[data-testid="month-cell"]')).toHaveLength(6);
+            const rest = row.find('[data-testid="uncalculated-months"]');
+            expect(rest.attributes("colspan")).toBe("6");
+            expect(rest.text()).toBe("計算できない：2027年度：年間販売目標が登録されていません");
+            expect(wrapper.findAll('[data-testid="sku-row"]')[1]!.find('[data-testid="status"]').text()).toBe("2026年度：年間販売目標が登録されていません");
+            // 品番の行の月末在庫は、計算できない月は「—」
+            expect(wrapper.find('[data-testid="item-row"]').findAll("td")[8]!.text()).toBe("—");
+
+            const undetermined = wrapper.findAll('[role="group"] button').find((button) => button.text().startsWith("判定できない"))!;
+            expect(undetermined.text()).toBe("判定できない 1");
+            await undetermined.trigger("click");
+            expect(wrapper.findAll('[data-testid="sku-row"]').map((sku) => sku.find("td").text())).toEqual(["fl-01-1-25"]);
+        });
+
+        it("labels the demand in the tooltip as the sales target", async () => {
+            vi.mocked(fetchInventoryTrends).mockResolvedValue(salesTargetResponse());
+            const { wrapper } = await mountView("/inventory-trends?basis=sales_target");
+
+            vi.useFakeTimers();
+
+            try {
+                await wrapper.findAll('[data-testid="month-td"]')[1]!.trigger("mouseenter");
+                await vi.advanceTimersByTimeAsync(200);
+
+                expect(wrapper.find('[role="tooltip"]').text()).toContain("販売目標（30日分）");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
     });
 });

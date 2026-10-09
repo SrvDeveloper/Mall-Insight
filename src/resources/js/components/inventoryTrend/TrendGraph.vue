@@ -5,7 +5,7 @@ import { monthLabel, sparkCheckPercent, type ItemRows, type TrendMonth } from "@
 /**
  * 在庫推移の「グラフ」（K-047、デザイン案A-3）。品番ごとのカードに、SKUの12か月の在庫の増減を小さなグラフで並べる。
  * 在庫は灰色の面と線、足りない量は0の線より下の赤い面、判定する月は点線、入荷予定は ▲ で示す。点線と ▲ はその月の点（月末）に置く。
- * 判定する月に欠品するSKUは、カードの枠を薄い赤にする。
+ * 判定する月に欠品するSKUは、カードの枠を薄い赤にする。途中の月から計算できないSKU（販売試算、K-109）は、その月から後を斜線にする。
  * グラフは画面の幅に合わせて自動で折り返す。
  */
 
@@ -33,6 +33,7 @@ const checkPosition = computed(() => `${sparkCheckPercent(props.checkMonthIndex,
                 <span v-if="group.shortageCount > 0" class="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
                     判定する月に欠品 {{ group.shortageCount }}/{{ group.calculatedCount }} SKU
                 </span>
+                <span v-else-if="group.undeterminedCount > 0" class="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-stone-600">判定する月は計算できません</span>
                 <template v-for="(inbound, index) in group.monthInbounds" :key="index">
                     <span v-if="inbound" class="inline-flex items-center gap-1 rounded-full border border-stone-300 px-2 py-px text-xs text-stone-700 tabular-nums" :title="inbound.label">
                         <svg class="size-3 text-stone-500" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -74,7 +75,22 @@ const checkPosition = computed(() => `${sparkCheckPercent(props.checkMonthIndex,
                             <defs>
                                 <clipPath :id="`trend-spark-${row.sku.sku_id}-above`"><rect x="0" y="0" width="240" :height="row.sparkline.zeroY" /></clipPath>
                                 <clipPath :id="`trend-spark-${row.sku.sku_id}-below`"><rect x="0" :y="row.sparkline.zeroY" width="240" height="72" /></clipPath>
+                                <pattern :id="`trend-spark-${row.sku.sku_id}-hatch`" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                                    <rect width="6" height="6" class="fill-stone-50" />
+                                    <line x1="0" y1="0" x2="0" y2="6" class="stroke-stone-200" stroke-width="3" />
+                                </pattern>
                             </defs>
+                            <rect
+                                v-if="row.sparkline.uncalculatedX !== null"
+                                :x="row.sparkline.uncalculatedX"
+                                y="0"
+                                :width="240 - row.sparkline.uncalculatedX"
+                                height="72"
+                                :fill="`url(#trend-spark-${row.sku.sku_id}-hatch)`"
+                                data-testid="graph-uncalculated"
+                            >
+                                <title>計算できない：{{ row.sku.uncalculated_months_label }}</title>
+                            </rect>
                             <path :d="row.sparkline.area" class="fill-stone-200" :clip-path="`url(#trend-spark-${row.sku.sku_id}-above)`" />
                             <path :d="row.sparkline.area" class="fill-red-300" :clip-path="`url(#trend-spark-${row.sku.sku_id}-below)`" data-testid="graph-shortage-area" />
                             <line x1="0" x2="240" :y1="row.sparkline.zeroY" :y2="row.sparkline.zeroY" class="stroke-stone-400" stroke-width="1" />

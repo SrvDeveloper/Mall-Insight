@@ -10,6 +10,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * SKU1件の12か月在庫推移。数量は小数2桁で返し、整数への丸めは表示するときに行う。
+ * 販売試算で途中の月から計算できないときは、months は計算できた月までで、uncalculated_months_label にその後の月の理由を持つ。
  *
  * @mixin SkuTrend
  */
@@ -26,18 +27,19 @@ class SkuTrendResource extends JsonResource
             'sku_id' => $this->sku->id,
             'sku_code' => $this->sku->sku_code,
             'status' => $this->status->value,
-            'status_label' => $this->status->label(),
+            'status_label' => $this->statusLabel(),
             'opening_stock' => $this->openingStock(),
             'stock_by_warehouse' => $this->stockByWarehouse === null ? null : array_map(fn (Warehouse $warehouse): array => [
                 'warehouse' => $warehouse->value,
                 'label' => $warehouse->label(),
                 'quantity' => $this->stockByWarehouse[$warehouse->value] ?? null,
             ], Warehouse::cases()),
-            'average_daily' => $this->forecast->baseAverage === null ? null : round($this->forecast->baseAverage, 4),
-            'is_partial_forecast' => $this->forecast->isPartial,
-            'forecast_reason_label' => $this->forecast->unpredictableReasonLabel(),
+            'average_daily' => $this->demand->averageDaily === null ? null : round($this->demand->averageDaily, 4),
+            'is_partial_forecast' => $this->forecast?->isPartial ?? false,
+            'forecast_reason_label' => $this->forecast?->unpredictableReasonLabel(),
             'warning' => $this->warning->value,
             'warning_label' => $this->warning->label(),
+            'uncalculated_months_label' => $this->uncalculatedMonthsLabel(),
             'first_shortage_month' => $this->firstShortageIndex === null ? null : $this->months[$this->firstShortageIndex]->month->format('Y-m'),
             'months' => $this->months === null ? null : array_map(fn (MonthTrend $month): array => [
                 'month' => $month->month->format('Y-m'),

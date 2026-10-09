@@ -9,10 +9,11 @@ import { useVirtualRows } from "@/composables/useVirtualRows";
 /**
  * 在庫推移の「タイムライン」（K-047、デザイン案A-2）。SKUごとに、在庫がいつまで持つかを月ごとの帯の濃さで示す
  * （在庫が持つ月数 ＝ 月末在庫 ÷ 平均月販）。足りない月は赤、在庫0の月は黄。右に「1月から欠品」「12か月もつ」の札を出す。
- * 品番の行には、入荷のある月に「+600」の札を出す。表と同じく、見えている行だけを描く。
+ * 品番の行には、入荷のある月に「+600」の札を出す。途中の月から計算できないSKU（販売試算、K-109）は、その月から後を斜線の帯にする。
+ * 表と同じく、見えている行だけを描く。
  */
 
-const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null }>();
+const props = defineProps<{ items: ItemRows[]; months: TrendMonth[]; checkMonthIndex: number; stockDate: string | null; demandLabel: string }>();
 
 const ROW_HEIGHT = 44;
 
@@ -81,7 +82,7 @@ function columnTint(index: number): string {
                         <span
                             v-if="entry.group.item.unassignable_inbound > 0"
                             class="min-w-0 truncate text-[11px] text-amber-700"
-                            :title="`需要予測の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
+                            :title="`需要の出せるSKUが無く、未割り振りの入荷予定 ${entry.group.item.unassignable_inbound} を推移に入れられません`"
                             data-testid="unassignable-inbound"
                         >
                             入荷を割り振れません
@@ -112,7 +113,7 @@ function columnTint(index: number): string {
                         </span>
                     </div>
                     <div class="truncate px-4 text-xs" :class="entry.group.shortageCount > 0 ? 'font-semibold text-red-700' : 'text-stone-500'">
-                        {{ entry.group.shortageCount > 0 ? `判定月に ${entry.group.shortageCount} SKU 欠品` : "判定月に欠品なし" }}
+                        {{ entry.group.shortageCount > 0 ? `判定月に ${entry.group.shortageCount} SKU 欠品` : entry.group.undeterminedCount > 0 ? "判定月は計算できません" : "判定月に欠品なし" }}
                     </div>
                 </div>
                 <div v-else class="group grid h-11 items-center border-t border-stone-100 hover:bg-stone-50" :style="gridColumns" data-testid="timeline-sku-row">
@@ -134,6 +135,15 @@ function columnTint(index: number): string {
                                 @focus="showTooltip($event, monthContent(entry.row, index), 0)"
                                 @blur="hideTooltip"
                             />
+                        </div>
+                        <div
+                            v-if="entry.row.uncalculatedSpan > 0"
+                            class="flex h-full items-center truncate px-2 bg-[repeating-linear-gradient(135deg,var(--color-stone-50)_0_8px,var(--color-stone-100)_8px_16px)]"
+                            :style="{ gridColumn: `span ${entry.row.uncalculatedSpan}` }"
+                            :title="entry.row.sku.uncalculated_months_label ?? undefined"
+                            data-testid="timeline-uncalculated"
+                        >
+                            <span class="truncate rounded-full bg-white px-2.5 py-0.5 text-xs text-stone-500 ring-1 ring-stone-200">計算できない：{{ entry.row.sku.uncalculated_months_label }}</span>
                         </div>
                         <div class="px-4">
                             <span
@@ -161,7 +171,7 @@ function columnTint(index: number): string {
             class="pointer-events-none fixed z-50 w-56 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg bg-stone-900 text-left text-stone-100 shadow-xl ring-1 ring-black/20"
             :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
         >
-            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" />
+            <TrendTooltip :content="tooltip.content" :stock-date="stockDate" :demand-label="demandLabel" />
         </div>
     </div>
 </template>
