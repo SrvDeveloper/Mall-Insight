@@ -9,6 +9,7 @@ import InventoryImportView from "@/views/InventoryImportView.vue";
 import ItemListView from "@/views/ItemListView.vue";
 import LoginView from "@/views/LoginView.vue";
 import ItemSalesView from "@/views/ItemSalesView.vue";
+import SkuSalesView from "@/views/SkuSalesView.vue";
 import SalesImportView from "@/views/SalesImportView.vue";
 import SalesTargetView from "@/views/SalesTargetView.vue";
 import StockActualsView from "@/views/StockActualsView.vue";
@@ -36,7 +37,14 @@ const routes: RouteRecordRaw[] = [
             { path: "items", name: "items", component: ItemListView, meta: { title: "品番・SKU" } },
             { path: "unit-prices", name: "unit-prices", component: UnitPriceView, meta: { title: "単価" } },
             { path: "target-items", name: "target-items", component: TargetItemSelectionView, meta: { title: "対象品番" } },
-            { path: "item-sales", name: "item-sales", component: ItemSalesView, meta: { title: "品番別売上" } },
+            // SKU別売上は品番別売上の下に置き、左メニューの「品番別売上」を選んだままにする
+            {
+                path: "item-sales",
+                children: [
+                    { path: "", name: "item-sales", component: ItemSalesView, meta: { title: "品番別売上" } },
+                    { path: ":itemNo", name: "sku-sales", component: SkuSalesView, meta: { title: "SKU別売上" } },
+                ],
+            },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
             { path: "sales-targets", name: "sales-targets", component: SalesTargetView, meta: { title: "販売目標" } },
             { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },

@@ -16,7 +16,7 @@ function stockResponse(): StockActualsResponse {
                 item_no: "fl-01",
                 brand: "FEELLIFE",
                 category: "老眼鏡",
-                skus: [{ sku_id: 1, sku_code: "fl-01-1-10", status: "active", status_label: "有効", not_sold: false, quantities: [null, 12, 0] }],
+                skus: [{ sku_id: 1, sku_code: "fl-01-1-10", color_no: "1", size: "10", status: "active", status_label: "有効", not_sold: false, quantities: [null, 12, 0] }],
             },
         ],
         meta: {

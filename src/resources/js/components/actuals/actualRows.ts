@@ -38,6 +38,8 @@ export interface ActualSkuRow {
 export interface ActualItemRows {
     item: ActualItem;
     rows: ActualSkuRow[];
+    /** 列ごとの品番の合計の値（グラフに使う）。SKUのどれにもデータが無い列は null */
+    totalValues: (number | null)[];
     /** 列ごとの品番の合計。SKUのどれにもデータが無い列は「—」 */
     totals: ActualCell[];
     summaryText: string;
@@ -45,21 +47,25 @@ export interface ActualItemRows {
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
+const dayLabel = (date: string): string => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+const weekday = (date: string): string => WEEKDAYS[new Date(`${date}T00:00:00`).getDay()]!;
+
 export function salesColumns(meta: SalesActualsResponse["meta"]): ActualColumn[] {
-    const lastIndex = meta.months.length - 1;
-    return meta.months.map((month, index) => ({
-        key: month.month,
-        label: shortMonthLabel(month.month),
-        sub: index === lastIndex ? "今月" : month.coverage === "none" ? "取込なし" : month.coverage === "partial" ? "途中まで" : "",
-        muted: month.coverage === "none",
+    const lastIndex = meta.periods.length - 1;
+    const isDay = meta.unit === "day";
+    return meta.periods.map((period, index) => ({
+        key: period.period,
+        label: isDay ? dayLabel(period.period) : shortMonthLabel(period.period),
+        sub: index === lastIndex ? (isDay ? "今日" : "今月") : period.coverage === "none" ? "取込なし" : period.coverage === "partial" ? "途中まで" : isDay ? weekday(period.period) : "",
+        muted: period.coverage === "none",
     }));
 }
 
 export function stockColumns(meta: StockActualsResponse["meta"]): ActualColumn[] {
     return meta.dates.map((date) => ({
         key: date.date,
-        label: `${Number(date.date.slice(5, 7))}/${Number(date.date.slice(8, 10))}`,
-        sub: date.has_data ? WEEKDAYS[new Date(`${date.date}T00:00:00`).getDay()]! : "調査なし",
+        label: dayLabel(date.date),
+        sub: date.has_data ? weekday(date.date) : "調査なし",
         muted: !date.has_data,
     }));
 }
@@ -98,6 +104,7 @@ export function buildActualRows(items: ActualItem[], kind: "sales" | "stock", me
                 cells: valuesOf(sku).map((value) => cell(value, kind, format)),
                 summaryText: sku.not_sold ? "—" : summary(valuesOf(sku), kind, format),
             })),
+            totalValues: totals,
             totals: totals.map((value) => cell(value, kind, format)),
             summaryText: summary(totals, kind, format),
         };
@@ -137,4 +144,60 @@ export function actualSparkline(values: (number | null)[], kind: "sales" | "stoc
     }
     const points = values.flatMap((value, index) => (value === null ? [] : [{ x: Number(x(index).toFixed(1)), y: Number(y(value).toFixed(1)), isEmpty: kind === "stock" && Math.round(value) <= 0 }]));
     return { segments, points };
+}
+
+/** グラフの系列（積み上げの1段）。values は列ごとの値で、データの無い列は null。 */
+export interface ChartSeries {
+    key: string;
+    label: string;
+    color: string;
+    values: (number | null)[];
+}
+
+/**
+ * グラフの色（K-079）。グラフの指針の検証済みの並び（青・橙）を、この順で使う。赤は在庫不足（K-074）に使っているため使わない。
+ */
+export const SERIES_COLORS = ["#2a78d6", "#eb6834"];
+
+/** モールの色は、どの画面でも BOSS が青、Amazon が橙（色はモールに付け、並び順に付けない）。 */
+export const MALL_SERIES: { key: "boss" | "amazon"; label: string; color: string }[] = [
+    { key: "boss", label: "BOSS", color: SERIES_COLORS[0]! },
+    { key: "amazon", label: "Amazon", color: SERIES_COLORS[1]! },
+];
+
+/** 列ごとに値を足す。どの値もデータ無しの列は null。 */
+function sumColumns(lists: (number | null)[][], length: number): (number | null)[] {
+    return Array.from({ length }, (_, index) => {
+        const values = lists.map((list) => list[index] ?? null).filter((value): value is number => value !== null);
+        return values.length === 0 ? null : values.reduce((total, value) => total + value, 0);
+    });
+}
+
+/** 品番の販売数（金額）を、モールごとの積み上げにする。選んだモールだけのときは1段。 */
+export function mallSeries(item: ActualItem, measure: ActualMeasure, length: number): ChartSeries[] {
+    const skus = item.skus.filter((sku) => !sku.not_sold);
+    return MALL_SERIES.filter((mall) => skus.some((sku) => sku.channels?.[mall.key])).map((mall) => ({
+        ...mall,
+        values: sumColumns(
+            skus.map((sku) => (measure === "amount" ? sku.channels?.[mall.key]?.amounts : sku.channels?.[mall.key]?.quantities) ?? []),
+            length,
+        ),
+    }));
+}
+
+/** SKUの販売数（金額）の、モールごとの値（SKU別売上の折れ線に使う）。 */
+export function skuMallSeries(sku: ActualSku, measure: ActualMeasure): ChartSeries[] {
+    return MALL_SERIES.filter((mall) => sku.channels?.[mall.key]).map((mall) => ({
+        ...mall,
+        values: (measure === "amount" ? sku.channels?.[mall.key]?.amounts : sku.channels?.[mall.key]?.quantities) ?? [],
+    }));
+}
+
+const compactFormat = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 });
+
+/** グラフの値・縦軸の表示（数量は個、金額は円。縦軸の金額は「50万」のように短くする）。 */
+export function chartFormats(measure: ActualMeasure): { formatValue: (value: number) => string; formatAxis: (value: number) => string; axisUnit: string } {
+    return measure === "amount"
+        ? { formatValue: (value) => `${formatQuantity(value)}円`, formatAxis: (value) => compactFormat.format(value), axisUnit: "円" }
+        : { formatValue: (value) => `${formatQuantity(value)}個`, formatAxis: (value) => formatQuantity(value), axisUnit: "個" };
 }

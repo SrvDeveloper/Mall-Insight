@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actualSparkline, buildActualRows, salesColumns, stockColumns } from "@/components/actuals/actualRows";
+import { actualSparkline, buildActualRows, salesColumns, skuMallSeries, stockColumns } from "@/components/actuals/actualRows";
 import type { ActualItem, SalesActualsResponse, StockActualsResponse } from "@/types/api";
 
 const meta = { calculated_at: "2026-10-07T10:00:00+09:00", scope: "total" as const, scope_label: "全体", selection: null };
@@ -9,7 +9,16 @@ function item(quantities: (number | null)[][], notSold: boolean[] = []): ActualI
         item_no: "fl-01",
         brand: "B",
         category: "C",
-        skus: quantities.map((values, index) => ({ sku_id: index + 1, sku_code: `fl-01-1-${index}`, status: "active", status_label: "有効", not_sold: notSold[index] ?? false, quantities: values })),
+        skus: quantities.map((values, index) => ({
+            sku_id: index + 1,
+            sku_code: `fl-01-1-${index}`,
+            color_no: null,
+            size: null,
+            status: "active",
+            status_label: "有効",
+            not_sold: notSold[index] ?? false,
+            quantities: values,
+        })),
     };
 }
 
@@ -17,11 +26,14 @@ describe("actualRows", () => {
     it("labels months with their coverage and days with the weekday or no data", () => {
         const sales: SalesActualsResponse["meta"] = {
             ...meta,
-            months: [
-                { month: "2025-10", coverage: "none" },
-                { month: "2025-11", coverage: "partial" },
-                { month: "2025-12", coverage: "full" },
-                { month: "2026-01", coverage: "partial" },
+            unit: "month",
+            from: "2025-10",
+            to: "2026-01",
+            periods: [
+                { period: "2025-10", coverage: "none" },
+                { period: "2025-11", coverage: "partial" },
+                { period: "2025-12", coverage: "full" },
+                { period: "2026-01", coverage: "partial" },
             ],
             channels: [],
         };
@@ -98,5 +110,16 @@ describe("actualRows", () => {
         expect(line.points.filter((point) => point.isEmpty)).toHaveLength(1);
         expect(actualSparkline([0, 0], "sales")!.points.some((point) => point.isEmpty)).toBe(false);
         expect(actualSparkline([null, null], "stock")).toBeNull();
+    });
+
+    it("breaks a SKU down by mall for the tooltip in quantities or amounts", () => {
+        const [sku] = item([[3]]).skus;
+        sku!.channels = { boss: { quantities: [2], amounts: [11000] }, amazon: { quantities: [1], amounts: [5500] } };
+
+        expect(skuMallSeries(sku!, "quantity").map((series) => [series.label, series.values])).toEqual([
+            ["BOSS", [2]],
+            ["Amazon", [1]],
+        ]);
+        expect(skuMallSeries(sku!, "amount").map((series) => series.values)).toEqual([[11000], [5500]]);
     });
 });

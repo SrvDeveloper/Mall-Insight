@@ -527,6 +527,10 @@ export interface ItemUnitPricePayload {
 export interface ActualSku {
     sku_id: number;
     sku_code: string;
+    /** CrossWalker の TQカラーNo（カラー×度数の表に使う） */
+    color_no: string | null;
+    /** CrossWalker の TQサイズ（度数×10。度数の無いSKUは "0"） */
+    size: string | null;
     status: ActiveStatus | null;
     status_label: string | null;
     /** そのモールでは売っていない（子ASINの無いSKUのAmazon、K-042） */
@@ -534,6 +538,8 @@ export interface ActualSku {
     quantities: (number | null)[];
     /** 販売実績のときだけ、列ごとの金額（税込） */
     amounts?: (number | null)[];
+    /** 販売実績のときだけ、モール（全体ならBOSS・Amazon、モールを選んだらそのモール）ごとの内訳。グラフの積み上げに使う */
+    channels?: Partial<Record<"boss" | "amazon", { quantities: (number | null)[]; amounts: (number | null)[] }>>;
 }
 
 export interface ActualItem {
@@ -550,11 +556,21 @@ interface ActualMeta {
     selection: { confirmed_at: string; item_count: number } | null;
 }
 
-/** 月ごとの販売数（直近12か月＋今月）。coverage は販売実績がそろっているか（none はデータ無し、partial は途中まで）。 */
+/** 品番別売上を何ごとに集めるか（B-127）。月ごとは直近12か月＋今月、日ごとは直近90日。 */
+export type SalesUnit = "month" | "day";
+
+/**
+ * 販売数と金額。period は月ごとなら YYYY-MM、日ごとなら YYYY-MM-DD。coverage は販売実績がそろっているか
+ * （none はデータ無し、partial は途中まで）。
+ */
 export interface SalesActualsResponse {
     data: ActualItem[];
     meta: ActualMeta & {
-        months: { month: string; coverage: "full" | "partial" | "none" }[];
+        unit: SalesUnit;
+        /** 期間（月ごとは YYYY-MM、日ごとは YYYY-MM-DD） */
+        from: string;
+        to: string;
+        periods: { period: string; coverage: "full" | "partial" | "none" }[];
         channels: { channel: "boss" | "amazon"; label: string; sales_data_from: string | null; sales_data_to: string | null }[];
     };
 }

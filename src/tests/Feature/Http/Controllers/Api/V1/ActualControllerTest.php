@@ -74,34 +74,109 @@ class ActualControllerTest extends TestCase
         $this->getJson('/api/v1/actuals/sales')
             ->assertOk()
             ->assertJsonPath('meta.scope', 'total')
-            ->assertJsonCount(13, 'meta.months')
+            ->assertJsonPath('meta.unit', 'month')
+            ->assertJsonCount(13, 'meta.periods')
             // 2025年10月はどちらも取り込んでいない、11月は BOSS が途中から、1月は Amazon がまだ、4月はそろう、今月は途中まで
-            ->assertJsonPath('meta.months.0', ['month' => '2025-10', 'coverage' => 'none'])
-            ->assertJsonPath('meta.months.1.coverage', 'partial')
-            ->assertJsonPath('meta.months.3.coverage', 'partial')
-            ->assertJsonPath('meta.months.6', ['month' => '2026-04', 'coverage' => 'full'])
-            ->assertJsonPath('meta.months.12', ['month' => '2026-10', 'coverage' => 'partial'])
+            ->assertJsonPath('meta.periods.0', ['period' => '2025-10', 'coverage' => 'none'])
+            ->assertJsonPath('meta.periods.1.coverage', 'partial')
+            ->assertJsonPath('meta.periods.3.coverage', 'partial')
+            ->assertJsonPath('meta.periods.6', ['period' => '2026-04', 'coverage' => 'full'])
+            ->assertJsonPath('meta.periods.12', ['period' => '2026-10', 'coverage' => 'partial'])
             ->assertJsonPath('meta.channels.0', ['channel' => 'boss', 'label' => 'BOSS', 'sales_data_from' => '2025-11-15', 'sales_data_to' => '2026-10-06'])
             ->assertJsonPath('meta.selection.item_count', 1)
             ->assertJsonPath('data.0.item_no', 'fl-01')
             ->assertJsonPath('data.0.skus.0.quantities', [null, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 5, 1])
             // 金額は取り込んだ販売実績の金額（税込）の合計（このテストでは1個1,000円）
             ->assertJsonPath('data.0.skus.0.amounts', [null, 0, 0, 5000, 0, 0, 0, 0, 0, 0, 0, 5000, 1000])
+            // グラフの積み上げのため、モールごとの内訳も返す（2026年9月は BOSS 3・Amazon 2）
+            ->assertJsonPath('data.0.skus.0.channels.boss.quantities.11', 3)
+            ->assertJsonPath('data.0.skus.0.channels.amazon.quantities.11', 2)
+            ->assertJsonPath('data.0.skus.0.channels.amazon.amounts.12', 1000)
+            ->assertJsonPath('data.0.skus.0.channels.amazon.quantities.0', null)
             ->assertJsonPath('data.0.skus.0.not_sold', false)
             // 廃番のSKUも、過去に売れているので出す
             ->assertJsonPath('data.0.skus.2.status_label', '廃番')
             ->assertJsonPath('data.0.skus.2.quantities.6', 4);
 
         $this->getJson('/api/v1/actuals/sales?scope=amazon')
-            ->assertJsonPath('meta.months.4.coverage', 'none')
-            ->assertJsonPath('meta.months.5.coverage', 'full')
+            ->assertJsonPath('meta.periods.4.coverage', 'none')
+            ->assertJsonPath('meta.periods.5.coverage', 'full')
             ->assertJsonPath('data.0.skus.0.quantities', [null, null, null, null, null, 0, 0, 0, 0, 0, 0, 2, 1])
             // 子ASINの無いSKUは Amazon で売っていない（K-042）
-            ->assertJsonPath('data.0.skus.1.not_sold', true);
+            ->assertJsonPath('data.0.skus.1.not_sold', true)
+            // モールを選んだときの内訳は、そのモールだけ
+            ->assertJsonPath('data.0.skus.0.channels.amazon.quantities.11', 2)
+            ->assertJsonMissingPath('data.0.skus.0.channels.boss');
 
         $this->getJson('/api/v1/actuals/sales?scope=boss')
             ->assertJsonPath('data.0.skus.0.quantities', [null, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 3, 0])
             ->assertJsonPath('data.0.skus.1.not_sold', false);
+    }
+
+    public function test_sums_sales_by_day_for_the_last_ninety_days(): void
+    {
+        // BOSS の販売実績は 2026-07-15 から 2026-10-06 まで。Amazon は取り込んでいない
+        $other = Sku::factory()->create(['item_id' => null]);
+        $this->sell($other, '2026-07-15', 1);
+        $this->sell($other, '2026-10-06', 1);
+        $sku = $this->sku('fl-01-1-10');
+        $this->sell($sku, '2026-09-30', 3);
+        $this->sell($sku, '2026-09-30', 2);
+        $this->sell($sku, '2026-10-06', 1);
+
+        $response = $this->getJson('/api/v1/actuals/sales?unit=day');
+
+        // 直近90日は 2026-07-10 から 2026-10-07 まで
+        $response->assertOk()
+            ->assertJsonPath('meta.unit', 'day')
+            ->assertJsonCount(90, 'meta.periods')
+            ->assertJsonPath('meta.periods.0', ['period' => '2026-07-10', 'coverage' => 'none'])
+            ->assertJsonPath('meta.periods.5', ['period' => '2026-07-15', 'coverage' => 'full'])
+            // 今日（2026-10-07）の販売実績はまだ取り込まれていない
+            ->assertJsonPath('meta.periods.89', ['period' => '2026-10-07', 'coverage' => 'none'])
+            ->assertJsonPath('data.0.skus.0.quantities.89', null)
+            ->assertJsonPath('data.0.skus.0.quantities.0', null)
+            ->assertJsonPath('data.0.skus.0.quantities.5', 0)
+            ->assertJsonPath('data.0.skus.0.quantities.82', 5)
+            ->assertJsonPath('data.0.skus.0.amounts.82', 5000)
+            ->assertJsonPath('data.0.skus.0.quantities.88', 1)
+            ->assertJsonPath('data.0.skus.0.channels.boss.quantities.82', 5)
+            ->assertJsonPath('data.0.skus.0.channels.amazon.quantities.82', 0);
+        $this->getJson('/api/v1/actuals/sales?unit=week')->assertUnprocessable()->assertJsonValidationErrors('unit');
+    }
+
+    public function test_sums_sales_for_the_period_asked_for(): void
+    {
+        $this->sell(Sku::factory()->create(['item_id' => null]), '2025-01-01', 1);
+        $sku = $this->sku('fl-01-1-10', 0, ['tq_color_no' => '1', 'tq_size' => '10']);
+        $this->sell($sku, '2026-01-10', 5);
+        $this->sell($sku, '2026-03-31', 2);
+        $this->sell($sku, '2026-04-01', 9);
+
+        $this->getJson('/api/v1/actuals/sales?from=2026-01&to=2026-03')
+            ->assertOk()
+            ->assertJsonPath('meta.from', '2026-01')
+            ->assertJsonPath('meta.to', '2026-03')
+            ->assertJsonPath('meta.periods.*.period', ['2026-01', '2026-02', '2026-03'])
+            ->assertJsonPath('data.0.skus.0.quantities', [5, 0, 2])
+            // カラー×度数の表に使う
+            ->assertJsonPath('data.0.skus.0.color_no', '1')
+            ->assertJsonPath('data.0.skus.0.size', '10');
+
+        $this->getJson('/api/v1/actuals/sales?unit=day&from=2026-03-31&to=2026-04-01')
+            ->assertOk()
+            ->assertJsonPath('meta.periods.*.period', ['2026-03-31', '2026-04-01'])
+            ->assertJsonPath('data.0.skus.0.quantities', [2, 9]);
+    }
+
+    public function test_rejects_a_period_that_is_reversed_in_the_future_too_long_or_malformed(): void
+    {
+        $this->getJson('/api/v1/actuals/sales?from=2026-05&to=2026-03')->assertUnprocessable()->assertJsonPath('errors.from.0', '開始は終了と同じか、それより前にしてください。');
+        $this->getJson('/api/v1/actuals/sales?from=2026-09&to=2026-11')->assertUnprocessable()->assertJsonPath('errors.to.0', '終了は今月までにしてください。');
+        $this->getJson('/api/v1/actuals/sales?from=2023-01&to=2026-10')->assertUnprocessable()->assertJsonPath('errors.from.0', '期間は36か月以内にしてください。');
+        $this->getJson('/api/v1/actuals/sales?unit=day&from=2026-06-01&to=2026-10-07')->assertUnprocessable()->assertJsonPath('errors.from.0', '期間は92日以内にしてください。');
+        $this->getJson('/api/v1/actuals/sales?unit=day&to=2026-10-08')->assertUnprocessable()->assertJsonPath('errors.to.0', '終了は今日までにしてください。');
+        $this->getJson('/api/v1/actuals/sales?from=2026-1')->assertUnprocessable()->assertJsonValidationErrors('from');
     }
 
     public function test_lists_the_daily_stock_of_the_mall_and_leaves_days_without_data_empty(): void
@@ -134,6 +209,19 @@ class ActualControllerTest extends TestCase
         $this->getJson('/api/v1/actuals/stock?scope=boss')
             ->assertJsonPath('data.0.skus.0.quantities.28', 20)
             ->assertJsonPath('data.0.skus.0.quantities.29', null);
+    }
+
+    public function test_returns_only_the_requested_target_item_for_the_sku_screen(): void
+    {
+        Item::factory()->create(['item_no' => 'fl-02']);
+        ItemSelection::current()->items()->create(['item_no' => 'fl-02', 'sales_rank' => 2, 'is_candidate' => true]);
+        Item::factory()->create(['item_no' => 'not-selected']);
+        $this->sku('fl-01-1-10');
+
+        $this->getJson('/api/v1/actuals/sales?item_no=fl-01')->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.item_no', 'fl-01');
+        $this->getJson('/api/v1/actuals/sales')->assertJsonCount(2, 'data');
+        // 対象品番でない品番は返さない
+        $this->getJson('/api/v1/actuals/sales?item_no=not-selected')->assertOk()->assertJsonPath('data', []);
     }
 
     public function test_returns_no_items_until_target_items_are_confirmed(): void

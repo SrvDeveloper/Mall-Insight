@@ -13,7 +13,8 @@ async function loadRouter() {
     return router;
 }
 
-describe("router", () => {
+// ルーターを読み込み直すたびにすべての画面を読み込むため、テスト全体を流すと5秒を超えることがある
+describe("router", { timeout: 20_000 }, () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         vi.mocked(fetchCurrentUser).mockReset();
