@@ -7,12 +7,13 @@ import type { ActualItem, ActualSku, SalesActualsResponse, StockActualsResponse 
  * データを読み込んだときに一度だけ作る。データの無い列（取り込んでいない月、在庫を取得していない日）は0とせず「—」にする（原則2）。
  */
 
-/** 列（月か日）の見出し。muted はデータの無い列。 */
+/** 列（月か日）の見出し。muted はデータの無い列、current は今月（今日）の列。 */
 export interface ActualColumn {
     key: string;
     label: string;
     sub: string;
     muted: boolean;
+    current?: boolean;
 }
 
 /** 欄の見た目。empty は在庫0（在庫推移の在庫不足と同じ赤い札）、none はデータ無し。 */
@@ -51,14 +52,20 @@ const dayLabel = (date: string): string => `${Number(date.slice(5, 7))}/${Number
 const weekday = (date: string): string => WEEKDAYS[new Date(`${date}T00:00:00`).getDay()]!;
 
 export function salesColumns(meta: SalesActualsResponse["meta"]): ActualColumn[] {
-    const lastIndex = meta.periods.length - 1;
     const isDay = meta.unit === "day";
-    return meta.periods.map((period, index) => ({
-        key: period.period,
-        label: isDay ? dayLabel(period.period) : shortMonthLabel(period.period),
-        sub: index === lastIndex ? (isDay ? "今日" : "今月") : period.coverage === "none" ? "取込なし" : period.coverage === "partial" ? "途中まで" : isDay ? weekday(period.period) : "",
-        muted: period.coverage === "none",
-    }));
+    // 今月（今日）は計算した日時から決める（期間を指定すると、最後の列が今月とは限らない）
+    const today = meta.calculated_at.slice(0, 10);
+    const currentPeriod = isDay ? today : today.slice(0, 7);
+    return meta.periods.map((period) => {
+        const current = period.period === currentPeriod;
+        return {
+            key: period.period,
+            label: isDay ? dayLabel(period.period) : shortMonthLabel(period.period),
+            sub: current ? (isDay ? "今日" : "今月") : period.coverage === "none" ? "取込なし" : period.coverage === "partial" ? "途中まで" : isDay ? weekday(period.period) : "",
+            muted: period.coverage === "none",
+            current,
+        };
+    });
 }
 
 export function stockColumns(meta: StockActualsResponse["meta"]): ActualColumn[] {
@@ -146,12 +153,17 @@ export function actualSparkline(values: (number | null)[], kind: "sales" | "stoc
     return { segments, points };
 }
 
-/** グラフの系列（積み上げの1段）。values は列ごとの値で、データの無い列は null。 */
+/**
+ * グラフの系列（積み上げの1段）。values は列ごとの値で、データの無い列は null。
+ * previous・lastYear は前の期間（前月・前日）と前年の同じ期間の値で、ツールチップの前月比・前年比に使う（K-082）。比べられない列は null。
+ */
 export interface ChartSeries {
     key: string;
     label: string;
     color: string;
     values: (number | null)[];
+    previous?: (number | null)[];
+    lastYear?: (number | null)[];
 }
 
 /**
@@ -173,15 +185,26 @@ function sumColumns(lists: (number | null)[][], length: number): (number | null)
     });
 }
 
+/** SKUのモールの値（今の期間、前の期間、前年の同じ期間）。 */
+function channelValues(sku: ActualSku, mall: "boss" | "amazon", measure: ActualMeasure, source: "current" | "previous" | "last_year"): (number | null)[] {
+    const channel = sku.channels?.[mall];
+    const values = source === "current" ? channel : channel?.[source];
+    return (measure === "amount" ? values?.amounts : values?.quantities) ?? [];
+}
+
 /** 品番の販売数（金額）を、モールごとの積み上げにする。選んだモールだけのときは1段。 */
 export function mallSeries(item: ActualItem, measure: ActualMeasure, length: number): ChartSeries[] {
     const skus = item.skus.filter((sku) => !sku.not_sold);
+    const sumOf = (mall: "boss" | "amazon", source: "current" | "previous" | "last_year") =>
+        sumColumns(
+            skus.map((sku) => channelValues(sku, mall, measure, source)),
+            length,
+        );
     return MALL_SERIES.filter((mall) => skus.some((sku) => sku.channels?.[mall.key])).map((mall) => ({
         ...mall,
-        values: sumColumns(
-            skus.map((sku) => (measure === "amount" ? sku.channels?.[mall.key]?.amounts : sku.channels?.[mall.key]?.quantities) ?? []),
-            length,
-        ),
+        values: sumOf(mall.key, "current"),
+        previous: sumOf(mall.key, "previous"),
+        lastYear: sumOf(mall.key, "last_year"),
     }));
 }
 
@@ -189,7 +212,9 @@ export function mallSeries(item: ActualItem, measure: ActualMeasure, length: num
 export function skuMallSeries(sku: ActualSku, measure: ActualMeasure): ChartSeries[] {
     return MALL_SERIES.filter((mall) => sku.channels?.[mall.key]).map((mall) => ({
         ...mall,
-        values: (measure === "amount" ? sku.channels?.[mall.key]?.amounts : sku.channels?.[mall.key]?.quantities) ?? [],
+        values: channelValues(sku, mall.key, measure, "current"),
+        previous: channelValues(sku, mall.key, measure, "previous"),
+        lastYear: channelValues(sku, mall.key, measure, "last_year"),
     }));
 }
 

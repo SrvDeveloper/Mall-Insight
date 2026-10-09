@@ -169,6 +169,52 @@ class ActualControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.quantities', [2, 9]);
     }
 
+    public function test_returns_the_previous_period_and_the_same_period_last_year_to_compare_with(): void
+    {
+        // BOSS の販売実績は 2024-09-01 から、Amazon は 2026-03-01 から（どちらも 2026-10-06 まで）
+        $other = Sku::factory()->create(['item_id' => null]);
+        $this->sell($other, '2024-09-01', 1);
+        $this->sell($other, '2026-03-01', 1, 'amazon_fba');
+        $this->sell($other, '2026-10-06', 1);
+        $this->sell($other, '2026-10-06', 1, 'amazon_fba');
+        $sku = $this->sku('fl-01-1-10');
+        $this->sell($sku, '2025-09-03', 4);
+        $this->sell($sku, '2025-09-26', 6);
+        $this->sell($sku, '2025-10-05', 2);
+        $this->sell($sku, '2025-10-20', 7);
+        $this->sell($sku, '2026-09-04', 3);
+        $this->sell($sku, '2026-09-25', 5);
+        $this->sell($sku, '2026-10-02', 1);
+        $this->sell($sku, '2026-03-10', 2, 'amazon_fba');
+        $this->sell($sku, '2026-04-10', 3, 'amazon_fba');
+
+        // 2025年9月～2026年10月の14か月
+        $this->getJson('/api/v1/actuals/sales?from=2025-09&to=2026-10')
+            ->assertOk()
+            // 今月（6日まで取り込み済み）は、前月・前年の同じ月の1日～6日と比べる
+            ->assertJsonPath('data.0.skus.0.channels.boss.quantities.13', 1)
+            ->assertJsonPath('data.0.skus.0.channels.boss.previous.quantities.13', 3)
+            ->assertJsonPath('data.0.skus.0.channels.boss.previous.amounts.13', 3000)
+            ->assertJsonPath('data.0.skus.0.channels.boss.last_year.quantities.13', 2)
+            // 終わった月は、前月と前年の同じ月の全体と比べる。期間の外の月（2024年9月・2025年8月）も比べられる
+            ->assertJsonPath('data.0.skus.0.channels.boss.previous.quantities.12', 0)
+            ->assertJsonPath('data.0.skus.0.channels.boss.last_year.quantities.12', 10)
+            ->assertJsonPath('data.0.skus.0.channels.boss.previous.quantities.0', 0)
+            ->assertJsonPath('data.0.skus.0.channels.boss.last_year.quantities.0', 0)
+            // 比べる月の販売実績を取り込んでいなければ比べない（Amazon の2026年2月、2025年4月）
+            ->assertJsonPath('data.0.skus.0.channels.amazon.previous.quantities.6', null)
+            ->assertJsonPath('data.0.skus.0.channels.amazon.previous.quantities.7', 2)
+            ->assertJsonPath('data.0.skus.0.channels.amazon.last_year.quantities.7', null);
+
+        // 日ごとは前日と前年の同じ日。今日はまだ取り込んでいないので比べない
+        $this->getJson('/api/v1/actuals/sales?unit=day&from=2026-09-25&to=2026-09-26')
+            ->assertJsonPath('data.0.skus.0.channels.boss.previous.quantities', [0, 5])
+            ->assertJsonPath('data.0.skus.0.channels.boss.last_year.quantities', [0, 6]);
+        $this->getJson('/api/v1/actuals/sales?unit=day&from=2026-10-06&to=2026-10-07&scope=boss')
+            ->assertJsonPath('data.0.skus.0.channels.boss.previous.quantities', [0, null])
+            ->assertJsonMissingPath('data.0.skus.0.channels.amazon');
+    }
+
     public function test_rejects_a_period_that_is_reversed_in_the_future_too_long_or_malformed(): void
     {
         $this->getJson('/api/v1/actuals/sales?from=2026-05&to=2026-03')->assertUnprocessable()->assertJsonPath('errors.from.0', '開始は終了と同じか、それより前にしてください。');

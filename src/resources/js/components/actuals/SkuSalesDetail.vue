@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import MallShareBar from "@/components/actuals/MallShareBar.vue";
 import SalesChart from "@/components/actuals/SalesChart.vue";
-import { chartFormats, MALL_SERIES, type ActualColumn, type ActualMeasure } from "@/components/actuals/actualRows";
+import { chartFormats, MALL_SERIES, skuMallSeries, type ActualColumn, type ActualMeasure } from "@/components/actuals/actualRows";
 import { formatCell, formatShare, formatTotal, type Mall, type SkuSalesRow } from "@/components/actuals/skuSales";
 import type { SalesUnit } from "@/types/api";
 
@@ -14,7 +14,8 @@ import type { SalesUnit } from "@/types/api";
 const props = defineProps<{ row: SkuSalesRow; columns: ActualColumn[]; measure: ActualMeasure; unit: SalesUnit; malls: Mall[]; notSoldLabel: string }>();
 
 const mallSeries = computed(() => MALL_SERIES.filter((mall) => props.malls.includes(mall.key)));
-const series = computed(() => mallSeries.value.map((mall) => ({ ...mall, values: props.row.malls[mall.key] })));
+// 前月比・前年比のため、前の期間と前年の同じ期間の値も渡す（K-082）
+const series = computed(() => skuMallSeries(props.row.sku, props.measure).filter((series) => props.malls.includes(series.key as Mall)));
 const formats = computed(() => chartFormats(props.measure));
 const mallShare = (mall: Mall): number => (props.row.sum > 0 ? props.row.mallSums[mall] / props.row.sum : 0);
 
@@ -56,7 +57,7 @@ const lines = computed(() =>
                         }}）</span
                     >
                 </div>
-                <SalesChart kind="line" :columns="columns" :series="series" v-bind="formats" :height="280" />
+                <SalesChart kind="line" :columns="columns" :series="series" v-bind="formats" :unit="unit" :height="280" />
             </template>
         </div>
 

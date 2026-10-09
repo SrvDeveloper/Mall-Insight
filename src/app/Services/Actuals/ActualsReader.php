@@ -87,7 +87,7 @@ class ActualsReader
      * 月ごとか日ごとの販売数と金額（税込）。期間を指定しなければ、月ごとは直近12か月と今月、日ごとは直近90日（K-080）。
      *
      * @param  list<Item>  $items
-     * @return array{periods: list<array{start: CarbonImmutable, coverage: Coverage}>, quantities: array<int, list<float|null>>, amounts: array<int, list<float|null>>, byChannel: array<int, array<string, array{quantities: list<float|null>, amounts: list<float|null>}>>} SKU ID => 期間ごとの数（データ無しの期間は null）。byChannel は選んだモール（全体ならBOSS・Amazon）ごとの内訳
+     * @return array{periods: list<array{start: CarbonImmutable, coverage: Coverage}>, quantities: array<int, list<float|null>>, amounts: array<int, list<float|null>>, byChannel: array<int, array<string, array{quantities: list<float|null>, amounts: list<float|null>, previous: array{quantities: list<float|null>, amounts: list<float|null>}, last_year: array{quantities: list<float|null>, amounts: list<float|null>}}>>} SKU ID => 期間ごとの数（データ無しの期間は null）。byChannel は選んだモール（全体ならBOSS・Amazon）ごとの内訳。previous・last_year は前月（前日）と前年の比べる値（K-082）
      */
     public function sales(array $items, CarbonImmutable $today, TrendScope $scope, SalesUnit $unit = SalesUnit::Month, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): array
     {
@@ -174,6 +174,11 @@ class ActualsReader
                 }
             }
         }
+        foreach ($this->comparisons($unit, $periods, $scopeChannels, $ranges, $skuIds, $warehouses) as $skuId => $channelComparisons) {
+            foreach ($channelComparisons as $channel => $comparison) {
+                $byChannel[$skuId][$channel] += $comparison;
+            }
+        }
 
         return [
             'periods' => array_map(fn (array $period): array => ['start' => $period['start'], 'coverage' => $period['coverage']], $periods),
@@ -181,6 +186,103 @@ class ActualsReader
             'amounts' => $amounts,
             'byChannel' => $byChannel,
         ];
+    }
+
+    /**
+     * 前の期間（月ごとは前月、日ごとは前日）と前年の同じ期間の販売数と金額（グラフのツールチップの前月比・前年比、K-082）。
+     * モールごとに、そのモールの販売実績がある日までと同じ日数で比べる（今月なら前月・前年の同じ月の1日から同じ日まで）。
+     * そのモールの販売実績が期間の初日からそろっていない期間と、比べる期間の販売実績を一部でも取り込んでいないときは null（原則2）。
+     *
+     * @param  list<array{start: CarbonImmutable, end: CarbonImmutable, coverage: Coverage}>  $periods
+     * @param  list<Channel>  $channels
+     * @param  array<string, array{from: CarbonImmutable, to: CarbonImmutable}>  $ranges
+     * @param  list<int>  $skuIds
+     * @param  list<string>  $warehouses
+     * @return array<int, array<string, array{previous: array{quantities: list<float|null>, amounts: list<float|null>}, last_year: array{quantities: list<float|null>, amounts: list<float|null>}}>>
+     */
+    private function comparisons(SalesUnit $unit, array $periods, array $channels, array $ranges, array $skuIds, array $warehouses): array
+    {
+        // 期間の位置 => モール => 比べ方 => 比べる期間の日付（比べられなければ null）
+        $windows = [];
+        $first = null;
+        $last = null;
+        foreach ($periods as $index => $period) {
+            foreach ($channels as $channel) {
+                $range = $ranges[$channel->value] ?? null;
+                $end = $range === null ? null : $period['end']->min($range['to']);
+                foreach (['previous', 'last_year'] as $kind) {
+                    $windows[$index][$channel->value][$kind] = null;
+                    if ($range === null || $range['from']->gt($period['start']) || $end->lt($period['start'])) {
+                        continue;
+                    }
+                    $start = match (true) {
+                        $kind === 'last_year' => $period['start']->subYearNoOverflow(),
+                        $unit === SalesUnit::Day => $period['start']->subDay(),
+                        default => $period['start']->subMonthNoOverflow(),
+                    };
+                    $periodEnd = $unit === SalesUnit::Day ? $start : $start->endOfMonth()->startOfDay();
+                    $windowEnd = $start->addDays((int) $period['start']->diffInDays($end))->min($periodEnd);
+                    if ($range['from']->gt($start) || $range['to']->lt($windowEnd)) {
+                        continue;
+                    }
+                    $dates = [];
+                    for ($day = $start; $day->lte($windowEnd); $day = $day->addDay()) {
+                        $dates[] = $day->toDateString();
+                    }
+                    $windows[$index][$channel->value][$kind] = $dates;
+                    $first = $first === null ? $start : $first->min($start);
+                    $last = $last === null ? $windowEnd : $last->max($windowEnd);
+                }
+            }
+        }
+
+        // SKU ID => モール => 日付 => [販売数, 金額]
+        $daily = [];
+        if ($first !== null && $skuIds !== []) {
+            foreach (array_chunk($skuIds, 500) as $chunk) {
+                $rows = SalesLine::query()
+                    ->selectRaw('sku_id, sales_date, warehouse, sum(quantity) as quantity, sum(amount) as amount')
+                    ->whereIn('sku_id', $chunk)
+                    ->whereIn('warehouse', $warehouses)
+                    ->where('sales_date', '>=', $first->toDateString())
+                    ->where('sales_date', '<', $last->addDay()->toDateString())
+                    ->groupBy('sku_id', 'sales_date', 'warehouse')
+                    ->toBase()
+                    ->get();
+                foreach ($rows as $row) {
+                    $channel = Warehouse::tryFrom((string) $row->warehouse)?->channel();
+                    if ($channel === null) {
+                        continue;
+                    }
+                    $date = CarbonImmutable::parse($row->sales_date)->toDateString();
+                    $current = $daily[(int) $row->sku_id][$channel->value][$date] ?? [0.0, 0.0];
+                    $daily[(int) $row->sku_id][$channel->value][$date] = [$current[0] + (float) $row->quantity, $current[1] + (float) $row->amount];
+                }
+            }
+        }
+
+        $comparisons = [];
+        foreach ($skuIds as $skuId) {
+            foreach ($channels as $channel) {
+                $sold = $daily[$skuId][$channel->value] ?? [];
+                foreach (['previous', 'last_year'] as $kind) {
+                    $comparisons[$skuId][$channel->value][$kind] = ['quantities' => [], 'amounts' => []];
+                    foreach (array_keys($periods) as $index) {
+                        $dates = $windows[$index][$channel->value][$kind];
+                        $total = $dates === null ? null : [0.0, 0.0];
+                        foreach ($dates ?? [] as $date) {
+                            if (isset($sold[$date])) {
+                                $total = [$total[0] + $sold[$date][0], $total[1] + $sold[$date][1]];
+                            }
+                        }
+                        $comparisons[$skuId][$channel->value][$kind]['quantities'][] = $total[0] ?? null;
+                        $comparisons[$skuId][$channel->value][$kind]['amounts'][] = $total[1] ?? null;
+                    }
+                }
+            }
+        }
+
+        return $comparisons;
     }
 
     /**

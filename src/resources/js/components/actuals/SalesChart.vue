@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
 import type { ActualColumn, ChartSeries } from "@/components/actuals/actualRows";
+import { formatQuantity } from "@/components/inventoryTrend/trendRows";
+import type { SalesUnit } from "@/types/api";
 
 /**
  * 販売実績のグラフ（B-127、K-079）。kind が bar なら積み上げ棒グラフ（品番別売上の BOSS・Amazon）、line なら系列ごとの折れ線
@@ -8,6 +10,7 @@ import type { ActualColumn, ChartSeries } from "@/components/actuals/actualRows"
  * 線は2pxで角を丸め、目盛り線は1pxの薄い実線とする。縦軸はきりのよい数の目盛り（棒は積み上げた合計、折れ線は一番大きい系列に合わせる）。
  * 月・日の帯にマウスを乗せる（またはフォーカスする）と、縦の線と点で示し、その月・日の合計と内訳をツールチップで出す。系列が2つ以上なら凡例を出す。
  * 販売実績を取り込んでいない月・日は棒も点も描かず（折れ線は前後の点を点線でつなぐ）、見出しを薄くしてツールチップでそのことを示す（原則2）。
+ * ツールチップには、合計とモールごとに前月比（日ごとは前日比）と前年比を出す（K-082）。比べる期間の販売実績が無い・0のときは「—」。
  */
 
 const props = withDefaults(
@@ -22,8 +25,10 @@ const props = withDefaults(
         axisUnit: string;
         kind?: "bar" | "line";
         height?: number;
+        /** 前月比か前日比か */
+        unit?: SalesUnit;
     }>(),
-    { kind: "bar", height: 300 },
+    { kind: "bar", height: 300, unit: "month" },
 );
 
 const MARGIN = { top: 14, right: 12, bottom: 40, left: 64 };
@@ -134,6 +139,30 @@ const xLabels = computed(() => {
 
 // ツールチップ
 const hovered = ref<number | null>(null);
+
+/** 比べる期間の値の合計（表示している系列）。値のある系列のどれかが比べられなければ null。 */
+function comparisonTotal(index: number, key: "previous" | "lastYear"): number | null {
+    let total = 0;
+    for (const series of props.series) {
+        if ((series.values[index] ?? null) === null) {
+            continue;
+        }
+        const value = series[key]?.[index] ?? null;
+        if (value === null) {
+            return null;
+        }
+        total += Math.max(0, value);
+    }
+    return total;
+}
+
+/** 比べる期間に対する割合（「112%」）。比べる値が無い・0なら「—」。 */
+function ratio(value: number | null, base: number | null): string {
+    return value === null || base === null || base <= 0 ? "—" : `${formatQuantity(Math.round((value / base) * 100))}%`;
+}
+
+const comparisonLabels = computed(() => (props.unit === "day" ? ["前日比", "前年比"] : ["前月比", "前年比"]));
+
 const tooltip = computed(() => {
     if (hovered.value === null) {
         return null;
@@ -143,11 +172,21 @@ const tooltip = computed(() => {
     const total = totals.value[index] ?? null;
     // 折れ線は0の系列も出す（2本のどちらが売れていないかも分かるように）
     const rows = props.series
-        .map((series) => ({ key: series.key, label: series.label, color: series.color, value: series.values[index] ?? null }))
+        .map((series) => {
+            const value = series.values[index] ?? null;
+            return {
+                key: series.key,
+                label: series.label,
+                color: series.color,
+                value,
+                previous: ratio(value, series.previous?.[index] ?? null),
+                lastYear: ratio(value, series.lastYear?.[index] ?? null),
+            };
+        })
         .filter((row) => row.value !== null && (props.kind === "line" || row.value > 0))
         .sort((a, b) => b.value! - a.value!);
-    const left = Math.min(Math.max(xCenter(index), 110), width.value - 110);
-    return { column, total, rows, left };
+    const left = Math.min(Math.max(xCenter(index), 150), width.value - 150);
+    return { column, total, previous: ratio(total, comparisonTotal(index, "previous")), lastYear: ratio(total, comparisonTotal(index, "lastYear")), rows, left };
 });
 </script>
 
@@ -239,7 +278,7 @@ const tooltip = computed(() => {
         <div
             v-if="tooltip"
             role="tooltip"
-            class="pointer-events-none absolute z-10 w-52 -translate-x-1/2 rounded-lg bg-stone-900 px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
+            class="pointer-events-none absolute z-10 w-72 -translate-x-1/2 rounded-lg bg-stone-900 px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
             :style="{ left: `${tooltip.left}px`, top: `${series.length >= 2 ? 36 : 8}px` }"
             data-testid="chart-tooltip"
         >
@@ -251,15 +290,29 @@ const tooltip = computed(() => {
                 <p class="pt-1 text-stone-300">販売実績を取り込んでいません</p>
             </template>
             <template v-else>
-                <div class="flex justify-between pt-1 tabular-nums">
-                    <span class="text-stone-300">合計</span><span class="font-semibold text-white" data-testid="tooltip-total">{{ formatValue(tooltip.total) }}</span>
+                <div class="grid grid-cols-[minmax(0,1fr)_auto_3.25rem_3.25rem] items-center gap-x-2 gap-y-0.5 pt-1 tabular-nums">
+                    <span />
+                    <span />
+                    <span class="text-right text-[10px] text-stone-400">{{ comparisonLabels[0] }}</span>
+                    <span class="text-right text-[10px] text-stone-400">{{ comparisonLabels[1] }}</span>
+
+                    <span class="text-stone-300">合計</span>
+                    <span class="text-right font-semibold text-white" data-testid="tooltip-total">{{ formatValue(tooltip.total) }}</span>
+                    <span class="text-right" :class="tooltip.previous === '—' ? 'text-stone-500' : 'text-white'" data-testid="tooltip-total-previous">{{ tooltip.previous }}</span>
+                    <span class="text-right" :class="tooltip.lastYear === '—' ? 'text-stone-500' : 'text-white'" data-testid="tooltip-total-last-year">{{ tooltip.lastYear }}</span>
+
+                    <template v-for="row in tooltip.rows" :key="row.key">
+                        <span class="flex min-w-0 items-center gap-1.5 text-stone-300"
+                            ><span class="h-2 w-2 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" /><span class="truncate">{{ row.label }}</span></span
+                        >
+                        <span class="text-right">{{ formatValue(row.value!) }}</span>
+                        <span class="text-right" :class="row.previous === '—' ? 'text-stone-500' : ''" :data-testid="`tooltip-previous-${row.key}`">{{ row.previous }}</span>
+                        <span class="text-right" :class="row.lastYear === '—' ? 'text-stone-500' : ''" :data-testid="`tooltip-last-year-${row.key}`">{{ row.lastYear }}</span>
+                    </template>
                 </div>
-                <div v-for="row in tooltip.rows" :key="row.key" class="flex items-center justify-between gap-2 tabular-nums">
-                    <span class="flex min-w-0 items-center gap-1.5 text-stone-300"
-                        ><span class="h-2 w-2 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" /><span class="truncate">{{ row.label }}</span></span
-                    >
-                    <span>{{ formatValue(row.value!) }}</span>
-                </div>
+                <p v-if="tooltip.column.current && unit === 'month'" class="mt-1 border-t border-white/10 pt-1 text-[10px] leading-snug text-stone-400" data-testid="tooltip-note">
+                    今月は、前月・前年の同じ月の同じ日までと比べています
+                </p>
             </template>
         </div>
     </div>

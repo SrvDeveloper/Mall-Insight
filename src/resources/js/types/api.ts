@@ -523,6 +523,14 @@ export interface ItemUnitPricePayload {
     boss_unit_price: number | null;
 }
 
+/** 販売実績のモールごとの値（列ごと、データの無い列は null）。 */
+export interface ActualChannelSales {
+    quantities: (number | null)[];
+    amounts: (number | null)[];
+    previous?: { quantities: (number | null)[]; amounts: (number | null)[] };
+    last_year?: { quantities: (number | null)[]; amounts: (number | null)[] };
+}
+
 /** 実績（B-124）のSKUの行。quantities は列（月・日）ごとの数で、データの無い列は null。 */
 export interface ActualSku {
     sku_id: number;
@@ -538,8 +546,11 @@ export interface ActualSku {
     quantities: (number | null)[];
     /** 販売実績のときだけ、列ごとの金額（税込） */
     amounts?: (number | null)[];
-    /** 販売実績のときだけ、モール（全体ならBOSS・Amazon、モールを選んだらそのモール）ごとの内訳。グラフの積み上げに使う */
-    channels?: Partial<Record<"boss" | "amazon", { quantities: (number | null)[]; amounts: (number | null)[] }>>;
+    /**
+     * 販売実績のときだけ、モール（全体ならBOSS・Amazon、モールを選んだらそのモール）ごとの内訳。グラフの積み上げに使う。
+     * previous は前の期間（前月・前日）、last_year は前年の同じ期間の値で、グラフのツールチップの前月比・前年比に使う（K-082）。比べられない列は null
+     */
+    channels?: Partial<Record<"boss" | "amazon", ActualChannelSales>>;
 }
 
 export interface ActualItem {

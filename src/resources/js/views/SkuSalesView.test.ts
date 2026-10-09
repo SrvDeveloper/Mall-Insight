@@ -65,6 +65,12 @@ describe("SkuSalesView", () => {
         const lines = wrapper.find('[data-testid="detail-table"]').findAll("tbody tr");
         expect(lines[0]!.text()).toContain("26/10");
         expect(lines[1]!.findAll("td").map((cell) => cell.text())).toEqual(["2", "1", "3", ""]);
+        // ツールチップの前月比・前年比は、そのSKUの値で比べる（10月は BOSS 5・Amazon 0、前月は BOSS 1・Amazon 1、前年は BOSS 4）
+        await wrapper.find('[data-testid="sku-detail"]').findAll('[data-testid="chart-band"]')[2]!.trigger("mouseenter");
+        const tooltip = wrapper.find('[data-testid="chart-tooltip"]');
+        expect(tooltip.find('[data-testid="tooltip-previous-amazon"]').text()).toBe("0%");
+        expect(tooltip.find('[data-testid="tooltip-total-previous"]').text()).toBe("250%");
+        expect(tooltip.find('[data-testid="tooltip-last-year-boss"]').text()).toBe("125%");
 
         await wrapper.find('[data-testid="sku-2"]').trigger("click");
         await flushPromises();
@@ -131,6 +137,9 @@ describe("SkuSalesView", () => {
 
         expect(fetchSalesActuals).toHaveBeenCalledWith("total", "day", "fl-01", null);
         expect(wrapper.find('[data-testid="back-to-items"]').attributes("href")).toBe("/item-sales?unit=day");
+        // 日ごとは前日と比べる
+        await wrapper.findAll('[data-testid="chart-band"]')[1]!.trigger("mouseenter");
+        expect(wrapper.find('[data-testid="chart-tooltip"]').text()).toContain("前日比");
         wrapper.unmount();
     });
 

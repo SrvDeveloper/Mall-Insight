@@ -106,8 +106,28 @@ describe("ItemSalesView", () => {
         expect(tooltip.text()).toContain("16,500円");
         expect(tooltip.text()).toContain("5,500円");
 
+        // 前年比は前年の同じ月と比べる。Amazon の前年は取り込んでいないので、Amazon と合計は「—」
+        expect(tooltip.find('[data-testid="tooltip-last-year-boss"]').text()).toBe("150%");
+        expect(tooltip.find('[data-testid="tooltip-last-year-amazon"]').text()).toBe("—");
+        expect(tooltip.find('[data-testid="tooltip-total-last-year"]').text()).toBe("—");
+        expect(tooltip.find('[data-testid="tooltip-total-previous"]').text()).toBe("—");
+
         await bands[0]!.trigger("mouseenter");
         expect(wrapper.find('[data-testid="chart-tooltip"]').text()).toContain("販売実績を取り込んでいません");
+    });
+
+    it("compares the month with the previous month and the same month last year in the tooltip", async () => {
+        const { wrapper } = await mountView("/item-sales?view=graph&item=fl-01");
+
+        await wrapper.findAll('[data-testid="chart-band"]')[2]!.trigger("mouseenter");
+        const tooltip = wrapper.find('[data-testid="chart-tooltip"]');
+        expect(tooltip.text()).toContain("前月比");
+        expect(tooltip.text()).toContain("前年比");
+        // 10月は BOSS 5・Amazon 0。前月（同じ日まで）は BOSS 1・Amazon 1、前年は BOSS 4
+        expect(tooltip.find('[data-testid="tooltip-total-previous"]').text()).toBe("250%");
+        expect(tooltip.find('[data-testid="tooltip-previous-boss"]').text()).toBe("500%");
+        expect(tooltip.find('[data-testid="tooltip-last-year-boss"]').text()).toBe("125%");
+        expect(tooltip.find('[data-testid="tooltip-note"]').text()).toBe("今月は、前月・前年の同じ月の同じ日までと比べています");
     });
 
     it("chooses the period from the presets and passes it on to the SKU sales", async () => {

@@ -4,6 +4,7 @@ import { RouterLink, type RouteLocationRaw } from "vue-router";
 import SalesChart from "@/components/actuals/SalesChart.vue";
 import { chartFormats, mallSeries, type ActualColumn, type ActualItemRows, type ActualMeasure } from "@/components/actuals/actualRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
+import type { SalesUnit } from "@/types/api";
 
 /**
  * 品番別売上のグラフ（B-127、K-079）。左に品番の一覧（期間計の多い順、全体に対する割合付き）、右に選んだ品番の大きな棒グラフを出す。
@@ -15,6 +16,7 @@ const props = defineProps<{
     items: ActualItemRows[];
     columns: ActualColumn[];
     measure: ActualMeasure;
+    unit: SalesUnit;
     summaryLabel: string;
     selectedItemNo: string | null;
     skuSalesLink: (itemNo: string) => RouteLocationRaw;
@@ -80,7 +82,7 @@ const formats = computed(() => chartFormats(props.measure));
                     </svg>
                 </RouterLink>
             </div>
-            <SalesChart :columns="columns" :series="series" :format-value="formats.formatValue" :format-axis="formats.formatAxis" :axis-unit="formats.axisUnit" />
+            <SalesChart :columns="columns" :series="series" :format-value="formats.formatValue" :format-axis="formats.formatAxis" :axis-unit="formats.axisUnit" :unit="unit" />
         </div>
     </div>
 </template>

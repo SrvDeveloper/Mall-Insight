@@ -92,6 +92,7 @@ function selectItem(itemNo: string): void {
                 :items="visibleItems"
                 :columns="columns"
                 :measure="measure"
+                :unit="unit"
                 :summary-label="summaryLabel"
                 :selected-item-no="selectedItemNo"
                 :sku-sales-link="skuSalesLink"

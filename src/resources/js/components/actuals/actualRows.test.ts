@@ -41,8 +41,10 @@ describe("actualRows", () => {
             ["25/10", "取込なし", true],
             ["25/11", "途中まで", false],
             ["25/12", "", false],
-            ["26/1", "今月", false],
+            ["26/1", "途中まで", false],
         ]);
+        // 今月（今日）は計算した日から決める。期間の最後の列とは限らない
+        expect(salesColumns({ ...sales, periods: [{ period: "2026-10", coverage: "partial" }] }).map((column) => [column.sub, column.current])).toEqual([["今月", true]]);
 
         const stock: StockActualsResponse["meta"] = {
             ...meta,
