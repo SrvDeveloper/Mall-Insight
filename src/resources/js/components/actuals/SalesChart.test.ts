@@ -3,23 +3,45 @@ import { mount } from "@vue/test-utils";
 import SalesChart from "@/components/actuals/SalesChart.vue";
 import type { ChartSeries } from "@/components/actuals/actualRows";
 
-function mountChart(boss: (number | null)[], amazon: (number | null)[]) {
+function mountChart(boss: (number | null)[], amazon: (number | null)[], kind: "bar" | "line" = "line", axisUnit = "個") {
     const series: ChartSeries[] = [
         { key: "boss", label: "BOSS", color: "#2a78d6", values: boss },
         { key: "amazon", label: "Amazon", color: "#eb6834", values: amazon },
     ];
     return mount(SalesChart, {
         props: {
-            kind: "line",
+            kind,
             height: 280,
             series,
             columns: boss.map((_, index) => ({ key: String(index), label: String(index), sub: "", muted: false })),
             formatValue: String,
             formatAxis: String,
-            axisUnit: "個",
+            axisUnit,
         },
     });
 }
+
+describe("SalesChart axis labels", () => {
+    it.each(["bar", "line"] as const)("omits the quantity unit from the %s chart", (kind) => {
+        const wrapper = mountChart([10, 100], [0, 10], kind);
+        const labels = wrapper.find("svg > g").findAll("text");
+
+        expect(labels.some((label) => label.text() === "個")).toBe(false);
+        expect(wrapper.find("svg").attributes("aria-label")).toBe("個の推移");
+        wrapper.unmount();
+    });
+
+    it("keeps the currency unit separate from the highest tick", () => {
+        const wrapper = mountChart([10, 100], [0, 10], "bar", "円");
+        const labels = wrapper.find("svg > g").findAll("text");
+        const highestTick = labels.at(-2)!;
+        const unit = labels.at(-1)!;
+
+        expect(unit.text()).toBe("円");
+        expect(Number(highestTick.attributes("y")) - Number(unit.attributes("y"))).toBeGreaterThanOrEqual(18);
+        wrapper.unmount();
+    });
+});
 
 describe("SalesChart tooltip placement", () => {
     beforeEach(() => {

@@ -32,7 +32,7 @@ const props = withDefaults(
     { kind: "bar", height: 300, unit: "month" },
 );
 
-const MARGIN = { top: 14, right: 12, bottom: 40, left: 64 };
+const MARGIN = { top: 32, right: 12, bottom: 40, left: 64 };
 const MAX_BAR = 24;
 const GAP = 2;
 const RADIUS = 4;
@@ -249,7 +249,7 @@ watchPostEffect(() => {
                     <line :x1="MARGIN.left" :x2="width - MARGIN.right" :y1="y(tick)" :y2="y(tick)" :class="tick === 0 ? 'stroke-stone-300' : 'stroke-stone-200'" stroke-width="1" />
                     <text :x="MARGIN.left - 8" :y="y(tick)" text-anchor="end" dominant-baseline="middle" class="fill-stone-500 tabular-nums">{{ formatAxis(tick) }}</text>
                 </template>
-                <text :x="MARGIN.left - 8" :y="MARGIN.top - 4" text-anchor="end" class="fill-stone-400 text-[10px]">{{ axisUnit }}</text>
+                <text v-if="axisUnit !== '個'" :x="MARGIN.left - 8" :y="MARGIN.top - 18" text-anchor="end" class="fill-stone-400 text-[10px]">{{ axisUnit }}</text>
             </g>
 
             <!-- 帯（マウスを乗せた月・日を薄く示す） -->
