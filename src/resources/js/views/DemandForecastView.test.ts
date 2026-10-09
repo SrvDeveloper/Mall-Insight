@@ -73,7 +73,7 @@ function channel(channelName: "boss" | "amazon", baseAverage: number | null, rea
     };
 }
 
-function sku(sku_id: number, sku_code: string, channels: ChannelForecast[]): SkuForecast {
+function sku(sku_id: number, sku_code: string, channels: ChannelForecast[], unit_prices: SkuForecast["unit_prices"] = { total: 2000, boss: 2000, amazon: null }): SkuForecast {
     const predictable = channels.filter((candidate) => candidate.base_average !== null);
     const baseAverage = predictable.length ? predictable.reduce((total, candidate) => total + candidate.base_average!, 0) : null;
     const unpredictable = channels.filter((candidate) => candidate.base_average === null);
@@ -87,6 +87,7 @@ function sku(sku_id: number, sku_code: string, channels: ChannelForecast[]): Sku
         is_partial: predictable.length > 0 && unpredictable.length > 0,
         unpredictable_reason_label: unpredictable.length ? unpredictable.map((candidate) => `${candidate.channel_label}：${candidate.unpredictable_reason_label}`).join("／") : null,
         channels,
+        unit_prices,
     };
 }
 
@@ -126,11 +127,12 @@ const bothChannels: DemandForecastResponse["meta"]["channels"] = [
     { channel: "amazon", label: "Amazon", sales_data_from: "2025-10-07", sales_data_to: "2026-10-06" },
 ];
 
-async function mountView() {
+async function mountView(path = "/forecasts") {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:any(.*)", component: DemandForecastView }] });
+    await router.push(path);
     const wrapper = mount(DemandForecastView, { global: { plugins: [router] } });
     await flushPromises();
-    return wrapper;
+    return Object.assign(wrapper, { router });
 }
 
 function viewButton(wrapper: Awaited<ReturnType<typeof mountView>>, label: string) {
@@ -186,6 +188,32 @@ describe("DemandForecastView", () => {
         expect(skuRows[2]!.find('[data-testid="unpredictable-reason"]').text()).toBe(`BOSS：${NO_SALES}`);
         expect(wrapper.find('[data-testid="item-unpredictable"]').text()).toBe("予測不能 1/3");
         expect(wrapper.find('[data-testid="filter-unpredictable"]').text()).toBe("予測不能 1");
+    });
+
+    it("switches to amounts with the unit prices and leaves SKUs without a price out of the item totals (B-123)", async () => {
+        const unpricedSku = sku(2, "fl-01-1-15", [channel("boss", 0.5)], { total: null, boss: null, amazon: null });
+        vi.mocked(fetchDemandForecasts).mockResolvedValue(
+            response({}, [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1.75)]), unpricedSku] }]),
+        );
+        const wrapper = await mountView();
+
+        await wrapper.find('[data-testid="measure-amount"]').trigger("click");
+        await flushPromises();
+
+        expect(wrapper.router.currentRoute.value.query).toEqual({ measure: "amount" });
+        expect(wrapper.find('[data-testid="amount-note"]').text()).toContain("金額は税込の売値の概算（千円）");
+        expect(wrapper.findAll("thead tr")[1]!.findAll("th").at(-1)!.text()).toBe("12か月計（千円）");
+        const skuRows = wrapper.findAll('[data-testid="sku-row"]');
+        // 10月は 1.75×31＝54.25個 × 2,000円 ＝ 108,500円
+        expect(skuRows[0]!.findAll("td")[2]!.text()).toBe("109");
+        expect(skuRows[1]!.find('[data-testid="unpriced"]').text()).toContain("単価なし");
+        const itemCells = wrapper.find('[data-testid="item-row"]').findAll("td");
+        expect(itemCells[0]!.text()).toBe("単価なしを除く");
+        expect(itemCells[1]!.text()).toBe("109");
+
+        await wrapper.find('[data-testid="measure-quantity"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.findAll('[data-testid="sku-row"]')[0]!.findAll("td")[2]!.text()).toBe("54");
     });
 
     it("switches between the total and each channel and marks partly unpredictable SKUs", async () => {

@@ -230,6 +230,8 @@ export interface SkuForecast {
     /** 予測できなかったチャネルの理由（「Amazon：直近180日に販売実績がありません」など） */
     unpredictable_reason_label: string | null;
     channels: ChannelForecast[];
+    /** 金額の概算（B-123）に使う単価（税込）。合計はモールの単価を基準平均日販で加重平均した単価。出せなければ null */
+    unit_prices: { total: number | null; boss: number | null; amazon: number | null };
 }
 
 export interface ItemForecast {

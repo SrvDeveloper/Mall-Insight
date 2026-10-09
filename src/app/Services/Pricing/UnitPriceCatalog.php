@@ -129,4 +129,28 @@ final class UnitPriceCatalog
 
         return $price !== null ? (float) $price : ($this->itemTotal($itemNo, $channel->value)->averagePrice() ?? $this->itemTotal($itemNo)->averagePrice());
     }
+
+    /**
+     * モールを分けない数（需要予測の合計）の金額に使う単価。モールの単価を、モールごとの需要の比率で加重平均する。
+     * 合計の金額がAmazonの金額とBOSSの金額の合計になるようにするため（K-073）。比率のあるモールの単価が1つでも出せなければ null。
+     *
+     * @param  array<string, float>  $weights  Channel の値 => 比率（基準平均日販）
+     */
+    public function blendedPrice(string $itemNo, array $weights): ?float
+    {
+        $weights = array_filter($weights, fn (float $weight): bool => $weight > 0);
+        if ($weights === []) {
+            return null;
+        }
+        $total = 0.0;
+        foreach ($weights as $channel => $weight) {
+            $price = $this->channelPrice($itemNo, Channel::from($channel));
+            if ($price === null) {
+                return null;
+            }
+            $total += $price * $weight;
+        }
+
+        return $total / array_sum($weights);
+    }
 }

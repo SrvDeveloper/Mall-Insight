@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, useTemplateRef } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { fetchDemandForecasts } from "@/api/demandForecasts";
 import ForecastTooltip from "@/components/demandForecast/ForecastTooltip.vue";
 import { shortMonthLabel, yearSpans } from "@/components/inventoryTrend/trendRows";
+import { formatThousandYen } from "@/components/salesTarget/format";
 import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
 import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
 import { useVirtualRows } from "@/composables/useVirtualRows";
@@ -21,10 +22,16 @@ import type { DemandForecastResponse, ItemForecast, MonthlyDemand, SkuForecast }
  * - 見えている行（と前後の少し）だけを描き、スクロールに合わせて入れ替える（行の高さは固定）。
  * - 列の幅を固定して、ブラウザが全マスから幅を計算し直さなくて済むようにする。
  *
+ * 数量と金額（税込の売値の概算、千円、B-123）を切り替える。金額はSKUの単価（チャネルはその単価、合計はチャネルの単価を基準平均日販で
+ * 加重平均した単価で、合計の金額はチャネルの金額の合計になる、K-073）を掛けて出す。単価を出せないSKUは金額の合計に入れない。
+ * 選んだ方は URL に持たせる。
+ *
  * 見た目は在庫推移の画面（K-047）とそろえる（計算の根拠の帯、切り替えのタブ、絞り込みの札、表の罫線と品番の行）。
  */
 
 type ForecastView = "total" | "boss" | "amazon";
+/** 数量で見るか、金額（税込の売値の概算、千円、B-123）で見るか。 */
+type Measure = "quantity" | "amount";
 type ForecastFilter = "all" | "unpredictable" | "partial";
 
 const FILTERS: { value: ForecastFilter; label: string }[] = [
@@ -55,6 +62,8 @@ interface SkuRow {
     yearText: string;
     /** 予測不能（売っていないチャネルを除く） */
     isUnpredictable: boolean;
+    /** 金額で見ているが単価を出せない（予測できたSKUだけ） */
+    unpriced: boolean;
 }
 
 interface ItemRows {
@@ -64,6 +73,8 @@ interface ItemRows {
     yearTotalText: string;
     /** 予測不能のSKUの数（品番の合計に入らない） */
     unpredictableCount: number;
+    /** 金額で見ているとき、単価を出せず品番の合計に入らないSKUの数 */
+    unpricedCount: number;
 }
 
 interface ViewTable {
@@ -125,7 +136,7 @@ function figuresOf(sku: SkuForecast, forView: ForecastView = view.value): SkuFig
     return { baseAverage: channel.base_average, monthly: channel.monthly, reason: channel.unpredictable_reason_label, isPartial: false, notSold: false };
 }
 
-function buildTable(forView: ForecastView): ViewTable {
+function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
     let months: MonthlyDemand[] = [];
     let unpredictableCount = 0;
     let partialCount = 0;
@@ -134,12 +145,18 @@ function buildTable(forView: ForecastView): ViewTable {
         let yearTotal = 0;
         const rows = item.skus.map((sku): SkuRow => {
             const figures = figuresOf(sku, forView);
+            const price = sku.unit_prices[forView];
+            const unpriced = forMeasure === "amount" && figures.monthly !== null && price === null;
+            const format = forMeasure === "amount" ? formatThousandYen : formatQuantity;
             let skuYear = 0;
-            const monthTexts = (figures.monthly ?? []).map((month, index) => {
-                skuYear += month.quantity;
-                monthTotals[index] = (monthTotals[index] ?? 0) + month.quantity;
-                return formatQuantity(month.quantity);
-            });
+            const monthTexts = unpriced
+                ? []
+                : (figures.monthly ?? []).map((month, index) => {
+                      const value = forMeasure === "amount" ? month.quantity * price! : month.quantity;
+                      skuYear += value;
+                      monthTotals[index] = (monthTotals[index] ?? 0) + value;
+                      return format(value);
+                  });
             yearTotal += skuYear;
             if (figures.monthly && months.length === 0) {
                 months = figures.monthly;
@@ -152,23 +169,37 @@ function buildTable(forView: ForecastView): ViewTable {
                 figures,
                 baseText: figures.baseAverage !== null ? formatAverage(figures.baseAverage) : figures.notSold ? "—" : "予測不能",
                 monthTexts,
-                yearText: formatQuantity(skuYear),
+                yearText: format(skuYear),
                 isUnpredictable,
+                unpriced,
             };
         });
         return {
             item,
             rows,
-            monthTotalTexts: monthTotals.map(formatQuantity),
-            yearTotalText: formatQuantity(yearTotal),
+            monthTotalTexts: monthTotals.map(forMeasure === "amount" ? formatThousandYen : formatQuantity),
+            yearTotalText: (forMeasure === "amount" ? formatThousandYen : formatQuantity)(yearTotal),
             unpredictableCount: rows.filter((row) => row.isUnpredictable).length,
+            unpricedCount: rows.filter((row) => row.unpriced).length,
         };
     });
     return { items, months, unpredictableCount, partialCount };
 }
 
-/** 合計・チャネルごとの表。データを読み込んだときに一度だけ作り、表示の切り替えでは作り直さない。 */
-const tables = computed<Record<ForecastView, ViewTable>>(() => ({ total: buildTable("total"), boss: buildTable("boss"), amazon: buildTable("amazon") }));
+const route = useRoute();
+const router = useRouter();
+const measure = computed<Measure>(() => (route.query.measure === "amount" ? "amount" : "quantity"));
+
+function selectMeasure(value: Measure): void {
+    void router.replace({ query: { ...route.query, measure: value === "quantity" ? undefined : value } });
+}
+
+/** 合計・チャネルごとの表。データを読み込んだとき（と数量・金額を切り替えたとき）に作り、チャネルの切り替えでは作り直さない。 */
+const tables = computed<Record<ForecastView, ViewTable>>(() => ({
+    total: buildTable("total", measure.value),
+    boss: buildTable("boss", measure.value),
+    amazon: buildTable("amazon", measure.value),
+}));
 const table = computed(() => tables.value[view.value]);
 
 /** 予測の12か月（どのSKUも同じ）。予測できたSKUが無いときは空。 */
@@ -331,6 +362,23 @@ const facts = computed(() => {
                                 {{ option.label }}
                             </button>
                         </div>
+                        <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="group" aria-label="数量と金額">
+                            <button
+                                v-for="option in [
+                                    { value: 'quantity' as Measure, label: '数量' },
+                                    { value: 'amount' as Measure, label: '金額' },
+                                ]"
+                                :key="option.value"
+                                type="button"
+                                class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
+                                :class="measure === option.value ? 'bg-white font-semibold text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'"
+                                :aria-pressed="measure === option.value"
+                                :data-testid="`measure-${option.value}`"
+                                @click="selectMeasure(option.value)"
+                            >
+                                {{ option.label }}
+                            </button>
+                        </div>
                         <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="絞り込み" data-testid="forecast-filters">
                             <button
                                 v-for="option in FILTERS"
@@ -367,6 +415,7 @@ const facts = computed(() => {
                     <span class="inline-flex items-center gap-1.5"><span class="text-[11px] font-medium text-amber-700">一部</span>一部のチャネルだけ予測できなかった</span>
                     <span class="inline-flex items-center gap-1.5"><span class="text-stone-400">—</span>そのチャネルでは販売していない</span>
                     <span class="text-stone-400">基準平均日販にマウスを乗せると内訳が出ます</span>
+                    <span v-if="measure === 'amount'" class="text-stone-500" data-testid="amount-note">金額は税込の売値の概算（千円）。単価は単価の画面の単価、無ければ直近12か月の平均単価です</span>
                 </div>
 
                 <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
@@ -418,7 +467,9 @@ const facts = computed(() => {
                                         <span class="text-[10px] font-normal text-stone-400">{{ index === 0 ? "今月" : "&nbsp;" }}</span>
                                     </span>
                                 </th>
-                                <th scope="col" class="px-3 pt-1 pb-2 text-right whitespace-nowrap shadow-[inset_1px_0_0_var(--color-stone-200)]">12か月計</th>
+                                <th scope="col" class="px-3 pt-1 pb-2 text-right whitespace-nowrap shadow-[inset_1px_0_0_var(--color-stone-200)]">
+                                    {{ measure === "amount" ? "12か月計（千円）" : "12か月計" }}
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -444,7 +495,9 @@ const facts = computed(() => {
                                         </div>
                                     </th>
                                     <td class="truncate px-3 text-right text-[11px] text-stone-500">
-                                        <span v-if="entry.group.unpredictableCount > 0">予測不能を除く</span>
+                                        <span v-if="entry.group.unpredictableCount > 0 || entry.group.unpricedCount > 0" data-testid="item-excluded"
+                                            >{{ [entry.group.unpredictableCount > 0 ? "予測不能" : "", entry.group.unpricedCount > 0 ? "単価なし" : ""].filter(Boolean).join("・") }}を除く</span
+                                        >
                                     </td>
                                     <td v-for="(month, index) in months" :key="month.month" class="px-3 text-right font-semibold text-stone-900 tabular-nums">
                                         {{ entry.group.monthTotalTexts[index] ?? "0" }}
@@ -482,10 +535,13 @@ const facts = computed(() => {
                                         </span>
                                         <span v-if="entry.row.figures.isPartial" class="ml-1 text-[10px] font-medium text-amber-700" data-testid="partial">一部</span>
                                     </td>
-                                    <template v-if="entry.row.figures.monthly">
+                                    <template v-if="entry.row.figures.monthly && !entry.row.unpriced">
                                         <td v-for="(text, index) in entry.row.monthTexts" :key="index" class="px-3 text-right text-stone-700 tabular-nums">{{ text }}</td>
                                         <td class="px-3 text-right text-stone-700 tabular-nums shadow-[inset_1px_0_0_var(--color-stone-200)]">{{ entry.row.yearText }}</td>
                                     </template>
+                                    <td v-else-if="entry.row.unpriced" :colspan="months.length + 1" class="truncate px-3" data-testid="unpriced">
+                                        <span class="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs text-amber-800">単価なし：登録した単価も販売実績も無いため、金額を出せません</span>
+                                    </td>
                                     <td v-else :colspan="months.length + 1" class="truncate px-3" :title="entry.row.figures.reason ?? undefined" data-testid="unpredictable-reason">
                                         <span class="rounded-full px-2.5 py-0.5 text-xs" :class="entry.row.figures.notSold ? 'bg-stone-100 text-stone-500' : 'bg-amber-50 text-amber-800'">{{
                                             entry.row.figures.reason

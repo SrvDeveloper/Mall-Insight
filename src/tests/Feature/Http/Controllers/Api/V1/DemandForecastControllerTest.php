@@ -5,6 +5,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 use App\Models\Inventory;
 use App\Models\Item;
 use App\Models\ItemSelection;
+use App\Models\ItemUnitPrice;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Models\User;
@@ -70,6 +71,19 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.monthly.0', ['month' => '2026-10', 'days' => 31, 'quantity' => 46.5])
             ->assertJsonPath('data.0.skus.0.monthly.1', ['month' => '2026-11', 'days' => 30, 'quantity' => 45])
             ->assertJsonPath('data.0.skus.0.monthly.11', ['month' => '2027-09', 'days' => 30, 'quantity' => 45]);
+    }
+
+    public function test_adds_the_unit_prices_of_the_total_and_each_mall_for_amounts(): void
+    {
+        $sku = $this->targetSku('fl-01', 'fl-01-1-10');
+        $this->sell(Sku::factory()->create(), '2025-10-01', 1);
+        $this->sell($sku, '2026-09-30', 30);
+        // Amazon は販売実績を取り込んでいないので、合計の単価は BOSS の単価だけで決まる（K-073）
+        ItemUnitPrice::create(['item_no' => 'fl-01', 'amazon_unit_price' => 3000, 'boss_unit_price' => 6000, 'source' => 'screen']);
+
+        $this->getJson('/api/v1/demand-forecasts')
+            ->assertOk()
+            ->assertJsonPath('data.0.skus.0.unit_prices', ['total' => 6000, 'boss' => 6000, 'amazon' => 3000]);
     }
 
     public function test_shortens_or_excludes_older_windows_without_enough_sales_data_and_renormalizes_the_weights(): void
