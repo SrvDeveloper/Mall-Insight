@@ -365,3 +365,136 @@ export interface AuthUser {
     name: string;
     email: string;
 }
+
+/** 区分1つの月別販売比率（4月～翌3月、1万分率。合計は10000）。 */
+export interface MonthlySalesRatio {
+    ratio_category_id: number;
+    ratios: number[];
+    source: "screen" | "excel";
+    source_label: string;
+    changed_by: string | null;
+    changed_at: string;
+}
+
+/** 年間販売目標の1つの版。monthly_quantities は手で直した月（直していない月は null）、sku_quantities は手で上書きしたSKUの年間の数。 */
+export interface SalesTarget {
+    id: number;
+    fiscal_year: number;
+    item_no: string;
+    annual_quantity: number;
+    monthly_quantities: (number | null)[];
+    sku_quantities: Record<string, number>;
+    note: string | null;
+    source: "screen" | "excel";
+    source_label: string;
+    changed_by: string | null;
+    changed_at: string;
+}
+
+export interface SkuTargetPlan {
+    sku_id: number;
+    sku_code: string;
+    /** 構成比に使う直近12か月の販売数 */
+    sales_quantity: number;
+    /** 品番の目標を構成比で割り振った数。構成比を出せなければ null */
+    default_annual: number | null;
+    override_annual: number | null;
+    annual: number | null;
+    monthly: number[] | null;
+    /** 売上金額の概算に使う単価（税込）。登録が無く販売実績も無ければ null（K-062） */
+    unit_price: number | null;
+    price_basis: "registered" | "sku_actual" | "item_actual" | null;
+    price_basis_label: string | null;
+    annual_amount: number | null;
+    monthly_amounts: number[] | null;
+}
+
+/** 品番1件の販売目標と、月・SKUへの割り振り（B-110）。割り振れないときは status_label に理由を持つ。 */
+export interface ItemTargetPlan {
+    item_no: string;
+    brand: string | null;
+    category: string | null;
+    exists_in_crosswalker: boolean;
+    is_target_item: boolean;
+    ratio_category_id: number | null;
+    ratio_category_name: string | null;
+    /** 区分を登録しているか（false なら CrossWalker のカテゴリーから引いた初期値） */
+    is_ratio_category_set: boolean;
+    status: "calculated" | "no_target" | "no_category" | "no_ratio" | "no_composition";
+    status_label: string;
+    target: SalesTarget | null;
+    monthly: number[] | null;
+    month_overridden: boolean[];
+    sku_total: number | null;
+    /** 品番に登録した単価（税込）。登録が無ければ null で、販売実績の平均単価を使う（K-062） */
+    unit_price: number | null;
+    /** 品番全体の直近12か月の平均単価（税込） */
+    actual_unit_price: number | null;
+    /** 売上金額の概算（税込）。単価を出せないSKUは含めない */
+    annual_amount: number | null;
+    monthly_amounts: number[] | null;
+    has_unpriced_sku: boolean;
+    skus: SkuTargetPlan[];
+}
+
+export interface SalesTargetResponse {
+    data: ItemTargetPlan[];
+    meta: {
+        fiscal_year: number;
+        current_fiscal_year: number;
+        /** 4月～翌3月（YYYY-MM） */
+        months: string[];
+        /** 月別販売比率の区分（並び順）。code は最初からある4区分の印で、画面で足した区分は null（K-061） */
+        ratio_categories: { id: number; code: string | null; name: string; ratio: MonthlySalesRatio | null }[];
+        composition_from: string;
+        composition_to: string;
+    };
+}
+
+export interface SalesTargetPayload {
+    fiscal_year: number;
+    item_no: string;
+    annual_quantity: number;
+    monthly_quantities: (number | null)[];
+    sku_quantities: Record<number, number | null>;
+    note: string | null;
+}
+
+/** 前年度から引き継げる年間販売目標（B-110、K-060）。current_annual_quantity は引き継ぐ年度の今の目標（無ければ null）。 */
+export interface CarryOverCandidate {
+    item_no: string;
+    annual_quantity: number;
+    monthly_override_count: number;
+    sku_override_count: number;
+    current_annual_quantity: number | null;
+}
+
+/** 品番の単価（B-110、K-063）。registered は登録した単価（税込）、actual は直近12か月の販売数と平均単価。 */
+export interface ItemUnitPriceRow {
+    item_no: string;
+    brand: string;
+    category: string;
+    status: ActiveStatus;
+    status_label: string;
+    is_target_item: boolean;
+    registered: {
+        unit_price: number | null;
+        amazon_unit_price: number | null;
+        boss_unit_price: number | null;
+        source_label: string;
+        changed_by: string | null;
+        changed_at: string;
+    } | null;
+    actual: Record<"all" | "amazon" | "boss", { quantity: number; unit_price: number | null }>;
+}
+
+export interface ItemUnitPriceResponse {
+    data: ItemUnitPriceRow[];
+    meta: { sales_from: string; sales_to: string };
+}
+
+export interface ItemUnitPricePayload {
+    unit_price: number | null;
+    amazon_unit_price: number | null;
+    boss_unit_price: number | null;
+}

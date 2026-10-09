@@ -35,6 +35,7 @@ php artisan zerostockview:sync-inventory   # ZeroStockViewから日次在庫を�
 php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得、10時のZeroStockView取得）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
 php artisan user:create {email} {name}   # ログインできる利用者を登録する（パスワードは対話で入力。管理画面は B-117 で作る）
 php artisan user:reset-password {email}  # 利用者のパスワードを設定し直す
+php artisan sales-targets:import-excel ../docs/参考/在庫確保販売試算_検証用.xlsx   # 現行Excelから販売目標の初期値を取り込む（一度だけ。登録済みの分は取り込まない）
 ```
 
 ### JS / Vue

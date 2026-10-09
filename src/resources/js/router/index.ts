@@ -9,7 +9,9 @@ import InventoryImportView from "@/views/InventoryImportView.vue";
 import ItemListView from "@/views/ItemListView.vue";
 import LoginView from "@/views/LoginView.vue";
 import SalesImportView from "@/views/SalesImportView.vue";
+import SalesTargetView from "@/views/SalesTargetView.vue";
 import TargetItemSelectionView from "@/views/TargetItemSelectionView.vue";
+import UnitPriceView from "@/views/UnitPriceView.vue";
 import { useAuthStore } from "@/stores/auth";
 
 declare module "vue-router" {
@@ -30,8 +32,10 @@ const routes: RouteRecordRaw[] = [
             { path: "imports/sales", name: "sales-imports", component: SalesImportView, meta: { title: "販売実績の取込" } },
             { path: "imports/inventory", name: "inventory-imports", component: InventoryImportView, meta: { title: "在庫の取得" } },
             { path: "items", name: "items", component: ItemListView, meta: { title: "品番・SKU" } },
+            { path: "unit-prices", name: "unit-prices", component: UnitPriceView, meta: { title: "単価" } },
             { path: "target-items", name: "target-items", component: TargetItemSelectionView, meta: { title: "対象品番" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
+            { path: "sales-targets", name: "sales-targets", component: SalesTargetView, meta: { title: "販売目標" } },
             { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },
             { path: "inventory-trends", name: "inventory-trends", component: InventoryTrendView, meta: { title: "在庫推移" } },
         ],

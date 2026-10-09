@@ -22,13 +22,17 @@ export const navigation: NavGroup[] = [
     },
     {
         label: "商品",
-        pages: [{ name: "items", label: "品番・SKU", path: "/items" }],
+        pages: [
+            { name: "items", label: "品番・SKU", path: "/items" },
+            { name: "unit-prices", label: "単価", path: "/unit-prices" },
+        ],
     },
     {
         label: "在庫試算",
         pages: [
             { name: "target-items", label: "対象品番", path: "/target-items" },
             { name: "forecasts", label: "需要予測", path: "/forecasts" },
+            { name: "sales-targets", label: "販売目標", path: "/sales-targets" },
             { name: "inbound-plans", label: "入荷予定", path: "/inbound-plans" },
             { name: "inventory-trends", label: "在庫推移", path: "/inventory-trends" },
         ],
