@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watchPostEffect } from "vue";
 import type { ActualColumn, ChartSeries } from "@/components/actuals/actualRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
-import type { SalesUnit } from "@/types/api";
+import type { SalesUnit, StockoutPeriod } from "@/types/api";
 
 /**
  * 販売実績のグラフ（B-127、K-079）。kind が bar なら積み上げ棒グラフ（品番別売上の BOSS・Amazon）、line なら系列ごとの折れ線
@@ -11,6 +11,7 @@ import type { SalesUnit } from "@/types/api";
  * 月・日の帯にマウスを乗せる（またはフォーカスする）と、縦の線と点で示し、その月・日の合計と内訳をツールチップで出す。系列が2つ以上なら凡例を出す。
  * 販売実績を取り込んでいない月・日は棒も点も描かず（折れ線は前後の点を点線でつなぐ）、見出しを薄くしてツールチップでそのことを示す（原則2）。
  * ツールチップには、合計とモールごとに前月比（日ごとは前日比）と前年比を出す（K-082）。比べる期間の販売実績が無い・0のときは「—」。
+ * SKU別売上の月ごとの折れ線には、モールごとの欠品日数と、在庫記録が途中からある場合の確認日数を添える（K-084）。
  */
 
 const props = withDefaults(
@@ -38,6 +39,9 @@ const RADIUS = 4;
 
 // グラフの幅は置き場所の幅に合わせる（ResizeObserver の無い環境では既定の幅）
 const root = useTemplateRef<HTMLDivElement>("root");
+const graph = useTemplateRef("graph");
+const tooltipElement = useTemplateRef<HTMLDivElement>("tooltipElement");
+const tooltipPosition = ref({ left: 0, top: 0 });
 const width = ref(760);
 let observer: ResizeObserver | null = null;
 onMounted(() => {
@@ -163,6 +167,13 @@ function ratio(value: number | null, base: number | null): string {
 
 const comparisonLabels = computed(() => (props.unit === "day" ? ["前日比", "前年比"] : ["前月比", "前年比"]));
 
+function stockoutLabel(period: StockoutPeriod | undefined): string {
+    if (period?.days === null || period === undefined) {
+        return "—";
+    }
+    return period.known_days < period.period_days ? `${period.days}日（確認${period.known_days}/${period.period_days}日）` : `${period.days}日`;
+}
+
 const tooltip = computed(() => {
     if (hovered.value === null) {
         return null;
@@ -185,8 +196,40 @@ const tooltip = computed(() => {
         })
         .filter((row) => row.value !== null && (props.kind === "line" || row.value > 0))
         .sort((a, b) => b.value! - a.value!);
-    const left = Math.min(Math.max(xCenter(index), 150), width.value - 150);
-    return { column, total, previous: ratio(total, comparisonTotal(index, "previous")), lastYear: ratio(total, comparisonTotal(index, "lastYear")), rows, left };
+    const stockouts = props.kind === "line" && props.unit === "month" ? props.series.map((series) => ({ key: series.key, label: series.label, value: stockoutLabel(series.stockouts?.[index]) })) : [];
+    return {
+        column,
+        total,
+        previous: ratio(total, comparisonTotal(index, "previous")),
+        lastYear: ratio(total, comparisonTotal(index, "lastYear")),
+        rows,
+        stockouts,
+        anchorX: xCenter(index),
+    };
+});
+
+// 高さはグラフ上部にそろえ、ホバーした列の左右だけを切り替える。凡例とツールチップの実際の幅を反映する。
+watchPostEffect(() => {
+    if (!tooltip.value || !root.value || !graph.value || !tooltipElement.value) {
+        return;
+    }
+    const chartBounds = root.value.getBoundingClientRect();
+    const graphBounds = graph.value.getBoundingClientRect();
+    const tooltipBounds = tooltipElement.value.getBoundingClientRect();
+    const chartWidth = chartBounds.width || width.value;
+    const tooltipWidth = tooltipBounds.width || 288;
+    const maxLeft = Math.max(0, chartWidth - tooltipWidth);
+    const clampLeft = (left: number): number => Math.min(Math.max(0, left), maxLeft);
+    const top = Math.max(0, graphBounds.top - chartBounds.top + 8);
+    if (props.kind !== "line") {
+        tooltipPosition.value = { left: clampLeft(tooltip.value.anchorX - tooltipWidth / 2), top };
+        return;
+    }
+
+    const anchorX = tooltip.value.anchorX * (graphBounds.width ? graphBounds.width / width.value : 1);
+    const gap = 12;
+    const beside = anchorX + gap + tooltipWidth <= chartWidth ? anchorX + gap : anchorX - tooltipWidth - gap;
+    tooltipPosition.value = { left: clampLeft(beside), top };
 });
 </script>
 
@@ -199,7 +242,7 @@ const tooltip = computed(() => {
             </span>
         </div>
 
-        <svg :width="width" :height="height" class="block max-w-full" role="img" :aria-label="`${axisUnit}の推移`" @mouseleave="hovered = null">
+        <svg ref="graph" :width="width" :height="height" class="block max-w-full" role="img" :aria-label="`${axisUnit}の推移`" @mouseleave="hovered = null">
             <!-- 目盛り線と縦軸 -->
             <g class="text-[11px]">
                 <template v-for="tick in ticks" :key="tick">
@@ -277,9 +320,11 @@ const tooltip = computed(() => {
 
         <div
             v-if="tooltip"
+            ref="tooltipElement"
             role="tooltip"
-            class="pointer-events-none absolute z-10 w-72 -translate-x-1/2 rounded-lg bg-stone-900 px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
-            :style="{ left: `${tooltip.left}px`, top: `${series.length >= 2 ? 36 : 8}px` }"
+            class="pointer-events-none absolute z-10 w-72 max-w-full rounded-lg px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
+            :class="kind === 'line' ? 'bg-stone-900/85' : 'bg-stone-900'"
+            :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px` }"
             data-testid="chart-tooltip"
         >
             <div class="flex items-baseline justify-between gap-2 border-b border-white/10 pb-1">
@@ -314,6 +359,14 @@ const tooltip = computed(() => {
                     今月は、前月・前年の同じ月の同じ日までと比べています
                 </p>
             </template>
+            <div v-if="tooltip.stockouts.length" class="mt-1 border-t border-white/10 pt-1" data-testid="tooltip-stockouts">
+                <p class="text-[10px] text-stone-400">欠品日数{{ tooltip.column.current ? "（今日まで）" : "" }}</p>
+                <div v-for="row in tooltip.stockouts" :key="row.key" class="flex justify-between gap-2 tabular-nums">
+                    <span class="text-stone-300">{{ row.label }}</span>
+                    <span :class="row.value === '—' ? 'text-stone-500' : 'text-white'" :data-testid="`tooltip-stockouts-${row.key}`">{{ row.value }}</span>
+                </div>
+                <p v-if="tooltip.stockouts.some((row) => row.value === '—')" class="text-[10px] text-stone-400">—：判定できる在庫記録なし</p>
+            </div>
         </div>
     </div>
 </template>

@@ -5,11 +5,11 @@ namespace App\Services\Forecast;
 use App\Enums\ActiveStatus;
 use App\Enums\Channel;
 use App\Enums\Warehouse;
-use App\Models\Inventory;
 use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Models\Sku;
+use App\Services\Actuals\StockoutHistory;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -31,6 +31,8 @@ use Illuminate\Support\Collection;
  */
 class DemandForecaster
 {
+    public function __construct(private StockoutHistory $stockouts) {}
+
     /** 期間の日数 => 重み（合計1）。新しい期間から順に、重ならずに遡る。 */
     public const WINDOW_WEIGHTS = [30 => 0.5, 60 => 0.3, 90 => 0.2];
 
@@ -213,35 +215,10 @@ class DemandForecaster
         }
 
         $stockouts = [];
-        foreach (array_chunk($skuIds, 500) as $chunk) {
-            $rows = Inventory::query()
-                ->selectRaw('sku_id, stock_date, sum(quantity) as quantity')
-                ->whereIn('sku_id', $chunk)
-                ->whereIn('warehouse', $this->warehouseValues($channel))
-                ->where('stock_date', '<', $to->addDay()->toDateString())
-                ->groupBy('sku_id', 'stock_date')
-                ->orderBy('stock_date')
-                ->toBase()
-                ->get();
-            $spanDates = $this->dates($from, $to);
-            foreach ($rows->groupBy('sku_id') as $skuId => $surveys) {
-                $isOutOfStock = [];
-                foreach ($surveys as $survey) {
-                    $isOutOfStock[substr((string) $survey->stock_date, 0, 10)] = (int) $survey->quantity <= 0;
-                }
-                // 期間の初日より前の、最後の在庫基準日の状態から始める
-                $state = null;
-                foreach ($isOutOfStock as $date => $outOfStock) {
-                    if ($date >= $spanDates[0]) {
-                        break;
-                    }
-                    $state = $outOfStock;
-                }
-                foreach ($spanDates as $date) {
-                    $state = $isOutOfStock[$date] ?? $state;
-                    if ($state === true) {
-                        $stockouts[$skuId][$date] = true;
-                    }
+        foreach ($this->stockouts->dailyStates($skuIds, $from, $to, $channel) as $skuId => $states) {
+            foreach ($states as $date => $isOutOfStock) {
+                if ($isOutOfStock === true) {
+                    $stockouts[$skuId][$date] = true;
                 }
             }
         }

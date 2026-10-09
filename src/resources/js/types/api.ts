@@ -523,12 +523,20 @@ export interface ItemUnitPricePayload {
     boss_unit_price: number | null;
 }
 
+/** 月ごとの欠品日数。判定できる在庫記録が無ければ days は null（K-084）。 */
+export interface StockoutPeriod {
+    days: number | null;
+    known_days: number;
+    period_days: number;
+}
+
 /** 販売実績のモールごとの値（列ごと、データの無い列は null）。 */
 export interface ActualChannelSales {
     quantities: (number | null)[];
     amounts: (number | null)[];
     previous?: { quantities: (number | null)[]; amounts: (number | null)[] };
     last_year?: { quantities: (number | null)[]; amounts: (number | null)[] };
+    stockouts?: StockoutPeriod[];
 }
 
 /** 実績（B-124）のSKUの行。quantities は列（月・日）ごとの数で、データの無い列は null。 */
@@ -567,7 +575,7 @@ interface ActualMeta {
     selection: { confirmed_at: string; item_count: number } | null;
 }
 
-/** 品番別売上を何ごとに集めるか（B-127）。月ごとは直近12か月＋今月、日ごとは直近90日。 */
+/** 品番別売上を何ごとに集めるか（B-127）。月ごとは直近12か月＋今月、日ごとは直近30日。 */
 export type SalesUnit = "month" | "day";
 
 /**

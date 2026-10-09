@@ -10,6 +10,7 @@ use App\Models\ItemSelection;
 use App\Models\Sku;
 use App\Services\Actuals\ActualsReader;
 use App\Services\Actuals\SalesUnit;
+use App\Services\Actuals\StockoutHistory;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\InventoryTrend\TrendScope;
 use Carbon\CarbonImmutable;
@@ -21,12 +22,13 @@ use Illuminate\Validation\ValidationException;
 class ActualController extends Controller
 {
     /**
-     * 対象品番のSKUの、販売数と金額（税込）（バックログ B-124・B-127）。unit で月ごと（初期値、直近12か月＋今月）か日ごと（直近90日）、
+     * 対象品番のSKUの、販売数と金額（税込）（バックログ B-124・B-127）。unit で月ごと（初期値、直近12か月＋今月）か日ごと（直近30日）、
      * from・to で期間（月ごとは YYYY-MM、日ごとは YYYY-MM-DD。今日（今月）まで、36か月・92日以内、K-080）、
      * scope で全体（初期値）・Amazon・BOSSを選ぶ。item_no を指定すると、対象品番のうちその品番だけを返す（SKU別売上）。
      * 販売実績を取り込んでいない期間は null。
+     * SKU別売上の月ごとには、モールごとの欠品日数と判定できた日数を添える（K-084）。
      */
-    public function sales(Request $request, ActualsReader $reader): JsonResponse
+    public function sales(Request $request, ActualsReader $reader, StockoutHistory $stockouts): JsonResponse
     {
         $scope = $this->scope($request);
         $request->validate(['unit' => ['nullable', Rule::enum(SalesUnit::class)], 'item_no' => ['nullable', 'string', 'max:255']]);
@@ -36,6 +38,23 @@ class ActualController extends Controller
         $items = $reader->items($request->filled('item_no') ? $request->string('item_no')->toString() : null);
         $sales = $reader->sales($items, $now, $scope, $unit, $from, $to);
         $ranges = $reader->salesRanges();
+
+        if ($unit === SalesUnit::Month && $request->filled('item_no')) {
+            $channels = $scope->channel() === null ? Channel::cases() : [$scope->channel()];
+            foreach ($channels as $channel) {
+                $skuIds = [];
+                foreach ($items as $item) {
+                    foreach ($item->skus as $sku) {
+                        if (DemandForecaster::sellsOn($sku, $channel)) {
+                            $skuIds[] = $sku->id;
+                        }
+                    }
+                }
+                foreach ($stockouts->monthlyCounts($skuIds, $from, $to, $now, $channel) as $skuId => $counts) {
+                    $sales['byChannel'][$skuId][$channel->value]['stockouts'] = $counts;
+                }
+            }
+        }
 
         return response()->json([
             'data' => $this->rows($items, $sales['quantities'], $scope, $sales['amounts'], $sales['byChannel']),

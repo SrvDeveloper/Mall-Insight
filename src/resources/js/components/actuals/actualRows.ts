@@ -1,6 +1,6 @@
 import { formatQuantity, shortMonthLabel } from "@/components/inventoryTrend/trendRows";
 import { formatThousandYen } from "@/components/salesTarget/format";
-import type { ActualItem, ActualSku, SalesActualsResponse, StockActualsResponse } from "@/types/api";
+import type { ActualItem, ActualSku, SalesActualsResponse, StockActualsResponse, StockoutPeriod } from "@/types/api";
 
 /**
  * 実績（B-124）の表示用データ。販売実績（月ごと）と在庫実績（日ごと）で共通に使う。表とグラフの両方で使い、
@@ -164,6 +164,7 @@ export interface ChartSeries {
     values: (number | null)[];
     previous?: (number | null)[];
     lastYear?: (number | null)[];
+    stockouts?: StockoutPeriod[];
 }
 
 /**
@@ -215,6 +216,7 @@ export function skuMallSeries(sku: ActualSku, measure: ActualMeasure): ChartSeri
         values: channelValues(sku, mall.key, measure, "current"),
         previous: channelValues(sku, mall.key, measure, "previous"),
         lastYear: channelValues(sku, mall.key, measure, "last_year"),
+        stockouts: sku.channels?.[mall.key]?.stockouts,
     }));
 }
 

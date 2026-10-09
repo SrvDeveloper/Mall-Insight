@@ -12,7 +12,7 @@ use App\Services\InventoryTrend\TrendScope;
 use Carbon\CarbonImmutable;
 
 /**
- * 販売実績と在庫実績の推移（バックログ B-124・B-127）。対象品番（最新の選定）のSKUについて、月ごと（直近12か月＋今月）か日ごと（直近90日）の販売数と、
+ * 販売実績と在庫実績の推移（バックログ B-124・B-127）。対象品番（最新の選定）のSKUについて、月ごと（直近12か月＋今月）か日ごと（直近30日）の販売数と、
  * 日ごとの在庫数（直近31日）を、全体・Amazon・BOSSのどれかで集める。取り込んだ実績は変えない（原則3）。
  *
  * - 販売数は販売実績の出荷倉庫でモールに分ける（K-038）。モールの販売実績を取り込んだ期間の外の月は0とせず、データ無しとする（原則2）。
@@ -27,8 +27,8 @@ class ActualsReader
     /** 販売実績の月数（直近12か月と今月）。 */
     public const SALES_MONTHS = 13;
 
-    /** 日ごとの販売実績の日数（今日まで、B-127）。 */
-    public const SALES_DAYS = 90;
+    /** 日ごとの販売実績の初期日数（今日まで、B-127・K-083）。 */
+    public const SALES_DAYS = 30;
 
     /** 期間を指定するときの上限（月ごとは36か月、日ごとは92日。グラフと表が読めなくならないように、K-080）。 */
     public const MAX_MONTHS = 36;
@@ -84,7 +84,7 @@ class ActualsReader
     }
 
     /**
-     * 月ごとか日ごとの販売数と金額（税込）。期間を指定しなければ、月ごとは直近12か月と今月、日ごとは直近90日（K-080）。
+     * 月ごとか日ごとの販売数と金額（税込）。期間を指定しなければ、月ごとは直近12か月と今月、日ごとは直近30日（K-083）。
      *
      * @param  list<Item>  $items
      * @return array{periods: list<array{start: CarbonImmutable, coverage: Coverage}>, quantities: array<int, list<float|null>>, amounts: array<int, list<float|null>>, byChannel: array<int, array<string, array{quantities: list<float|null>, amounts: list<float|null>, previous: array{quantities: list<float|null>, amounts: list<float|null>}, last_year: array{quantities: list<float|null>, amounts: list<float|null>}}>>} SKU ID => 期間ごとの数（データ無しの期間は null）。byChannel は選んだモール（全体ならBOSS・Amazon）ごとの内訳。previous・last_year は前月（前日）と前年の比べる値（K-082）

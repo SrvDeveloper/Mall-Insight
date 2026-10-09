@@ -80,6 +80,62 @@ describe("SkuSalesView", () => {
         wrapper.unmount();
     });
 
+    it("shows monthly stockout days by mall with partial history and missing records", async () => {
+        const response = itemResponse();
+        const sku = response.data[0]!.skus[0]!;
+        sku.channels!.boss!.stockouts = [
+            { days: null, known_days: 0, period_days: 31 },
+            { days: 3, known_days: 15, period_days: 30 },
+            { days: 2, known_days: 7, period_days: 7 },
+        ];
+        sku.channels!.amazon!.stockouts = [
+            { days: null, known_days: 0, period_days: 31 },
+            { days: 2, known_days: 30, period_days: 30 },
+            { days: 0, known_days: 7, period_days: 7 },
+        ];
+        vi.mocked(fetchSalesActuals).mockResolvedValue(response);
+        const { wrapper } = await mountView();
+        const bands = wrapper.find('[data-testid="sku-detail"]').findAll('[data-testid="chart-band"]');
+
+        await bands[1]!.trigger("mouseenter");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-boss"]').text()).toBe("3日（確認15/30日）");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-amazon"]').text()).toBe("2日");
+
+        await bands[2]!.trigger("mouseenter");
+        expect(wrapper.find('[data-testid="tooltip-stockouts"]').text()).toContain("欠品日数（今日まで）");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-boss"]').text()).toBe("2日");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-amazon"]').text()).toBe("0日");
+
+        // 販売実績も在庫記録も無い月を、欠品0日として表示しない
+        await bands[0]!.trigger("mouseenter");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-boss"]').text()).toBe("—");
+        expect(wrapper.find('[data-testid="tooltip-stockouts"]').text()).toContain("判定できる在庫記録なし");
+        wrapper.unmount();
+    });
+
+    it("shows stockouts for the selected mall in amounts and hides them in daily charts", async () => {
+        const response = itemResponse();
+        response.meta.scope = "amazon";
+        const sku = response.data[0]!.skus[0]!;
+        sku.channels = { amazon: sku.channels!.amazon };
+        sku.channels.amazon!.stockouts = [
+            { days: null, known_days: 0, period_days: 31 },
+            { days: 2, known_days: 30, period_days: 30 },
+            { days: 0, known_days: 7, period_days: 7 },
+        ];
+        vi.mocked(fetchSalesActuals).mockResolvedValue(response);
+        const { wrapper } = await mountView("/item-sales/fl-01?scope=amazon&measure=amount");
+        await wrapper.findAll('[data-testid="chart-band"]')[1]!.trigger("mouseenter");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-amazon"]').text()).toBe("2日");
+        expect(wrapper.find('[data-testid="tooltip-stockouts-boss"]').exists()).toBe(false);
+        wrapper.unmount();
+
+        const { wrapper: daily } = await mountView("/item-sales/fl-01?unit=day");
+        await daily.findAll('[data-testid="chart-band"]')[1]!.trigger("mouseenter");
+        expect(daily.find('[data-testid="tooltip-stockouts"]').exists()).toBe(false);
+        daily.unmount();
+    });
+
     it("opens the color and size table in a dialog and moves to the SKU picked there", async () => {
         const { wrapper, router } = await mountView();
 
