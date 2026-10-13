@@ -5,10 +5,10 @@ import type { SalesUnit } from "@/types/api";
 
 /**
  * 販売実績のツールチップの中身（グラフと店舗売上の表で共通、K-082・K-084）。合計と系列ごとの値・前月比（前日比）・前年比を表にし、
- * highlightKey の系列（表でマウスを乗せた店舗）を目立たせる。販売実績を取り込んでいない系列があれば、合計に含めていないことを添える（原則2）。
+ * 販売実績を取り込んでいない系列があれば、合計に含めていないことを添える（原則2）。
  */
 
-const props = defineProps<{ tooltip: SalesTooltip; formatValue: (value: number) => string; unit: SalesUnit; highlightKey?: string | null }>();
+const props = defineProps<{ tooltip: SalesTooltip; formatValue: (value: number) => string; unit: SalesUnit }>();
 
 const comparisonLabels = computed(() => (props.unit === "day" ? ["前日比", "前年比"] : ["前月比", "前年比"]));
 const hasShare = computed(() => props.tooltip.rows.some((row) => row.share !== undefined));
@@ -38,13 +38,10 @@ const gridColumns = computed(() => (hasShare.value ? "grid-cols-[minmax(0,1fr)_a
             <span class="text-right" :class="tooltip.lastYear === '—' ? 'text-stone-500' : 'text-white'" data-testid="tooltip-total-last-year">{{ tooltip.lastYear }}</span>
 
             <template v-for="row in tooltip.rows" :key="row.key">
-                <span
-                    class="flex min-w-0 items-center gap-1.5"
-                    :class="row.key === highlightKey ? 'font-semibold text-white' : 'text-stone-300'"
-                    :data-highlighted="row.key === highlightKey || undefined"
+                <span class="flex min-w-0 items-center gap-1.5 text-stone-300"
                     ><span class="h-2 w-2 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" /><span class="truncate">{{ row.label }}</span></span
                 >
-                <span class="text-right" :class="row.key === highlightKey ? 'font-semibold text-white' : ''" :data-testid="`tooltip-value-${row.key}`">{{ formatValue(row.value!) }}</span>
+                <span class="text-right" :data-testid="`tooltip-value-${row.key}`">{{ formatValue(row.value!) }}</span>
                 <span v-if="hasShare" class="text-right text-stone-300" :data-testid="`tooltip-share-${row.key}`">{{ row.share }}</span>
                 <span class="text-right" :class="row.previous === '—' ? 'text-stone-500' : ''" :data-testid="`tooltip-previous-${row.key}`">{{ row.previous }}</span>
                 <span class="text-right" :class="row.lastYear === '—' ? 'text-stone-500' : ''" :data-testid="`tooltip-last-year-${row.key}`">{{ row.lastYear }}</span>

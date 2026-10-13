@@ -69,16 +69,24 @@ describe("StoreSalesView", () => {
         expect(wrapper.find('[data-testid="range-note"]').text()).toBe("BOSS 2025/09/01〜2026/10/06・Amazon 2026/09/01〜2026/10/06");
     });
 
-    it("shows the details of a month in a tooltip on the table, highlighting the store", async () => {
+    it("shows the breakdown of a month only when the info button of the total row is pressed", async () => {
         const { wrapper } = await mountView();
 
+        // 店舗の行にマウスを乗せても出さない
         const rows = wrapper.findAll('[data-testid="store-row"]');
         await rows[0]!.findAll("td[tabindex]")[2]!.trigger("mouseenter");
+        expect(wrapper.find('[data-testid="table-tooltip"]').exists()).toBe(false);
+        // (i) は合計の行の、販売実績のある欄だけ
+        expect(wrapper.findAll('[data-testid="store-row"] [data-testid="info-button"]')).toHaveLength(0);
+        const buttons = wrapper.find('[data-testid="store-total-row"]').findAll('[data-testid="info-button"]');
+        expect(buttons).toHaveLength(3);
+
+        await buttons[2]!.trigger("click");
         const tooltip = wrapper.find('[data-testid="table-tooltip"]');
         expect(tooltip.exists()).toBe(true);
+        expect(buttons[2]!.attributes("aria-expanded")).toBe("true");
         // 背景は透かす（K-085）
         expect(tooltip.classes()).toContain("bg-stone-900/85");
-        expect(tooltip.find('[data-testid="tooltip-pick-hint"]').text()).toContain("この店舗の売上上位の品番・SKUを表の下に出します");
         expect(tooltip.text()).toContain("26/10");
         // 金額は千円単位ではなく円で出す
         expect(tooltip.find('[data-testid="tooltip-total"]').text()).toBe("53,000円");
@@ -87,14 +95,23 @@ describe("StoreSalesView", () => {
         // 前月（9月の同じ日まで）45,000円に対して
         expect(tooltip.find('[data-testid="tooltip-previous-rakuten"]').text()).toBe("56%");
         expect(tooltip.find('[data-testid="tooltip-last-year-rakuten"]').text()).toBe("—");
-        expect(tooltip.find('[data-highlighted="true"]').text()).toBe("楽天市場");
-        await rows[0]!.findAll("td[tabindex]")[2]!.trigger("mouseleave");
+        // (i) を押しても売上上位は出さない
+        expect(fetchStoreRanking).not.toHaveBeenCalled();
+
+        // もう一度押すと閉じる
+        await buttons[2]!.trigger("click");
         expect(wrapper.find('[data-testid="table-tooltip"]').exists()).toBe(false);
 
-        // 販売実績を取り込んでいない店舗を除いた合計は、そのことを示す
-        await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[0]!.trigger("focus");
+        // 販売実績を取り込んでいない店舗を除いた合計は、そのことを示す。外側を押すか Esc キーで閉じる
+        await buttons[0]!.trigger("click");
         expect(wrapper.find('[data-testid="tooltip-missing"]').text()).toBe("Amazonは販売実績を取り込んでいないため、合計に含めていません");
-        expect(wrapper.find('[data-testid="table-tooltip"] [data-highlighted="true"]').exists()).toBe(false);
+        document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        await flushPromises();
+        expect(wrapper.find('[data-testid="table-tooltip"]').exists()).toBe(false);
+        await buttons[1]!.trigger("click");
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        await flushPromises();
+        expect(wrapper.find('[data-testid="table-tooltip"]').exists()).toBe(false);
     });
 
     it("shows the top items and SKUs of the store and month under the table when a cell is clicked", async () => {

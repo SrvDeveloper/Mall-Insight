@@ -16,7 +16,7 @@ import type { SalesUnit, StoreSales, StoreSalesProducts, StoreSalesResponse } fr
  * 店舗売上（バックログ B-126）。左メニュー「販売実績」の画面。楽天市場・Yahoo!ショッピング・au PAY マーケット・Amazon の店舗ごとの売上を、
  * 月ごと（直近12か月＋今月）か日ごと（直近30日）に表・グラフで見る。期間の指定と前月比・前年比のツールチップは品番別売上とそろえる（K-080・K-082）。
  * 商品は全商品（CrossWalkerに未登録のSKUを含む）と対象品番だけを切り替えられる。初めは店舗の売上として金額を出す（K-088）。
- * 販売実績を取り込んでいない月・日は0とせず「—」で示す（原則2）。表でもグラフと同じツールチップで詳細を見られ、欄を押すと
+ * 販売実績を取り込んでいない月・日は0とせず「—」で示す（原則2）。表では合計の行の (i) を押すとグラフと同じ内訳を出し（K-094）、欄を押すと
  * その店舗・月（日）の売上上位の品番・SKUを表の下に出す（K-091・K-092）。
  * 選んだ商品・月ごとと日ごと・数量と金額・見せ方・期間は URL に持たせる。
  */
@@ -143,9 +143,9 @@ const rangeNote = computed(() =>
                 <p class="max-w-3xl text-[13px] text-stone-600" data-testid="description">
                     取り込んだ販売実績の、店舗ごとの{{ unit === "day" ? "日ごと" : "月ごと" }}の売上です。{{
                         products === "all" ? "CrossWalkerに未登録のSKUを含む、全商品の売上です。" : "対象品番のSKUだけの売上です。"
-                    }}楽天市場・Yahoo!ショッピング・au PAY マーケットはBOSS受注実績から、AmazonはAmazon全注文レポートから集めています。表の欄を押すと、その店舗・{{
+                    }}楽天市場・Yahoo!ショッピング・au PAY マーケットはBOSS受注実績から、AmazonはAmazon全注文レポートから集めています。合計の行の (i) を押すと、その{{
                         unit === "day" ? "日" : "月"
-                    }}の売上上位の品番・SKUを見られます。
+                    }}の店舗ごとの内訳と前{{ unit === "day" ? "日" : "月" }}比・前年比を見られます。表の欄を押すと、その店舗・{{ unit === "day" ? "日" : "月" }}の売上上位の品番・SKUを見られます。
                 </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
@@ -199,7 +199,7 @@ const rangeNote = computed(() =>
                     :stores="rows.stores"
                     :columns="columns"
                     :summary-label="summaryLabel"
-                    :column-width="unit === 'day' ? 72 : 84"
+                    :column-width="unit === 'day' ? 80 : 96"
                     :series="series"
                     :format-value="formats.formatValue"
                     :unit="unit"
