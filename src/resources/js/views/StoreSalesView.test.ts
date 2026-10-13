@@ -224,6 +224,40 @@ describe("StoreSalesView", () => {
         expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(false);
     });
 
+    it("pages the top items by ten", async () => {
+        const response = rankingResponse();
+        const [first] = response.data.items;
+        response.data.items = Array.from({ length: 13 }, (_, index) => ({ ...first!, item_no: `i-${index + 1}`, amount: 1300 - index * 100, rank: index + 1 }));
+        vi.mocked(fetchStoreRanking).mockResolvedValue(response);
+        const { wrapper } = await mountView();
+
+        await wrapper.findAll('[data-testid="store-row"]')[0]!.findAll("td[tabindex]")[2]!.trigger("click");
+        await flushPromises();
+        const panel = () => wrapper.find('[data-testid="ranking-panel"]');
+        const itemNos = () =>
+            panel()
+                .findAll('[data-testid="ranking-item"]')
+                .map((item) => item.find(".font-mono").text());
+        expect(itemNos()).toEqual(["i-1", "i-2", "i-3", "i-4", "i-5", "i-6", "i-7", "i-8", "i-9", "i-10"]);
+        expect(panel().find('[data-testid="ranking-page-1"]').text()).toBe("1〜10位");
+        expect(panel().find('[data-testid="ranking-page-2"]').text()).toBe("11〜13位");
+        expect(panel().find('[data-testid="ranking-page-previous"]').attributes("disabled")).toBeDefined();
+
+        await panel().find('[data-testid="ranking-page-next"]').trigger("click");
+        expect(itemNos()).toEqual(["i-11", "i-12", "i-13"]);
+        expect(panel().find('[data-testid="ranking-page-2"]').attributes("aria-current")).toBe("page");
+        expect(panel().find('[data-testid="ranking-page-next"]').attributes("disabled")).toBeDefined();
+        // 円グラフは上位10品番のまま
+        expect(panel().findAll('[data-testid="donut-segment"]').length).toBeGreaterThanOrEqual(10);
+
+        // 並び順を変えて読み込み直すと、1ページ目に戻る
+        await panel().find('[data-testid="ranking-order-quantity"]').trigger("click");
+        await flushPromises();
+        expect(itemNos()[0]).toBe("i-1");
+        await panel().find('[data-testid="ranking-page-2"]').trigger("click");
+        expect(itemNos()).toEqual(["i-11", "i-12", "i-13"]);
+    });
+
     it("switches to the target items, quantities and the graph, keeping them in the URL", async () => {
         const response = storeSalesResponse();
         response.meta.selection = { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1 };

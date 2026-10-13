@@ -16,7 +16,7 @@ import type { RankingStockout, SalesUnit, StoreRankingResponse, StoreSales, Stor
  * 前の一覧を薄くして残す（表の高さが変わらないように）。開いたときは一覧が見えるところまで画面を動かす。×で閉じる。
  * 各行に、前月（日ごとは前日）の順位からの変動と、店舗のチャネル（全店舗なら BOSS と Amazon）の欠品日数を出す。品番の欠品日数は、
  * 欠品したSKUの欠品日数の合計（K-095）。広い画面では、左に上位10品番・その他の品番・未登録のSKUの割合の円グラフ、右に順位の一覧を並べ、
- * 円グラフに出した品番は一覧にも同じ色の印を付ける（K-097・K-098）。
+ * 円グラフに出した品番は一覧にも同じ色の印を付ける（K-097・K-098）。順位の一覧は10位ずつのページに分けて切り替える（K-100）。
  */
 
 const props = defineProps<{
@@ -39,6 +39,10 @@ const isLoading = ref(false);
 const hasError = ref(false);
 const root = useTemplateRef<HTMLElement>("root");
 
+/** 順位の一覧は10位ずつのページに分ける（K-100）。欄・並び順を変えて読み込み直したら1ページ目に戻す。 */
+const PAGE_SIZE = 10;
+const page = ref(0);
+
 async function load(): Promise<void> {
     const target = props.target;
     if (!target) {
@@ -52,6 +56,7 @@ async function load(): Promise<void> {
         // 読み込み中に欄や並び順を変えたときは、古い方の結果を表示しない
         if (props.target === target && order.value === requested) {
             result.value = response;
+            page.value = 0;
         }
     } catch {
         hasError.value = true;
@@ -78,6 +83,13 @@ watch(
     { immediate: true },
 );
 watch(order, () => void load());
+
+const pageCount = computed(() => Math.ceil((result.value?.data.items.length ?? 0) / PAGE_SIZE));
+const pageItems = computed(() => result.value?.data.items.slice(page.value * PAGE_SIZE, (page.value + 1) * PAGE_SIZE) ?? []);
+const pageLabel = (index: number): string => {
+    const count = result.value?.data.items.length ?? 0;
+    return `${index * PAGE_SIZE + 1}〜${Math.min(count, (index + 1) * PAGE_SIZE)}位`;
+};
 
 const valueOf = (row: { quantity: number; amount: number }): number => (order.value === "amount" ? row.amount : row.quantity);
 const format = (value: number): string => (order.value === "amount" ? formatYen(value) : `${formatQuantity(value)}個`);
@@ -200,9 +212,51 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
                 <RankingDonut :segments="segments" :total="totalValue" :format="format" :total-label="order === 'amount' ? '合計金額' : '合計販売数'" />
             </div>
             <section class="flex min-w-0 flex-col" aria-labelledby="ranking-items">
-                <h3 id="ranking-items" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">品番 上位{{ result.data.items.length }}</h3>
-                <ol class="flex flex-col pb-2" data-testid="ranking-items">
-                    <li v-for="row in result.data.items" :key="row.item_no" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-item">
+                <div class="flex flex-wrap items-center justify-between gap-2 px-5 pt-4 pb-2">
+                    <h3 id="ranking-items" class="text-sm font-semibold text-stone-900">品番 上位{{ result.data.items.length }}</h3>
+                    <nav v-if="pageCount > 1" class="flex items-center gap-1" aria-label="順位のページ" data-testid="ranking-pager">
+                        <button
+                            type="button"
+                            class="flex size-7 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-900 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                            :disabled="page === 0"
+                            aria-label="前の10位"
+                            data-testid="ranking-page-previous"
+                            @click="page--"
+                        >
+                            <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M10 3.5 5.5 8l4.5 4.5" />
+                            </svg>
+                        </button>
+                        <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75">
+                            <button
+                                v-for="index in pageCount"
+                                :key="index"
+                                type="button"
+                                class="inline-flex h-7 items-center rounded-[7px] px-2.5 text-[12px] tabular-nums"
+                                :class="page === index - 1 ? 'bg-white font-semibold text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'"
+                                :aria-current="page === index - 1 ? 'page' : undefined"
+                                :data-testid="`ranking-page-${index}`"
+                                @click="page = index - 1"
+                            >
+                                {{ pageLabel(index - 1) }}
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            class="flex size-7 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-900 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
+                            :disabled="page >= pageCount - 1"
+                            aria-label="次の10位"
+                            data-testid="ranking-page-next"
+                            @click="page++"
+                        >
+                            <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="m6 3.5 4.5 4.5L6 12.5" />
+                            </svg>
+                        </button>
+                    </nav>
+                </div>
+                <ol class="flex flex-col pb-2" :start="page * PAGE_SIZE + 1" data-testid="ranking-items">
+                    <li v-for="row in pageItems" :key="row.item_no" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-item">
                         <span class="flex w-7 shrink-0 flex-col items-end leading-tight tabular-nums">
                             <span class="text-[12px] text-stone-500">{{ row.rank }}</span>
                             <span v-if="rankChange(row)" class="text-[10px] font-medium" :class="CHANGE_CLASSES[rankChange(row)!.tone]" :title="rankChange(row)!.title" data-testid="rank-change">{{
