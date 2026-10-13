@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\ActualController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
 use App\Http\Controllers\Api\V1\DemandForecastController;
+use App\Http\Controllers\Api\V1\ForecastBacktestController;
 use App\Http\Controllers\Api\V1\InboundPlanController;
 use App\Http\Controllers\Api\V1\InboundPlanReceiptController;
 use App\Http\Controllers\Api\V1\InventoryDateController;
@@ -36,6 +37,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/item-selections/current', [ItemSelectionController::class, 'current'])->name('item-selections.current');
         Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
         Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
+        Route::get('/forecast-backtests', [ForecastBacktestController::class, 'index'])->name('forecast-backtests.index');
+        Route::get('/forecast-backtests/{forecastBacktest}', [ForecastBacktestController::class, 'show'])->name('forecast-backtests.show');
+        Route::post('/forecast-backtests', [ForecastBacktestController::class, 'store'])->name('forecast-backtests.store');
         Route::apiResource('inbound-plans', InboundPlanController::class)->except('show');
         Route::post('/inbound-plans/{inboundPlan}/receipt', [InboundPlanReceiptController::class, 'store'])->name('inbound-plans.receipt.store');
         Route::delete('/inbound-plans/{inboundPlan}/receipt', [InboundPlanReceiptController::class, 'destroy'])->name('inbound-plans.receipt.destroy');

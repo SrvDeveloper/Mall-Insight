@@ -31,6 +31,9 @@ use Illuminate\Support\Collection;
  */
 class DemandForecaster
 {
+    /** @var array<string, list<array{0: CarbonImmutable, 1: int}>> 予測の開始日 => 12か月の月の初日と日数 */
+    private array $monthCache = [];
+
     public function __construct(private StockoutHistory $stockouts) {}
 
     /** 期間の日数 => 重み（合計1）。新しい期間から順に、重ならずに遡る。 */
@@ -99,7 +102,7 @@ class DemandForecaster
      *
      * @return list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>
      */
-    private function channelSalesRanges(CarbonImmutable $forecastFrom): array
+    public function channelSalesRanges(CarbonImmutable $forecastFrom): array
     {
         $byWarehouse = SalesLine::query()
             ->selectRaw('warehouse, min(sales_date) as first_date, max(sales_date) as last_date')
@@ -121,12 +124,12 @@ class DemandForecaster
 
     /**
      * 品番（CrossWalker に残っているもの）を、渡した順（対象品番なら選定の順＝売上順位の高い順）で返す。
-     * 無効（廃番）のSKUは今後売らず発注もしないため、予測の対象から外す（K-053）。在庫推移からも外れる。
+     * 無効（廃番）のSKUは今後売らず発注もしないため、予測の対象から外す（K-053）。在庫推移からも外れる。予測精度の測定（B-130）でも同じSKUを使う。
      *
      * @param  Collection<int, string>  $itemNos
      * @return Collection<int, Item>
      */
-    private function items(Collection $itemNos): Collection
+    public function items(Collection $itemNos): Collection
     {
         if ($itemNos->isEmpty()) {
             return collect();
@@ -266,6 +269,33 @@ class DemandForecaster
     }
 
     /**
+     * ある日（$forecastFrom）時点の、平均日販を出す期間と期間の日付。予測精度の測定（B-130）で、過去のある日に戻って予測をやり直すために使う。
+     * $salesDataTo は、その日の前日までに分かっていた最後の販売日とし、それより後は期間に入れない。期間の日付はSKUによらないため、
+     * チャネルと起点ごとに1回だけ求めて、forecastChannelWith() に渡す。
+     *
+     * @return array{ranges: array<int, array{from: ?CarbonImmutable, to: ?CarbonImmutable, days: int, offset: int}>, window_dates: array<int, list<string>>}
+     */
+    public function windowPlan(CarbonImmutable $salesDataFrom, CarbonImmutable $salesDataTo, CarbonImmutable $forecastFrom): array
+    {
+        $ranges = $this->windowRanges($salesDataFrom, $salesDataTo->min($forecastFrom->subDay()));
+
+        return ['ranges' => $ranges, 'window_dates' => array_map(fn (array $range): array => $this->dates($range['from'], $range['to']), $ranges)];
+    }
+
+    /**
+     * windowPlan() の期間と、与えた販売数・欠品日から、ある日時点のチャネルの予測を出す。計算は forecast() と同じ
+     * （欠品日の除き方・期間を使うかの判定・予測不能の判定）。
+     *
+     * @param  array{ranges: array<int, array{from: ?CarbonImmutable, to: ?CarbonImmutable, days: int, offset: int}>, window_dates: array<int, list<string>>}  $plan
+     * @param  array<string, int>  $dailySales  [Y-m-d => 販売数量]
+     * @param  array<string, true>  $stockoutDates  [Y-m-d => true]
+     */
+    public function forecastChannelWith(Channel $channel, array $plan, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom): ChannelForecast
+    {
+        return $this->forecastChannel($channel, $plan['ranges'], $plan['window_dates'], $dailySales, $stockoutDates, $forecastFrom);
+    }
+
+    /**
      * @param  array<int, array{from: ?CarbonImmutable, to: ?CarbonImmutable, days: int, offset: int}>  $ranges
      * @param  array<int, list<string>>  $windowDates  [期間の日数 => 期間の日付（Y-m-d）]
      * @param  array<string, int>  $dailySales  [Y-m-d => 販売数量]
@@ -326,12 +356,26 @@ class DemandForecaster
      */
     private function monthly(float $baseAverage, CarbonImmutable $forecastFrom): array
     {
-        $months = [];
-        for ($index = 0; $index < self::MONTHS; $index++) {
-            $month = $forecastFrom->startOfMonth()->addMonthsNoOverflow($index);
-            $months[] = new MonthlyDemand($month, $month->daysInMonth, $baseAverage * $month->daysInMonth);
+        return array_map(fn (array $month): MonthlyDemand => new MonthlyDemand($month[0], $month[1], $baseAverage * $month[1]), $this->forecastMonths($forecastFrom));
+    }
+
+    /**
+     * 予測の開始日の月から12か月の、月の初日と日数。SKUごとに同じ月を求め直すと遅いため、開始日ごとに覚えておく（予測精度の測定では起点ごとに数千回使う）。
+     *
+     * @return list<array{0: CarbonImmutable, 1: int}>
+     */
+    private function forecastMonths(CarbonImmutable $forecastFrom): array
+    {
+        $key = $forecastFrom->toDateString();
+        if (! isset($this->monthCache[$key])) {
+            $months = [];
+            for ($index = 0; $index < self::MONTHS; $index++) {
+                $month = $forecastFrom->startOfMonth()->addMonthsNoOverflow($index);
+                $months[] = [$month, $month->daysInMonth];
+            }
+            $this->monthCache[$key] = $months;
         }
 
-        return $months;
+        return $this->monthCache[$key];
     }
 }

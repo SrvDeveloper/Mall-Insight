@@ -685,3 +685,42 @@ export interface StockActualsResponse {
         dates: StockActualDate[];
     };
 }
+
+/** 予測精度の測定（B-130）で測る何か月先。 */
+export type BacktestHorizon = "month_1" | "months_3" | "check_month";
+
+/** 予測精度の測定で比べる方式。base_average は今の方式（基準平均日販）。 */
+export type BacktestMethod = "base_average" | "recent_30" | "last_year";
+
+/** 予測精度を測った記録。 */
+export interface ForecastBacktest {
+    id: number;
+    measured_at: string;
+    measured_by: string | null;
+    check_month_offset: number;
+    item_count: number;
+    sku_count: number;
+    duration_ms: number;
+    horizons: { horizon: BacktestHorizon; label: string; origin_from: string | null; origin_to: string | null; origin_count: number }[];
+}
+
+/** 方式ごとの当たり具合。販売実績の合計が0なら wape・bias は null。 */
+export interface BacktestMetrics {
+    evaluated: number;
+    skipped: number;
+    actual: number;
+    forecast: number;
+    abs_error: number;
+    wape: number | null;
+    bias: number | null;
+}
+
+/** 測った結果を何か月先とチャネルで絞って集計したもの。 */
+export interface ForecastBacktestSummaryResponse {
+    data: {
+        methods: (BacktestMetrics & { method: BacktestMethod; label: string })[];
+        items: { item_no: string; brand: string | null; category: string | null; methods: Record<BacktestMethod, BacktestMetrics> }[];
+        origins: { origin: string; methods: Record<BacktestMethod, BacktestMetrics> }[];
+    };
+    meta: { backtest: ForecastBacktest; horizon: BacktestHorizon; channel: "total" | "boss" | "amazon" };
+}
