@@ -19,8 +19,6 @@ import type { SalesEvent, SalesEventListResponse, SalesEventPeriodDetailResponse
  *   選んだイベントと期間は URL に持たせる。
  */
 
-type Filter = "active" | "all";
-
 const route = useRoute();
 const router = useRouter();
 
@@ -28,8 +26,6 @@ const result = shallowRef<SalesEventListResponse | null>(null);
 const isLoading = ref(false);
 const hasError = ref(false);
 const message = ref<string | null>(null);
-const filter = ref<Filter>("active");
-
 const queryId = (key: string): number | null => (typeof route.query[key] === "string" && /^\d+$/.test(route.query[key] as string) ? Number(route.query[key]) : null);
 const selectedEventId = computed(() => queryId("event"));
 const selectedPeriodId = computed(() => queryId("period"));
@@ -84,8 +80,6 @@ onMounted(() => {
 watch(selectedPeriodId, () => void loadPeriod());
 
 const events = computed(() => result.value?.data ?? []);
-const counts = computed<Record<Filter, number>>(() => ({ active: events.value.filter((event) => event.next_period !== null).length, all: events.value.length }));
-const visibleEvents = computed(() => (filter.value === "all" ? events.value : events.value.filter((event) => event.next_period !== null)));
 const selectedEvent = computed(() => events.value.find((event) => event.id === selectedEventId.value) ?? null);
 const maxDays = computed(() => result.value?.meta.max_days ?? 31);
 
@@ -162,9 +156,6 @@ async function onSaved(saved: SalesEventWithPeriods): Promise<void> {
     const isEdit = editing.value?.event !== null;
     message.value = isEdit ? `${saved.name}を保存しました。` : `${saved.name}を登録しました。${saved.periods.length === 0 ? "期間を追加してください。" : "需要予測と在庫予測に反映されます。"}`;
     closeForm();
-    if (saved.next_period === null) {
-        filter.value = "all";
-    }
     await load();
     if (!isEdit) {
         await router.replace({ query: { ...route.query, event: String(saved.id), period: undefined } });
@@ -234,23 +225,9 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
 
         <section class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
-                <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="絞り込み">
-                    <button
-                        v-for="option in [
-                            { value: 'active' as Filter, label: 'これからの期間あり' },
-                            { value: 'all' as Filter, label: 'すべて' },
-                        ]"
-                        :key="option.value"
-                        type="button"
-                        class="h-8 rounded-full border bg-white px-3 text-[13px]"
-                        :class="filter === option.value ? 'border-stone-900 font-semibold text-stone-900' : 'border-stone-200 text-stone-600 hover:border-stone-300'"
-                        :aria-pressed="filter === option.value"
-                        :data-testid="`filter-${option.value}`"
-                        @click="filter = option.value"
-                    >
-                        {{ option.label }} <span class="text-stone-500 tabular-nums">{{ result ? counts[option.value] : "" }}</span>
-                    </button>
-                </div>
+                <h2 class="text-[13px] font-semibold text-stone-900">
+                    登録済みのイベント <span class="ml-1 font-normal text-stone-500 tabular-nums">{{ result ? events.length : "" }}</span>
+                </h2>
                 <p class="text-[11px] text-stone-400">イベントを押すと、期間を下に出します</p>
             </div>
 
@@ -261,14 +238,9 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
 
             <div v-else-if="!result" class="px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
 
-            <div v-else-if="visibleEvents.length === 0" class="flex flex-col items-center gap-3 px-6 py-16 text-center text-sm text-stone-500" data-testid="empty">
-                <template v-if="events.length > 0">これからの期間があるイベントはありません。「すべて」で終わったイベントも見られます。</template>
-                <template v-else>
-                    イベントはまだありません。
-                    <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-[13px] font-semibold text-stone-700 hover:bg-stone-100" @click="openForm(null)">
-                        イベントを登録
-                    </button>
-                </template>
+            <div v-else-if="events.length === 0" class="flex flex-col items-center gap-3 px-6 py-16 text-center text-sm text-stone-500" data-testid="empty">
+                イベントはまだありません。
+                <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-[13px] font-semibold text-stone-700 hover:bg-stone-100" @click="openForm(null)">イベントを登録</button>
             </div>
 
             <div v-else class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">
@@ -285,7 +257,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                     </thead>
                     <tbody>
                         <tr
-                            v-for="event in visibleEvents"
+                            v-for="event in events"
                             :key="event.id"
                             class="cursor-pointer [&>*]:border-t [&>*]:border-stone-100"
                             :class="selectedEventId === event.id ? 'bg-stone-100' : 'hover:bg-stone-50'"
@@ -314,7 +286,9 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                             <td class="px-3 py-3 align-top whitespace-nowrap tabular-nums" data-testid="row-period">
                                 <template v-if="shownPeriod(event)">
                                     {{ periodLabel(shownPeriod(event)!.starts_on, shownPeriod(event)!.ends_on) }}
-                                    <span class="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="statusClass(shownPeriod(event)!)">{{ shownPeriod(event)!.status_label }}</span>
+                                    <span class="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="statusClass(shownPeriod(event)!)">{{
+                                        shownPeriod(event)!.status === "ended" ? "終了" : shownPeriod(event)!.status_label
+                                    }}</span>
                                 </template>
                                 <span v-else class="text-xs text-amber-700">期間がありません</span>
                             </td>

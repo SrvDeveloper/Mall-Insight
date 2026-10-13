@@ -151,21 +151,21 @@ describe("SalesEventView", () => {
         }
     });
 
-    it("lists events with the next period and its candidate, and switches to all events", async () => {
+    it("lists upcoming and ended events together with their period details", async () => {
         const { wrapper } = await mountView();
 
         expect(wrapper.find("h1").text()).toBe("イベント");
-        let rows = wrapper.findAll('[data-testid="event-row"]');
-        expect(rows).toHaveLength(1);
+        expect(wrapper.find('[aria-label="絞り込み"]').exists()).toBe(false);
+        const rows = wrapper.findAll('[data-testid="event-row"]');
+        expect(rows).toHaveLength(2);
         expect(rows[0]!.find('[data-testid="row-period"]').text()).toContain("2026/12/4〜12/7");
         expect(rows[0]!.find('[data-testid="row-multiplier"]').text()).toContain("4.67倍");
         expect(rows[0]!.find('[data-testid="row-counts"]').text()).toBe("3件（これから 1・終わった 2）");
 
-        await wrapper.find('[data-testid="filter-all"]').trigger("click");
-        rows = wrapper.findAll('[data-testid="event-row"]');
-        expect(rows).toHaveLength(2);
         // 次の期間が無いイベントは、最後の期間と実績の倍率を出す
         expect(rows[1]!.find('[data-testid="row-period"]').text()).toContain("2026/1/9〜1/16");
+        expect(rows[1]!.find('[data-testid="row-period"]').text()).toContain("終了");
+        expect(rows[1]!.find('[data-testid="row-period"]').text()).not.toContain("終わった");
         expect(rows[1]!.find('[data-testid="row-multiplier"]').text()).toContain("実績");
         wrapper.unmount();
     });
