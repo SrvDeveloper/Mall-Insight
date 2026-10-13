@@ -5,7 +5,8 @@ import type { BacktestHorizon, BacktestMethod, BacktestMetrics } from "@/types/a
  */
 
 export const METHODS: { value: BacktestMethod; label: string; short: string }[] = [
-    { value: "base_average", label: "今の方式（基準平均日販）", short: "今の方式" },
+    { value: "event_adjusted", label: "今の方式（イベントの補正あり）", short: "今の方式" },
+    { value: "base_average", label: "基準平均日販（補正なし）", short: "補正なし" },
     { value: "recent_30", label: "直近30日の平均", short: "直近30日" },
     { value: "last_year", label: "前年同月の実績", short: "前年同月" },
 ];
@@ -28,12 +29,21 @@ export const biasLabel = (bias: number | null): string => (bias === null ? "" : 
 
 export const formatCount = (value: number): string => count.format(Math.round(value));
 
+/**
+ * その記録で測った方式。イベントの補正（B-129）より前に測った記録には、今の方式（イベントの補正あり）が無い。
+ * 1件も比べていない方式は測っていないものとして外す（どれも比べていなければ、すべて出す）。
+ */
+export function measuredMethods(methods: { method: BacktestMethod; evaluated: number; skipped: number }[]): typeof METHODS {
+    const measured = METHODS.filter((method) => methods.some((item) => item.method === method.value && item.evaluated + item.skipped > 0));
+    return measured.length > 0 ? measured : METHODS;
+}
+
 /** WAPE がいちばん小さい方式（比べられるものが無ければ null）。同じなら並びの先（今の方式）を選ぶ。 */
-export function bestMethod(methods: Record<BacktestMethod, BacktestMetrics>): BacktestMethod | null {
+export function bestMethod(methods: Partial<Record<BacktestMethod, BacktestMetrics>>, candidates: typeof METHODS = METHODS): BacktestMethod | null {
     let best: BacktestMethod | null = null;
-    for (const method of METHODS) {
+    for (const method of candidates) {
         const wape = methods[method.value]?.wape ?? null;
-        if (wape !== null && (best === null || wape < (methods[best].wape ?? Infinity) - 1e-9)) {
+        if (wape !== null && (best === null || wape < (methods[best]?.wape ?? Infinity) - 1e-9)) {
             best = method.value;
         }
     }

@@ -43,6 +43,10 @@ class ForecastBacktestRecorder
                         'window_weights' => DemandForecaster::WINDOW_WEIGHTS,
                         'min_sales_days' => DemandForecaster::MIN_SALES_DAYS,
                         'recent_days' => ForecastBacktester::RECENT_DAYS,
+                        // イベントの補正（B-129、K-112）：倍率の候補の求め方と、測ったときに登録してあったイベント
+                        'event_recent_events' => EventUpliftEstimator::RECENT_EVENTS,
+                        'event_min_expected' => EventUpliftEstimator::MIN_EXPECTED,
+                        'events' => $result['events'],
                         'origins' => array_map(fn (array $origins): array => array_map(fn (CarbonImmutable $origin): string => $origin->toDateString(), $origins), $result['origins']),
                     ],
                     'item_count' => $result['item_count'],

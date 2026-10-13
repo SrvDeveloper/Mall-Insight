@@ -191,7 +191,9 @@ export interface AverageWindow {
     sales_days: number;
     /** 欠品していた日数。AmazonとBOSSの在庫の合計が0以下の日 */
     stockout_days: number;
-    /** 欠品日を除いた販売数 */
+    /** 平均日販から除いたイベントの日数（B-129、K-112）。欠品していたイベントの日は欠品日に数える */
+    event_days: number;
+    /** 欠品日とイベントの日を除いた販売数 */
     sales_quantity: number;
     average: number | null;
     base_weight: number;
@@ -199,11 +201,26 @@ export interface AverageWindow {
     is_excluded: boolean;
 }
 
+/** 1か月のうち、イベントの日に倍率で増やした需要（K-112）。増やした数＝基準平均日販×（倍率－1）×日数。 */
+export interface MonthlyEventDemand {
+    event_id: number;
+    name: string;
+    channel: "boss" | "amazon";
+    days: number;
+    multiplier: number;
+    /** システムの候補を使った（false なら担当者が入れた倍率） */
+    is_candidate: boolean;
+    quantity: number;
+}
+
 export interface MonthlyDemand {
     /** YYYY-MM */
     month: string;
     days: number;
+    /** 基準平均日販×日数に、イベントで増やした数を足したもの */
     quantity: number;
+    event_quantity: number;
+    events: MonthlyEventDemand[];
 }
 
 /** SKU1件・チャネル1つの需要予測（K-038）。予測不能のときは base_average・monthly が null で、理由を持つ。 */
@@ -251,6 +268,8 @@ export interface DemandForecastResponse {
         selection: { confirmed_at: string; item_count: number } | null;
         window_weights: { length: number; weight: number }[];
         min_sales_days: number;
+        /** 登録したイベント（平均日販から日を除き、これからの日に倍率を掛けたもの） */
+        events: { id: number; name: string; starts_on: string; ends_on: string; channels: ("boss" | "amazon")[]; status: SalesEventStatus }[];
     };
 }
 
@@ -689,8 +708,8 @@ export interface StockActualsResponse {
 /** 予測精度の測定（B-130）で測る何か月先。 */
 export type BacktestHorizon = "month_1" | "months_3" | "check_month";
 
-/** 予測精度の測定で比べる方式。base_average は今の方式（基準平均日販）。 */
-export type BacktestMethod = "base_average" | "recent_30" | "last_year";
+/** 予測精度の測定で比べる方式。event_adjusted が今の方式（イベントの補正あり）、base_average は補正を入れる前の基準平均日販。 */
+export type BacktestMethod = "event_adjusted" | "base_average" | "recent_30" | "last_year";
 
 /** 予測精度を測った記録。 */
 export interface ForecastBacktest {
@@ -723,4 +742,113 @@ export interface ForecastBacktestSummaryResponse {
         origins: { origin: string; methods: Record<BacktestMethod, BacktestMetrics> }[];
     };
     meta: { backtest: ForecastBacktest; horizon: BacktestHorizon; channel: "total" | "boss" | "amazon" };
+}
+
+/** イベント（B-129）の、今日から見た状態。 */
+export type SalesEventStatus = "upcoming" | "ongoing" | "ended";
+
+/** イベント（キャンペーン、B-129、K-112）。 */
+export interface SalesEvent {
+    id: number;
+    name: string;
+    starts_on: string;
+    ends_on: string;
+    days: number;
+    malls: { value: "rakuten" | "yahoo" | "au_pay" | "amazon"; label: string }[];
+    channels: ("boss" | "amazon")[];
+    note: string | null;
+    status: SalesEventStatus;
+    status_label: string;
+    created_by: string | null;
+    updated_by: string | null;
+    updated_at: string | null;
+}
+
+/** 一覧に添える、チャネルごとの倍率（品番の全体）。これからのイベントは候補、終わったイベントは普段の何倍売れたか。出せなければ null。 */
+export interface SalesEventChannelMultiplier {
+    channel: "boss" | "amazon";
+    label: string;
+    kind: "candidate" | "measured";
+    multiplier: number | null;
+    /** 候補を求めた過去のイベントの回数 */
+    basis_count: number;
+    /** 担当者が倍率を入れた品番の数 */
+    override_count: number;
+}
+
+export interface SalesEventListResponse {
+    data: (SalesEvent & { multipliers: SalesEventChannelMultiplier[] })[];
+    meta: SalesEventMeta;
+}
+
+export interface SalesEventMeta {
+    /** 候補に使う過去のイベントの回数（新しい方から） */
+    recent_events: number;
+    /** 品番の倍率を候補にするのに必要な、普段なら売れた数の合計 */
+    min_expected: number;
+    max_days: number;
+}
+
+/** これからのイベントの品番1つの倍率。usual は今日以降のイベントの日の普段の予測、extra は倍率で増やした数。 */
+export interface SalesEventCandidateItem {
+    item_no: string;
+    brand: string;
+    category: string;
+    candidate: number | null;
+    uses_overall: boolean;
+    past_expected: number | null;
+    past_actual: number | null;
+    override: number | null;
+    multiplier: number | null;
+    base_average: number | null;
+    usual: number | null;
+    extra: number | null;
+}
+
+/** 終わったイベントの品番1つの、普段なら売れた数と売れた数。 */
+export interface SalesEventMeasuredItem {
+    item_no: string;
+    brand: string;
+    category: string;
+    expected: number | null;
+    actual: number | null;
+    ratio: number | null;
+}
+
+export interface SalesEventBasis {
+    id: number;
+    name: string;
+    starts_on: string;
+    ends_on: string;
+    expected: number;
+    actual: number;
+    ratio: number | null;
+}
+
+export type SalesEventChannelDetail =
+    | { channel: "boss" | "amazon"; label: string; kind: "candidate"; overall: number | null; expected: number; actual: number; basis: SalesEventBasis[]; note: null; items: SalesEventCandidateItem[] }
+    | {
+          channel: "boss" | "amazon";
+          label: string;
+          kind: "measured";
+          overall: number | null;
+          expected: number | null;
+          actual: number | null;
+          basis: [];
+          note: string | null;
+          items: SalesEventMeasuredItem[];
+      };
+
+export interface SalesEventDetailResponse {
+    /** channels は、一覧のチャネルの値ではなく、チャネルごとの倍率 */
+    data: Omit<SalesEvent, "channels"> & { remaining_days: number; channels: SalesEventChannelDetail[] };
+    meta: SalesEventMeta;
+}
+
+export interface SalesEventPayload {
+    name: string;
+    starts_on: string;
+    ends_on: string;
+    malls: string[];
+    note: string | null;
 }

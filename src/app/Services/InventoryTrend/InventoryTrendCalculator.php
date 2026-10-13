@@ -9,6 +9,7 @@ use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Services\Forecast\DemandForecast;
 use App\Services\Forecast\DemandForecaster;
+use App\Services\Forecast\MonthlyDemand;
 use App\Services\Forecast\SkuForecast;
 use App\Services\Pricing\UnitPriceCatalog;
 use App\Services\SalesTarget\ItemTargetPlan;
@@ -51,8 +52,10 @@ class InventoryTrendCalculator
             return ['month' => $month, 'days' => $month->daysInMonth];
         }, range(0, self::MONTHS - 1));
 
+        // 今月は今日（予測の開始日）から月末までの日数分だけ数える
+        $remainingDays = $currentMonth->daysInMonth - $forecast->forecastFrom->day + 1;
         [$demands, $limits, $salesTargets] = $basis === DemandBasis::Forecast
-            ? [$this->forecastDemands($forecast, $scope->channel()), [], null]
+            ? [$this->forecastDemands($forecast, $scope->channel(), $remainingDays), [], null]
             : $this->targetDemands($forecast, $months, $now, $scope->channel());
 
         $skus = collect($forecast->items)->flatMap(fn (array $entry) => $entry['skus']);
@@ -61,8 +64,6 @@ class InventoryTrendCalculator
         $stocks = $stockDate === null ? [] : $this->stocks($skuIds, $stockDate);
         // 入荷予定は社内在庫に入るものとし、モールの推移には入れない（K-072）
         [$inbound, $provisional, $unassignable, $overdueCount] = $scope === TrendScope::Total ? $this->inbound($forecast->items, $demands, $limits, $currentMonth) : [[], [], [], 0];
-        // 今月は今日（予測の開始日）から月末までの日数分だけ数える
-        $remainingDays = $currentMonth->daysInMonth - $forecast->forecastFrom->day + 1;
 
         return new InventoryTrend(
             calculatedAt: $now,
@@ -95,25 +96,27 @@ class InventoryTrendCalculator
 
     /**
      * 需要予測の需要。全体はチャネルの合計（K-038）、モールはそのチャネルの予測。仮の割り振りの比率は、どの月も基準平均日販。
+     * 今月は、今日から月末までの需要（イベントで増やした分は今日以降の日の分なので按分しない、K-112）。
      *
      * @return array<int, SkuDemand>
      */
-    private function forecastDemands(DemandForecast $forecast, ?Channel $channel): array
+    private function forecastDemands(DemandForecast $forecast, ?Channel $channel, int $remainingDays): array
     {
         $demands = [];
         foreach ($forecast->items as $entry) {
             foreach ($entry['skus'] as $sku) {
                 if ($channel !== null) {
-                    $demands[$sku->sku->id] = $this->channelForecastDemand($sku, $channel);
+                    $demands[$sku->sku->id] = $this->channelForecastDemand($sku, $channel, $remainingDays);
 
                     continue;
                 }
                 $demands[$sku->sku->id] = $sku->monthly === null || $sku->baseAverage === null
                     ? new SkuDemand([], [], null)
                     : new SkuDemand(
-                        array_map(fn ($month): float => $month->quantity, $sku->monthly),
+                        array_map(fn (MonthlyDemand $month): float => $month->quantity, $sku->monthly),
                         array_fill(0, self::MONTHS, $sku->baseAverage),
                         $sku->baseAverage,
+                        currentMonthRemaining: $sku->monthly[0]->remainingQuantity($remainingDays),
                     );
             }
         }
@@ -125,7 +128,7 @@ class InventoryTrendCalculator
      * モールの需要予測の需要。そのモールで売っていない（子ASINの無いSKUのAmazon、K-042）、販売実績を取り込んでいない、
      * 予測できないときは、0にせず理由を持つ（原則2）。
      */
-    private function channelForecastDemand(SkuForecast $sku, Channel $channel): SkuDemand
+    private function channelForecastDemand(SkuForecast $sku, Channel $channel, int $remainingDays): SkuDemand
     {
         if (! DemandForecaster::sellsOn($sku->sku, $channel)) {
             return new SkuDemand([], [], null, "{$channel->label()}では販売していません", TrendStatus::NotSold);
@@ -138,7 +141,12 @@ class InventoryTrendCalculator
             return new SkuDemand([], [], null, "{$channel->label()}：{$channelForecast->unpredictableReason->label()}", TrendStatus::Unpredictable);
         }
 
-        return new SkuDemand(array_map(fn ($month): float => $month->quantity, $channelForecast->monthly), [], $channelForecast->baseAverage);
+        return new SkuDemand(
+            array_map(fn (MonthlyDemand $month): float => $month->quantity, $channelForecast->monthly),
+            [],
+            $channelForecast->baseAverage,
+            currentMonthRemaining: $channelForecast->monthly[0]->remainingQuantity($remainingDays),
+        );
     }
 
     /**
@@ -353,7 +361,7 @@ class InventoryTrendCalculator
         $level = (float) $scope->stockOf($stock);
         foreach ($demand->monthly as $index => $quantity) {
             $days = $months[$index]['days'];
-            [$days, $quantity] = $index === 0 ? [$remainingDays, $quantity * $remainingDays / $days] : [$days, $quantity];
+            [$days, $quantity] = $index === 0 ? [$remainingDays, $demand->currentMonthRemaining ?? $quantity * $remainingDays / $days] : [$days, $quantity];
             $arriving = ($inbound[$index] ?? 0) + ($provisional[$index] ?? 0);
             $ending = max(0.0, $level + $arriving - $quantity);
             $shortfall = max(0.0, $quantity - $level - $arriving);

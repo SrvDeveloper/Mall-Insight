@@ -28,13 +28,16 @@ use Illuminate\Support\Collection;
  * 欠品していた日（そのチャネルの在庫の区分の合計が0以下の日）は、販売数・日数の両方から外す（K-037・K-038）。
  * 販売できた日数が14日未満か、欠品日が期間の半分以上ある期間は除外して重みを割り戻し、
  * 3期間とも除外されたSKUと、使える期間に1点も売れていないSKUは予測不能とする。
+ *
+ * イベント（B-129、K-112）の日は、イベントのモールのチャネルで欠品日と同じく販売数・日数から外す（販売できた日数が減るだけで、欠品日の数には入れない）。
+ * 今日以降のイベントの日は、品番ごとの倍率で需要を増やす（基準平均日販×倍率）。倍率は EventUpliftEstimator で決める。
  */
 class DemandForecaster
 {
     /** @var array<string, list<array{0: CarbonImmutable, 1: int}>> 予測の開始日 => 12か月の月の初日と日数 */
     private array $monthCache = [];
 
-    public function __construct(private StockoutHistory $stockouts) {}
+    public function __construct(private StockoutHistory $stockouts, private EventUpliftEstimator $eventUplifts) {}
 
     /** 期間の日数 => 重み（合計1）。新しい期間から順に、重ならずに遡る。 */
     public const WINDOW_WEIGHTS = [30 => 0.5, 60 => 0.3, 90 => 0.2];
@@ -54,6 +57,8 @@ class DemandForecaster
         $items = $this->items(collect($itemNos ?? $selection?->items->pluck('item_no')->all() ?? []));
         $skuIds = $items->flatMap(fn (Item $item) => $item->skus)->pluck('id')->all();
         $channelRanges = $this->channelSalesRanges($forecastFrom);
+        $events = $this->eventUplifts->events();
+        $eventPlan = $this->eventUplifts->plan($this, $forecastFrom, $items, $channelRanges, $events);
 
         // チャネルごとに、期間・日別の販売数・欠品日を求める。SKUごとに日付の計算を繰り返すと遅いため、
         // 期間ごとの日付（Y-m-d）の一覧を先に1回だけ作って使い回す
@@ -81,10 +86,20 @@ class DemandForecaster
             items: $items->map(fn (Item $item): array => [
                 'item' => $item,
                 'skus' => $item->skus->map(fn (Sku $sku): SkuForecast => SkuForecast::combine($sku, array_map(
-                    fn (array $data): ChannelForecast => $this->forecastChannel($data['channel'], $data['ranges'], $data['window_dates'], $data['daily_sales'][$sku->id] ?? [], $data['stockout_dates'][$sku->id] ?? [], $forecastFrom),
+                    fn (array $data): ChannelForecast => $this->forecastChannel(
+                        $data['channel'],
+                        $data['ranges'],
+                        $data['window_dates'],
+                        $data['daily_sales'][$sku->id] ?? [],
+                        $data['stockout_dates'][$sku->id] ?? [],
+                        $forecastFrom,
+                        $eventPlan->excludedDatesOn($data['channel']->value),
+                        $eventPlan->upliftsFor($data['channel']->value, $item->item_no),
+                    ),
                     array_values(array_filter($channelData, fn (array $data): bool => self::sellsOn($sku, $data['channel']))),
                 )))->all(),
             ])->values()->all(),
+            events: $events,
         );
     }
 
@@ -182,6 +197,17 @@ class DemandForecaster
             return [];
         }
 
+        return $this->channelDailySales($skuIds, $channel, $from, $to);
+    }
+
+    /**
+     * SKUごと・日ごとの、そのチャネルの販売数量（$from〜$to）。イベントの倍率を測るとき（EventUpliftEstimator）にも使う。
+     *
+     * @param  list<int>  $skuIds
+     * @return array<int, array<string, int>> [SKU ID => [Y-m-d => 販売数量]]
+     */
+    public function channelDailySales(array $skuIds, Channel $channel, CarbonImmutable $from, CarbonImmutable $to): array
+    {
         // 行数が多いため、モデルにせず素の値で受け取る
         $sales = [];
         foreach (array_chunk($skuIds, 500) as $chunk) {
@@ -217,6 +243,17 @@ class DemandForecaster
             return [];
         }
 
+        return $this->channelStockoutDates($skuIds, $channel, $from, $to);
+    }
+
+    /**
+     * SKUごとの、そのチャネルの欠品日（$from〜$to、K-037・K-038）。
+     *
+     * @param  list<int>  $skuIds
+     * @return array<int, array<string, true>> [SKU ID => [Y-m-d => true]]
+     */
+    public function channelStockoutDates(array $skuIds, Channel $channel, CarbonImmutable $from, CarbonImmutable $to): array
+    {
         $stockouts = [];
         foreach ($this->stockouts->dailyStates($skuIds, $from, $to, $channel) as $skuId => $states) {
             foreach ($states as $date => $isOutOfStock) {
@@ -283,16 +320,18 @@ class DemandForecaster
     }
 
     /**
-     * windowPlan() の期間と、与えた販売数・欠品日から、ある日時点のチャネルの予測を出す。計算は forecast() と同じ
-     * （欠品日の除き方・期間を使うかの判定・予測不能の判定）。
+     * windowPlan() の期間と、与えた販売数・欠品日・イベントから、ある日時点のチャネルの予測を出す。計算は forecast() と同じ
+     * （欠品日・イベントの日の除き方・期間を使うかの判定・予測不能の判定・イベントの倍率の掛け方）。
      *
      * @param  array{ranges: array<int, array{from: ?CarbonImmutable, to: ?CarbonImmutable, days: int, offset: int}>, window_dates: array<int, list<string>>}  $plan
      * @param  array<string, int>  $dailySales  [Y-m-d => 販売数量]
      * @param  array<string, true>  $stockoutDates  [Y-m-d => true]
+     * @param  array<string, true>  $eventDates  平均日販から除くイベントの日 [Y-m-d => true]
+     * @param  list<EventUplift>  $uplifts  倍率を掛けるこれからのイベント
      */
-    public function forecastChannelWith(Channel $channel, array $plan, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom): ChannelForecast
+    public function forecastChannelWith(Channel $channel, array $plan, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = []): ChannelForecast
     {
-        return $this->forecastChannel($channel, $plan['ranges'], $plan['window_dates'], $dailySales, $stockoutDates, $forecastFrom);
+        return $this->forecastChannel($channel, $plan['ranges'], $plan['window_dates'], $dailySales, $stockoutDates, $forecastFrom, $eventDates, $uplifts);
     }
 
     /**
@@ -300,25 +339,33 @@ class DemandForecaster
      * @param  array<int, list<string>>  $windowDates  [期間の日数 => 期間の日付（Y-m-d）]
      * @param  array<string, int>  $dailySales  [Y-m-d => 販売数量]
      * @param  array<string, true>  $stockoutDates  [Y-m-d => true]
+     * @param  array<string, true>  $eventDates  [Y-m-d => true]
+     * @param  list<EventUplift>  $uplifts
      */
-    private function forecastChannel(Channel $channel, array $ranges, array $windowDates, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom): ChannelForecast
+    private function forecastChannel(Channel $channel, array $ranges, array $windowDates, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = []): ChannelForecast
     {
-        // 期間ごとに、欠品日を除いた販売数と販売できた日数を数える
+        // 期間ごとに、欠品日とイベントの日を除いた販売数と販売できた日数を数える。欠品していたイベントの日は欠品日として数える
         $counts = [];
         foreach ($ranges as $length => $range) {
             $quantity = 0;
             $stockoutDays = 0;
+            $eventDays = 0;
             foreach ($windowDates[$length] as $date) {
                 if (isset($stockoutDates[$date])) {
                     $stockoutDays++;
 
                     continue;
                 }
+                if (isset($eventDates[$date])) {
+                    $eventDays++;
+
+                    continue;
+                }
                 $quantity += $dailySales[$date] ?? 0;
             }
-            $salesDays = $range['days'] - $stockoutDays;
+            $salesDays = $range['days'] - $stockoutDays - $eventDays;
             $isUsable = $salesDays >= self::MIN_SALES_DAYS && $stockoutDays * 2 < $range['days'];
-            $counts[$length] = ['quantity' => $quantity, 'stockout_days' => $stockoutDays, 'sales_days' => $salesDays, 'usable' => $isUsable];
+            $counts[$length] = ['quantity' => $quantity, 'stockout_days' => $stockoutDays, 'event_days' => $eventDays, 'sales_days' => $salesDays, 'usable' => $isUsable];
         }
 
         $usableWeight = array_sum(array_map(fn (int $length): float => $counts[$length]['usable'] ? self::WINDOW_WEIGHTS[$length] : 0.0, array_keys(self::WINDOW_WEIGHTS)));
@@ -333,7 +380,7 @@ class DemandForecaster
             if ($average !== null) {
                 $baseAverage = ($baseAverage ?? 0.0) + $average * $weight;
             }
-            $windows[] = new AverageWindow($length, $range['offset'], $range['from'], $range['to'], $count['sales_days'], $count['stockout_days'], $count['quantity'], $average, $baseWeight, $weight);
+            $windows[] = new AverageWindow($length, $range['offset'], $range['from'], $range['to'], $count['sales_days'], $count['stockout_days'], $count['quantity'], $average, $baseWeight, $weight, $count['event_days']);
         }
 
         if ($baseAverage === null) {
@@ -346,17 +393,47 @@ class DemandForecaster
             return new ChannelForecast($channel, $windows, null, null, UnpredictableReason::NoSales);
         }
 
-        return new ChannelForecast($channel, $windows, $baseAverage, $this->monthly($baseAverage, $forecastFrom));
+        return new ChannelForecast($channel, $windows, $baseAverage, $this->monthly($channel, $baseAverage, $forecastFrom, $uplifts));
     }
 
     /**
      * 予測の開始日の月から12か月分。初月（今月）も、ほかの月と同じく1か月すべての日数分とする（K-052）。
+     * 今日以降のイベントの日は、基準平均日販×（倍率－1）を足す。同じ日に重なるイベントは、倍率の大きい方だけを数える（K-112）。
      *
+     * @param  list<EventUplift>  $uplifts
      * @return list<MonthlyDemand>
      */
-    private function monthly(float $baseAverage, CarbonImmutable $forecastFrom): array
+    private function monthly(Channel $channel, float $baseAverage, CarbonImmutable $forecastFrom, array $uplifts = []): array
     {
-        return array_map(fn (array $month): MonthlyDemand => new MonthlyDemand($month[0], $month[1], $baseAverage * $month[1]), $this->forecastMonths($forecastFrom));
+        // 日ごとに、いちばん大きい倍率のイベント（$uplifts の位置）を決め、月ごとにイベントの日数を数える
+        $from = $forecastFrom->toDateString();
+        $byDate = [];
+        foreach ($uplifts as $index => $uplift) {
+            if ($uplift->multiplier === null) {
+                continue;
+            }
+            foreach ($uplift->dates as $date) {
+                if ($date >= $from && (! isset($byDate[$date]) || $uplift->multiplier > $uplifts[$byDate[$date]]->multiplier)) {
+                    $byDate[$date] = $index;
+                }
+            }
+        }
+        $eventDays = [];
+        foreach ($byDate as $date => $index) {
+            $month = substr($date, 0, 7);
+            $eventDays[$month][$index] = ($eventDays[$month][$index] ?? 0) + 1;
+        }
+
+        return array_map(function (array $month) use ($channel, $baseAverage, $uplifts, $eventDays): MonthlyDemand {
+            $events = [];
+            foreach ($eventDays[$month[0]->format('Y-m')] ?? [] as $index => $days) {
+                $uplift = $uplifts[$index];
+                $events[] = new MonthlyEventDemand($uplift->event->id, $uplift->event->name, $channel, $days, $uplift->multiplier, $uplift->isCandidate, $baseAverage * ($uplift->multiplier - 1) * $days);
+            }
+            $extra = array_sum(array_map(fn (MonthlyEventDemand $event): float => $event->quantity, $events));
+
+            return new MonthlyDemand($month[0], $month[1], $baseAverage * $month[1] + $extra, $events);
+        }, $this->forecastMonths($forecastFrom));
     }
 
     /**

@@ -3,13 +3,14 @@ import { computed, onMounted, ref, shallowRef, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { ApiError } from "@/api/client";
 import { fetchForecastBacktest, fetchForecastBacktests, runForecastBacktest } from "@/api/forecastBacktests";
-import { METHODS, bestMethod, biasLabel, evaluatedMonths, formatBias, formatCount, formatWape, originLabel } from "@/components/forecastAccuracy/accuracyFormat";
+import { bestMethod, biasLabel, evaluatedMonths, formatBias, formatCount, formatWape, measuredMethods, originLabel } from "@/components/forecastAccuracy/accuracyFormat";
 import { formatDateTime } from "@/components/salesTarget/format";
 import type { BacktestHorizon, ForecastBacktest, ForecastBacktestSummaryResponse } from "@/types/api";
 
 /**
  * 予測精度（バックログ B-130、決定記録 K-111）。左メニュー「在庫試算」の需要予測の下に置く。過去の月初に戻って、その前日までの販売実績だけで予測し直し、
- * その後の販売実績と比べた当たり具合（WAPE・偏り）を、今の方式と比べるための単純な方式（直近30日の平均・前年同月の実績）で並べて見る。
+ * その後の販売実績と比べた当たり具合（WAPE・偏り）を、今の方式（イベントの補正あり、B-129）、補正を入れる前の方式と、
+ * 比べるための単純な方式（直近30日の平均・前年同月の実績）で並べて見る。イベントの補正より前に測った記録では、測っていない今の方式を出さない。
  * 何か月先（1か月目・1～3か月目の合計・判定する月）とチャネル（全体・BOSS・Amazon）を切り替え、方式ごと・品番ごと・起点ごとに見られる。
  * 「測り直す」で今の販売実績で測り直し、結果は測った日時とともに残す（最新20件）。前に測った結果も選んで見られ、予測の方式を変えた前後で比べられる。
  * 選んだ記録・何か月先・チャネルは URL に持たせる。
@@ -124,7 +125,10 @@ const originNote = computed(() => {
     return `起点 ${originLabel(item.origin_from)}〜${originLabel(item.origin_to)} の${item.origin_count}か月。各起点（月の1日）の前日までの販売実績だけで予測し、その後の販売実績と比べました。`;
 });
 
-const methodCards = computed(() => result.value?.data.methods ?? []);
+const methods = computed(() => measuredMethods(result.value?.data.methods ?? []));
+/** その記録の今の方式（イベントの補正より前に測った記録では、補正なしの基準平均日販）。 */
+const currentMethod = computed(() => methods.value[0]?.value ?? "event_adjusted");
+const methodCards = computed(() => (result.value?.data.methods ?? []).filter((card) => methods.value.some((method) => method.value === card.method)));
 const items = computed(() => result.value?.data.items ?? []);
 const origins = computed(() => result.value?.data.origins ?? []);
 </script>
@@ -136,7 +140,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                 <p class="text-xs text-stone-500">在庫試算 / 予測精度</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">予測精度</h1>
                 <p class="max-w-3xl text-[13px] text-stone-600" data-testid="description">
-                    需要予測が過去にどれだけ当たったかを測ります。過去の月初に戻ってその前日までの販売実績だけで予測し直し、その後の販売実績と比べます。今の方式のほかに、目安として単純な方式（直近30日の平均・前年同月の実績）も測ります。
+                    需要予測が過去にどれだけ当たったかを測ります。過去の月初に戻ってその前日までの販売実績だけで予測し直し、その後の販売実績と比べます。今の方式（イベントの補正あり）のほかに、補正を入れる前の方式と、目安として単純な方式（直近30日の平均・前年同月の実績）も測ります。
                 </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
@@ -227,12 +231,12 @@ const origins = computed(() => result.value?.data.origins ?? []);
                 </p>
 
                 <div v-if="!result" class="px-6 py-12 text-center text-sm text-stone-500">読み込み中…</div>
-                <div v-else class="grid gap-3 p-4 transition-opacity md:grid-cols-3" :class="isLoading ? 'opacity-50' : ''">
+                <div v-else class="grid gap-3 p-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4" :class="isLoading ? 'opacity-50' : ''">
                     <div
                         v-for="card in methodCards"
                         :key="card.method"
                         class="flex flex-col gap-1.5 rounded-lg border px-4 py-3.5"
-                        :class="card.method === 'base_average' ? 'border-stone-900 shadow-[inset_0_0_0_1px_var(--color-stone-900)]' : 'border-stone-200'"
+                        :class="card.method === currentMethod ? 'border-stone-900 shadow-[inset_0_0_0_1px_var(--color-stone-900)]' : 'border-stone-200'"
                         :data-testid="`method-${card.method}`"
                     >
                         <span class="text-xs font-medium text-stone-600">{{ card.label }}</span>
@@ -250,7 +254,8 @@ const origins = computed(() => result.value?.data.origins ?? []);
                         販売実績の合計。小さいほど当たっています。偏りは、予測の合計が販売実績の合計より多い（＋）か少ない（−）かです。
                     </p>
                     <p>
-                        3つの方式すべてで予測でき、答え合わせの販売実績を取り込んでいるSKUだけを比べています。販売実績は欠品で売れなかった分を補正していません（在庫の記録が2026年9月16日からのため）。
+                        すべての方式で予測でき、答え合わせの販売実績を取り込んでいるSKUだけを比べています。販売実績は欠品で売れなかった分を補正していません（在庫の記録が2026年9月16日からのため）。
+                        イベントの補正は、登録したイベントの日を平均日販から除き、起点より後のイベントの日に、起点より前に終わった同じ名前のイベントから求めた倍率の候補を掛けています（担当者が入れた倍率は使いません）。
                     </p>
                 </div>
             </section>
@@ -263,7 +268,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                             <tr>
                                 <th scope="col" class="text-left">品番</th>
                                 <th scope="col" class="text-right">販売実績</th>
-                                <th v-for="method in METHODS" :key="method.value" scope="col" class="text-right">{{ method.short }}</th>
+                                <th v-for="method in methods" :key="method.value" scope="col" class="text-right">{{ method.short }}</th>
                                 <th scope="col" class="text-right">偏り（今の方式）</th>
                             </tr>
                         </thead>
@@ -275,19 +280,19 @@ const origins = computed(() => result.value?.data.origins ?? []);
                                         <span v-if="row.brand" class="truncate rounded-full border border-stone-200 px-2 py-px text-[11px] text-stone-600">{{ row.brand }}・{{ row.category }}</span>
                                     </span>
                                 </th>
-                                <td class="text-right text-stone-700 tabular-nums">{{ formatCount(row.methods.base_average.actual) }}</td>
+                                <td class="text-right text-stone-700 tabular-nums">{{ formatCount(row.methods[currentMethod].actual) }}</td>
                                 <td
-                                    v-for="method in METHODS"
+                                    v-for="method in methods"
                                     :key="method.value"
                                     class="text-right tabular-nums"
-                                    :class="bestMethod(row.methods) === method.value ? 'font-semibold text-stone-900' : 'text-stone-600'"
+                                    :class="bestMethod(row.methods, methods) === method.value ? 'font-semibold text-stone-900' : 'text-stone-600'"
                                     :title="row.methods[method.value].wape === null ? '販売実績が0のため、外れ率を出せません' : undefined"
-                                    :data-best="bestMethod(row.methods) === method.value || undefined"
+                                    :data-best="bestMethod(row.methods, methods) === method.value || undefined"
                                     data-testid="item-wape"
                                 >
                                     {{ formatWape(row.methods[method.value].wape) }}
                                 </td>
-                                <td class="text-right text-stone-600 tabular-nums">{{ formatBias(row.methods.base_average.bias) }}</td>
+                                <td class="text-right text-stone-600 tabular-nums">{{ formatBias(row.methods[currentMethod].bias) }}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -304,19 +309,19 @@ const origins = computed(() => result.value?.data.origins ?? []);
                                 <th scope="col" class="text-left">起点</th>
                                 <th scope="col" class="text-left">答え合わせした月</th>
                                 <th scope="col" class="text-right">販売実績</th>
-                                <th v-for="method in METHODS" :key="method.value" scope="col" class="text-right">{{ method.short }}</th>
+                                <th v-for="method in methods" :key="method.value" scope="col" class="text-right">{{ method.short }}</th>
                             </tr>
                         </thead>
                         <tbody class="[&_td]:border-b [&_td]:border-stone-100 [&_td]:px-4 [&_td]:py-2">
                             <tr v-for="row in origins" :key="row.origin" data-testid="origin-row">
                                 <td class="text-stone-900 tabular-nums">{{ originLabel(row.origin) }}</td>
                                 <td class="text-stone-600 tabular-nums">{{ evaluatedMonths(row.origin, horizon, checkMonthOffset) }}</td>
-                                <td class="text-right text-stone-700 tabular-nums">{{ formatCount(row.methods.base_average.actual) }}</td>
+                                <td class="text-right text-stone-700 tabular-nums">{{ formatCount(row.methods[currentMethod].actual) }}</td>
                                 <td
-                                    v-for="method in METHODS"
+                                    v-for="method in methods"
                                     :key="method.value"
                                     class="text-right tabular-nums"
-                                    :class="bestMethod(row.methods) === method.value ? 'font-semibold text-stone-900' : 'text-stone-600'"
+                                    :class="bestMethod(row.methods, methods) === method.value ? 'font-semibold text-stone-900' : 'text-stone-600'"
                                 >
                                     {{ formatWape(row.methods[method.value].wape) }}
                                 </td>

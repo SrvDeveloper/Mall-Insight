@@ -31,7 +31,12 @@ final readonly class SkuForecast
         }
 
         $monthly = array_map(
-            fn (MonthlyDemand $month, int $index): MonthlyDemand => new MonthlyDemand($month->month, $month->days, array_sum(array_map(fn (ChannelForecast $channel): float => $channel->monthly[$index]->quantity, $predictable))),
+            fn (MonthlyDemand $month, int $index): MonthlyDemand => new MonthlyDemand(
+                $month->month,
+                $month->days,
+                array_sum(array_map(fn (ChannelForecast $channel): float => $channel->monthly[$index]->quantity, $predictable)),
+                array_merge(...array_map(fn (ChannelForecast $channel): array => $channel->monthly[$index]->events, $predictable)),
+            ),
             $predictable[0]->monthly,
             array_keys($predictable[0]->monthly),
         );

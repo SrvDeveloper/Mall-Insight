@@ -5,6 +5,7 @@ namespace Tests\Feature\Http\Controllers\Api\V1;
 use App\Models\ForecastBacktest;
 use App\Models\Item;
 use App\Models\ItemSelection;
+use App\Models\SalesEvent;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Models\User;
@@ -78,7 +79,7 @@ class ForecastBacktestControllerTest extends TestCase
 
         // 毎日1個の品番は、どの方式でも当たる
         $items = collect($response->json('data.items'))->keyBy('item_no');
-        foreach (['base_average', 'recent_30', 'last_year'] as $method) {
+        foreach (['event_adjusted', 'base_average', 'recent_30', 'last_year'] as $method) {
             $this->assertSame(0.0, (float) $items['fl-01']['methods'][$method]['wape']);
             $this->assertSame(12, $items['fl-01']['methods'][$method]['evaluated']);
         }
@@ -96,7 +97,10 @@ class ForecastBacktestControllerTest extends TestCase
 
         // 全体：販売実績は毎日1個の品番の 365個。WAPE は差の絶対値の合計 ÷ 販売実績
         $methods = collect($response->json('data.methods'))->keyBy('method');
-        $this->assertSame('今の方式（基準平均日販）', $methods['base_average']['label']);
+        $this->assertSame('今の方式（イベントの補正あり）', $methods['event_adjusted']['label']);
+        $this->assertSame('基準平均日販（補正なし）', $methods['base_average']['label']);
+        // イベントを登録していなければ、今の方式は補正なしと同じ
+        $this->assertEqualsWithDelta($methods['base_average']['forecast'], $methods['event_adjusted']['forecast'], 0.001);
         $this->assertEqualsWithDelta(365.0, $methods['base_average']['actual'], 0.001);
         $this->assertEqualsWithDelta(309.36 / 365, $methods['base_average']['wape'], 0.0001);
         $this->assertEqualsWithDelta(309.36 / 365, $methods['base_average']['bias'], 0.0001);
@@ -115,6 +119,28 @@ class ForecastBacktestControllerTest extends TestCase
         $this->getJson("/api/v1/forecast-backtests/{$id}?horizon=month_9")->assertUnprocessable()->assertJsonValidationErrors('horizon');
 
         $this->getJson('/api/v1/forecast-backtests')->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $id);
+    }
+
+    public function test_the_current_method_leaves_out_event_days_and_multiplies_them_by_the_candidate_known_at_each_origin(): void
+    {
+        // 普段は毎日1個、楽天スーパーセール（3・6・9・12月の4〜7日）は毎日5個売れる
+        $sku = Sku::factory()->create(['item_id' => Item::query()->where('item_no', 'fl-01')->value('id'), 'sku_code' => 'fl-01-1-10', 'child_asin' => null]);
+        $isSale = fn (CarbonImmutable $day): bool => in_array($day->month, [3, 6, 9, 12], true) && $day->day >= 4 && $day->day <= 7;
+        $this->sellDaily($sku, '2024-07-01', '2026-10-06', fn (CarbonImmutable $day): int => $isSale($day) ? 5 : 1);
+        foreach (['2024-09', '2024-12', '2025-03', '2025-06', '2025-09', '2025-12', '2026-03', '2026-06', '2026-09'] as $month) {
+            SalesEvent::factory()->period("{$month}-04", "{$month}-07")->create();
+        }
+
+        $id = $this->postJson('/api/v1/forecast-backtests')->assertCreated()->json('data.id');
+        $this->assertEquals(['event_recent_events' => 3, 'event_min_expected' => 10], array_intersect_key(ForecastBacktest::query()->find($id)->settings, array_flip(['event_recent_events', 'event_min_expected'])));
+        $this->assertCount(9, ForecastBacktest::query()->find($id)->settings['events']);
+
+        $methods = collect($this->getJson("/api/v1/forecast-backtests/{$id}")->json('data.methods'))->keyBy('method');
+        // セールの日を除いた平均日販は1個、セールは過去のセールから5倍と分かるため、どの月も当たる
+        $this->assertSame(0.0, (float) $methods['event_adjusted']['wape']);
+        // 補正しないと、セールの月は少なめ、セールの後の月は多めに外れる
+        $this->assertGreaterThan(0.05, $methods['base_average']['wape']);
+        $this->assertSame($methods['base_average']['evaluated'], $methods['event_adjusted']['evaluated']);
     }
 
     public function test_keeps_the_latest_twenty_measurements(): void

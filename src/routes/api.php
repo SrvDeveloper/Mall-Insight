@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\ItemSelectionController;
 use App\Http\Controllers\Api\V1\ItemUnitPriceController;
 use App\Http\Controllers\Api\V1\MonthlySalesRatioController;
 use App\Http\Controllers\Api\V1\RatioCategoryController;
+use App\Http\Controllers\Api\V1\SalesEventController;
 use App\Http\Controllers\Api\V1\SalesImportController;
 use App\Http\Controllers\Api\V1\SalesTargetCarryOverController;
 use App\Http\Controllers\Api\V1\SalesTargetController;
@@ -37,6 +38,8 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/item-selections/current', [ItemSelectionController::class, 'current'])->name('item-selections.current');
         Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
         Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
+        Route::apiResource('sales-events', SalesEventController::class)->parameters(['sales-events' => 'salesEvent']);
+        Route::put('/sales-events/{salesEvent}/multipliers', [SalesEventController::class, 'updateMultipliers'])->name('sales-events.multipliers.update');
         Route::get('/forecast-backtests', [ForecastBacktestController::class, 'index'])->name('forecast-backtests.index');
         Route::get('/forecast-backtests/{forecastBacktest}', [ForecastBacktestController::class, 'show'])->name('forecast-backtests.show');
         Route::post('/forecast-backtests', [ForecastBacktestController::class, 'store'])->name('forecast-backtests.store');

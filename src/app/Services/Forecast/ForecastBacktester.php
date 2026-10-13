@@ -6,10 +6,12 @@ use App\Enums\Channel;
 use App\Enums\Warehouse;
 use App\Models\Item;
 use App\Models\ItemSelection;
+use App\Models\SalesEvent;
 use App\Models\SalesLine;
 use App\Services\Actuals\StockoutHistory;
 use App\Services\InventoryTrend\TrendSettings;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 
 /**
  * 需要予測の当たり具合を、過去に戻って予測をやり直して測る（バックテスト、バックログ B-130・決定記録 K-111）。
@@ -17,9 +19,12 @@ use Carbon\CarbonImmutable;
  * - 起点は月の1日。起点の前日までに分かっていた販売実績・在庫だけで予測し、その後の販売実績と比べる。起点より後のデータは使わない。
  * - 何か月先を測るか（BacktestHorizon）：1か月目（起点の月）、1～3か月目の合計、判定する月（在庫推移の設定、初期値は6か月後）。
  *   それぞれ、販売実績がそろった最新の月までで答え合わせできる、新しい方から12の起点を使う。
- * - 方式（BacktestMethod）：今の方式（基準平均日販、B-006）と、比べるための単純な方式（直近30日の平均・前年同月の実績）。
+ * - 方式（BacktestMethod）：今の方式（イベントの補正あり、B-129・K-112）、補正を入れる前の基準平均日販（B-006）と、
+ *   比べるための単純な方式（直近30日の平均・前年同月の実績）。
+ *   イベントの補正は、登録したイベントの日を平均日販から除き、起点以降のイベントの日に、起点より前に終わった同じ名前のイベントから求めた倍率の候補を掛ける。
+ *   担当者が入れた倍率は、後から分かったことで決めた値のため使わない。
  * - 対象は対象品番（最新の選定）の有効なSKU。チャネル（BOSS・Amazon）ごとに予測と販売実績を比べ、子ASINの無いSKUは Amazon で比べない（K-042）。
- * - 3つの方式すべてで予測でき、答え合わせの期間の販売実績を取り込んでいるSKU・チャネル・起点だけを比べる（方式どうしを同じ条件で比べるため）。
+ * - すべての方式で予測でき、答え合わせの期間の販売実績を取り込んでいるSKU・チャネル・起点だけを比べる（方式どうしを同じ条件で比べるため）。
  *   比べられなかったものは件数だけ数える。
  * - 答え合わせは取り込んだ販売実績そのもので行う。在庫の履歴が短いため、欠品していた月の販売実績も補正しない。
  * - 結果は品番・方式・何か月先・チャネル・起点ごとに、販売実績・予測・誤差の絶対値の合計と件数で返す。WAPE などは集計するときに求める。
@@ -32,10 +37,10 @@ class ForecastBacktester
     /** 直近30日の平均（比べるための方式）の日数。 */
     public const RECENT_DAYS = 30;
 
-    public function __construct(private DemandForecaster $forecaster, private StockoutHistory $stockouts) {}
+    public function __construct(private DemandForecaster $forecaster, private StockoutHistory $stockouts, private EventUpliftEstimator $eventUplifts) {}
 
     /**
-     * @return array{measured_at: CarbonImmutable, check_month_offset: int, origins: array<string, list<CarbonImmutable>>, item_count: int, sku_count: int, rows: list<array{horizon: string, method: string, item_no: string, channel: string, origin: string, evaluated: int, skipped: int, actual: float, forecast: float, abs_error: float}>}
+     * @return array{measured_at: CarbonImmutable, check_month_offset: int, origins: array<string, list<CarbonImmutable>>, item_count: int, sku_count: int, events: list<array<string, mixed>>, rows: list<array{horizon: string, method: string, item_no: string, channel: string, origin: string, evaluated: int, skipped: int, actual: float, forecast: float, abs_error: float}>}
      */
     public function run(CarbonImmutable $now): array
     {
@@ -72,6 +77,13 @@ class ForecastBacktester
             'origins' => $origins,
             'item_count' => $items->count(),
             'sku_count' => $skus->count(),
+            'events' => $this->eventUplifts->events()->map(fn (SalesEvent $event): array => [
+                'id' => $event->id,
+                'name' => $event->name,
+                'starts_on' => $event->starts_on->toDateString(),
+                'ends_on' => $event->ends_on->toDateString(),
+                'malls' => $event->malls->map(fn ($mall): string => $mall->value)->all(),
+            ])->all(),
             'rows' => $rows,
         ];
     }
@@ -97,9 +109,16 @@ class ForecastBacktester
             }
         }
 
+        // イベント：平均日販から除く日と、終わったイベントごとの倍率（起点ごとの候補は、起点より前に終わったものから求める）
+        $events = $this->eventUplifts->events();
+        $excludedDates = $this->eventUplifts->excludedDates($events);
+        $today = $lastMonthEnd->addDay();
+        $measurements = $this->eventUplifts->measure($this->forecaster, $excludedDates, $events->filter(fn ($event): bool => $event->hasEndedBefore($today)), collect($items), $channelRanges);
+
         $sums = [];
         foreach ($channelRanges as $range) {
             $channel = $range['channel'];
+            $channelExcluded = $excludedDates[$channel->value] ?? [];
             $daily = $this->dailySales($skuIds, $channel, $loadFrom, $lastMonthEnd);
             $stockoutDates = [];
             foreach ($this->stockouts->dailyStates($skuIds, $loadFrom, $lastOrigin->subDay(), $channel) as $skuId => $states) {
@@ -113,7 +132,10 @@ class ForecastBacktester
             // 起点ごとの期間・日付は SKU によらないため、先に求めて使い回す
             $contexts = [];
             foreach ($allOrigins as $origin) {
-                $contexts[] = $this->context($range, $origin, $origins, $checkMonthOffset);
+                $contexts[] = [
+                    ...$this->context($range, $origin, $origins, $checkMonthOffset),
+                    'uplifts' => $this->uplifts($channel, $origin, $events, $measurements, $items),
+                ];
             }
 
             foreach ($items as $item) {
@@ -127,7 +149,7 @@ class ForecastBacktester
                         if ($context['horizons'] === []) {
                             continue;
                         }
-                        $predictions = $this->predict($channel, $context, $sales, $monthly, $stockoutDates[$sku->id] ?? []);
+                        $predictions = $this->predict($channel, $context, $sales, $monthly, $stockoutDates[$sku->id] ?? [], $channelExcluded, $context['uplifts'][$item->item_no] ?? []);
                         foreach ($context['horizons'] as $horizon => $spec) {
                             $actual = $spec['actual_months'] === null ? null : (float) array_sum(array_map(fn (string $month): int => $monthly[$month] ?? 0, $spec['actual_months']));
                             $forecasts = [];
@@ -223,15 +245,22 @@ class ForecastBacktester
      * @param  array<string, int>  $sales  [Y-m-d => 販売数量]
      * @param  array<string, int>  $monthly  [Y-m => 販売数量]
      * @param  array<string, true>  $stockoutDates
+     * @param  array<string, true>  $eventDates  平均日販から除くイベントの日
+     * @param  list<EventUplift>  $uplifts  起点以降のイベントの倍率（その品番の分）
      * @return array<string, list<float|null>> 方式 => 月の位置（起点の月が0） => 予測
      */
-    private function predict(Channel $channel, array $context, array $sales, array $monthly, array $stockoutDates): array
+    private function predict(Channel $channel, array $context, array $sales, array $monthly, array $stockoutDates, array $eventDates, array $uplifts): array
     {
         $none = array_fill(0, count($context['month_days']), null);
 
-        // 今の方式（基準平均日販）
+        // 今の方式（イベントの補正あり）と、補正を入れる前の基準平均日販
+        $eventMonthly = $none;
         $baseMonthly = $none;
         if ($context['plan'] !== null) {
+            $adjusted = $this->forecaster->forecastChannelWith($channel, $context['plan'], $sales, $stockoutDates, $context['origin'], $eventDates, $uplifts);
+            if ($adjusted->isPredictable()) {
+                $eventMonthly = array_map(fn (int $index): float => $adjusted->monthly[$index]->quantity, array_keys($context['month_days']));
+            }
             $base = $this->forecaster->forecastChannelWith($channel, $context['plan'], $sales, $stockoutDates, $context['origin']);
             if ($base->isPredictable()) {
                 $baseMonthly = array_map(fn (int $days): float => $base->baseAverage * $days, $context['month_days']);
@@ -252,10 +281,36 @@ class ForecastBacktester
         $lastYearMonthly = array_map(fn (?string $month): ?float => $month === null ? null : (float) ($monthly[$month] ?? 0), $context['last_year_months']);
 
         return [
+            BacktestMethod::EventAdjusted->value => $eventMonthly,
             BacktestMethod::BaseAverage->value => $baseMonthly,
             BacktestMethod::RecentAverage->value => $recentMonthly,
             BacktestMethod::LastYear->value => $lastYearMonthly,
         ];
+    }
+
+    /**
+     * 起点時点の、品番ごとのこれからのイベントの倍率の候補（起点より前に終わった同じ名前のイベントから求める）。倍率は起点以降の日に掛ける。
+     *
+     * @param  Collection<int, SalesEvent>  $events
+     * @param  array<int, array<string, EventMeasurement>>  $measurements
+     * @param  list<Item>  $items
+     * @return array<string, list<EventUplift>> 品番 => イベント
+     */
+    private function uplifts(Channel $channel, CarbonImmutable $origin, Collection $events, array $measurements, array $items): array
+    {
+        $uplifts = [];
+        foreach ($this->eventUplifts->upcoming($events, $origin) as $event) {
+            if (! $event->isOn($channel)) {
+                continue;
+            }
+            $candidate = $this->eventUplifts->candidate($event, $channel, $events, $measurements, $origin);
+            $dates = array_values(array_filter($event->dates(), fn (string $date): bool => $date >= $origin->toDateString()));
+            foreach ($items as $item) {
+                $uplifts[$item->item_no][] = new EventUplift($event, $candidate->forItem($item->item_no), true, $dates);
+            }
+        }
+
+        return $uplifts;
     }
 
     /**

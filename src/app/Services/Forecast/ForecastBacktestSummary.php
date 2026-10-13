@@ -40,7 +40,7 @@ class ForecastBacktestSummary
                 'category' => $item?->category,
                 'methods' => $this->byMethod($rows),
             ];
-        })->sortByDesc(fn (array $row): float => $row['methods'][BacktestMethod::BaseAverage->value]['actual'])->values()->all();
+        })->sortByDesc(fn (array $row): float => max(array_column($row['methods'], 'actual')))->values()->all();
 
         $originRows = $results->groupBy(fn (ForecastBacktestResult $result): string => $result->origin->toDateString())
             ->map(fn (Collection $rows, string $origin): array => ['origin' => $origin, 'methods' => $this->byMethod($rows)])

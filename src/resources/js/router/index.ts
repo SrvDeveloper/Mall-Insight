@@ -4,6 +4,7 @@ import { afterLoginLocation } from "@/router/afterLogin";
 import AppLayout from "@/layouts/AppLayout.vue";
 import DemandForecastView from "@/views/DemandForecastView.vue";
 import ForecastAccuracyView from "@/views/ForecastAccuracyView.vue";
+import SalesEventView from "@/views/SalesEventView.vue";
 import InboundPlanView from "@/views/InboundPlanView.vue";
 import InventoryTrendView from "@/views/InventoryTrendView.vue";
 import InventoryImportView from "@/views/InventoryImportView.vue";
@@ -49,6 +50,7 @@ const routes: RouteRecordRaw[] = [
             },
             { path: "store-sales", name: "store-sales", component: StoreSalesView, meta: { title: "店舗売上" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
+            { path: "sales-events", name: "sales-events", component: SalesEventView, meta: { title: "イベント" } },
             { path: "forecast-accuracy", name: "forecast-accuracy", component: ForecastAccuracyView, meta: { title: "予測精度" } },
             { path: "sales-targets", name: "sales-targets", component: SalesTargetView, meta: { title: "販売目標" } },
             { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },

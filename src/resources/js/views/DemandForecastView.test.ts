@@ -13,7 +13,7 @@ const months = Array.from({ length: 12 }, (_, index) => {
 });
 
 function monthly(baseAverage: number): MonthlyDemand[] {
-    return months.map((month) => ({ ...month, quantity: baseAverage * month.days }));
+    return months.map((month) => ({ ...month, quantity: baseAverage * month.days, event_quantity: 0, events: [] }));
 }
 
 const windows: AverageWindow[] = [
@@ -25,6 +25,7 @@ const windows: AverageWindow[] = [
         to: "2026-10-06",
         sales_days: 30,
         stockout_days: 0,
+        event_days: 0,
         sales_quantity: 60,
         average: 2,
         base_weight: 0.5,
@@ -39,6 +40,7 @@ const windows: AverageWindow[] = [
         to: "2026-09-06",
         sales_days: 57,
         stockout_days: 3,
+        event_days: 0,
         sales_quantity: 90,
         average: 1.5,
         base_weight: 0.3,
@@ -53,6 +55,7 @@ const windows: AverageWindow[] = [
         to: "2026-07-08",
         sales_days: 90,
         stockout_days: 0,
+        event_days: 0,
         sales_quantity: 135,
         average: 1.5,
         base_weight: 0.2,
@@ -117,6 +120,7 @@ function response(overrides: Partial<DemandForecastResponse["meta"]> = {}, data:
                 { length: 90, weight: 0.2 },
             ],
             min_sales_days: 14,
+            events: [],
             ...overrides,
         },
     };
@@ -366,6 +370,43 @@ describe("DemandForecastView", () => {
         const wrapper = await mountView();
 
         expect(wrapper.text()).toContain("対象品番がまだ確定されていません。");
-        expect(wrapper.find("a").attributes("href")).toBe("/target-items");
+        expect(wrapper.find('a[href="/target-items"]').exists()).toBe(true);
+    });
+
+    it("marks the months increased by upcoming events and shows the event days left out of the averages (B-129)", async () => {
+        const withEvent = channel("boss", 2);
+        withEvent.windows = windows.map((window, index) => (index === 0 ? { ...window, sales_days: 26, event_days: 4 } : window));
+        withEvent.monthly = withEvent.monthly!.map((month) =>
+            month.month === "2026-12"
+                ? {
+                      ...month,
+                      quantity: month.quantity + 40,
+                      event_quantity: 40,
+                      events: [{ event_id: 1, name: "楽天スーパーセール", channel: "boss", days: 4, multiplier: 6, is_candidate: true, quantity: 40 }],
+                  }
+                : month,
+        );
+        const target = sku(1, "fl-01-1-10", [withEvent]);
+        target.monthly = withEvent.monthly;
+        vi.mocked(fetchDemandForecasts).mockResolvedValue(
+            response({ events: [{ id: 1, name: "楽天スーパーセール", starts_on: "2026-12-04", ends_on: "2026-12-07", channels: ["boss"], status: "upcoming" }] }, [
+                { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [target] },
+            ]),
+        );
+
+        const wrapper = await mountView();
+
+        expect(wrapper.find('[data-testid="events"]').text()).toContain("これから 1件");
+        expect(wrapper.findAll('[data-testid="month-event"]').map((badge) => badge.text())).toEqual(["楽天スーパーセール"]);
+        const cells = wrapper.find('[data-testid="sku-row"]').findAll("[data-event]");
+        expect(cells).toHaveLength(1);
+        expect(cells[0]!.text()).toBe("100");
+        expect(cells[0]!.attributes("title")).toBe("楽天スーパーセール（BOSS）×6.00・4日で +40個");
+
+        await wrapper.find('[data-testid="base-average-td"]').trigger("focus");
+        await flushPromises();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await flushPromises();
+        expect(wrapper.find('[data-testid="tooltip-event-days"]').text()).toBe("・イベント4日を除く");
     });
 });

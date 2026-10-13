@@ -6,6 +6,7 @@ use App\Enums\Channel;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SkuForecastResource;
 use App\Models\Item;
+use App\Models\SalesEvent;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\Forecast\SkuForecast;
 use App\Services\Pricing\UnitPriceCatalog;
@@ -56,6 +57,15 @@ class DemandForecastController extends Controller
                 ],
                 'window_weights' => array_map(fn (int $length, float $weight): array => ['length' => $length, 'weight' => $weight], array_keys(DemandForecaster::WINDOW_WEIGHTS), DemandForecaster::WINDOW_WEIGHTS),
                 'min_sales_days' => DemandForecaster::MIN_SALES_DAYS,
+                // 平均日販から日を除き、これからの日に倍率を掛けたイベント（B-129、K-112）
+                'events' => $forecast->events->map(fn (SalesEvent $event): array => [
+                    'id' => $event->id,
+                    'name' => $event->name,
+                    'starts_on' => $event->starts_on->toDateString(),
+                    'ends_on' => $event->ends_on->toDateString(),
+                    'channels' => array_map(fn (Channel $channel): string => $channel->value, $event->channels()),
+                    'status' => $event->status($forecast->forecastFrom)->value,
+                ])->values()->all(),
             ],
         ]);
     }

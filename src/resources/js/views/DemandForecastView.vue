@@ -27,6 +27,9 @@ import type { DemandForecastResponse, ItemForecast, MonthlyDemand, SkuForecast }
  * 選んだ方は URL に持たせる。
  *
  * 見た目は在庫予測の画面（K-047）とそろえる（計算の根拠の帯、切り替えのタブ、絞り込みの札、表の罫線と品番の行）。
+ *
+ * イベント（B-129、K-112）の日は平均日販から除き（内訳に日数を出す）、これからのイベントの日は倍率で需要を増やす。
+ * 増やした月は、月の見出しにイベントの名前を出し、欄に印を付けてマウスを乗せると増やした数を出す。
  */
 
 type ForecastView = "total" | "boss" | "amazon";
@@ -64,6 +67,8 @@ interface SkuRow {
     isUnpredictable: boolean;
     /** 金額で見ているが単価を出せない（予測できたSKUだけ） */
     unpriced: boolean;
+    /** 月ごとの、イベントで増やした数の説明（増やしていない月は null） */
+    monthEventTitles: (string | null)[];
 }
 
 interface ItemRows {
@@ -80,6 +85,8 @@ interface ItemRows {
 interface ViewTable {
     items: ItemRows[];
     months: MonthlyDemand[];
+    /** 月ごとの、需要を増やしたイベントの名前 */
+    monthEventNames: string[][];
     unpredictableCount: number;
     partialCount: number;
 }
@@ -136,8 +143,22 @@ function figuresOf(sku: SkuForecast, forView: ForecastView = view.value): SkuFig
     return { baseAverage: channel.base_average, monthly: channel.monthly, reason: channel.unpredictable_reason_label, isPartial: false, notSold: false };
 }
 
+/** 1か月のうち、イベントで増やした数の説明（「楽天スーパーセール ×4.67・4日で +37個」）。 */
+function eventTitle(month: MonthlyDemand): string | null {
+    if (month.events.length === 0) {
+        return null;
+    }
+    return month.events
+        .map(
+            (event) =>
+                `${event.name}（${event.channel === "boss" ? "BOSS" : "Amazon"}）×${event.multiplier.toFixed(2)}・${event.days}日で ${event.quantity < 0 ? "−" : "+"}${formatQuantity(Math.abs(event.quantity))}個${event.is_candidate ? "" : "（担当者が入れた倍率）"}`,
+        )
+        .join("\n");
+}
+
 function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
     let months: MonthlyDemand[] = [];
+    const monthEventNames: Set<string>[] = [];
     let unpredictableCount = 0;
     let partialCount = 0;
     const items = (result.value?.data ?? []).map((item): ItemRows => {
@@ -149,6 +170,12 @@ function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
             const unpriced = forMeasure === "amount" && figures.monthly !== null && price === null;
             const format = forMeasure === "amount" ? formatThousandYen : formatQuantity;
             let skuYear = 0;
+            const monthEventTitles = (figures.monthly ?? []).map((month, index) => {
+                for (const event of month.events) {
+                    (monthEventNames[index] ??= new Set()).add(event.name);
+                }
+                return eventTitle(month);
+            });
             const monthTexts = unpriced
                 ? []
                 : (figures.monthly ?? []).map((month, index) => {
@@ -172,6 +199,7 @@ function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
                 yearText: format(skuYear),
                 isUnpredictable,
                 unpriced,
+                monthEventTitles,
             };
         });
         return {
@@ -183,7 +211,7 @@ function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
             unpricedCount: rows.filter((row) => row.unpriced).length,
         };
     });
-    return { items, months, unpredictableCount, partialCount };
+    return { items, months, monthEventNames: months.map((_, index) => [...(monthEventNames[index] ?? [])]), unpredictableCount, partialCount };
 }
 
 const route = useRoute();
@@ -235,6 +263,7 @@ const visibleItems = computed<ItemRows[]>(() => {
         .filter((group) => group.rows.length > 0);
 });
 const years = computed(() => yearSpans(months.value));
+const monthEventNames = computed(() => table.value.monthEventNames);
 
 type FlatRow = { kind: "item"; key: string; group: ItemRows } | { kind: "sku"; key: string; row: SkuRow };
 
@@ -278,8 +307,20 @@ const facts = computed(() => {
             warn: !imported,
         };
     });
+    const upcoming = meta.events.filter((event) => event.status !== "ended");
     return [
         ...channelFacts,
+        {
+            key: "events",
+            label: "イベント",
+            value: `これから ${upcoming.length}件`,
+            note:
+                meta.events.length === 0
+                    ? "登録するとイベントの日を平均日販から除き、倍率で需要を増やします"
+                    : `登録した${meta.events.length}件の日を平均日販から除き、これからのイベントの日は倍率で増やしています`,
+            stale: null,
+            warn: false,
+        },
         {
             key: "selection",
             label: "対象品番",
@@ -298,7 +339,10 @@ const facts = computed(() => {
             <div class="flex flex-col gap-1.5">
                 <p class="text-xs text-stone-500">在庫試算 / 需要予測</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">需要予測</h1>
-                <p class="text-[13px] text-stone-600">対象品番のSKUについて、平均日販から12か月分の需要を予測します。季節による増減はまだ反映しません。画面を開くたびに最新の販売実績で計算します。</p>
+                <p class="text-[13px] text-stone-600">
+                    対象品番のSKUについて、平均日販から12か月分の需要を予測します。<RouterLink to="/sales-events" class="font-medium text-stone-900 underline">イベント</RouterLink
+                    >の日は平均日販から除き、これからのイベントの日は倍率で増やします。季節による増減はまだ反映しません。画面を開くたびに最新の販売実績で計算します。
+                </p>
             </div>
             <div class="flex items-center gap-3">
                 <span v-if="result" class="text-xs text-stone-500 tabular-nums" data-testid="calculated-at">計算日時 {{ formatDateTime(result.meta.calculated_at) }}</span>
@@ -325,12 +369,12 @@ const facts = computed(() => {
         <div v-else-if="!result" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500">計算中…</div>
 
         <template v-else>
-            <section class="grid grid-cols-1 rounded-xl border border-stone-200 bg-white sm:grid-cols-3" aria-label="計算の根拠" data-testid="forecast-basis">
+            <section class="grid grid-cols-1 rounded-xl border border-stone-200 bg-white sm:grid-cols-2 xl:grid-cols-4" aria-label="計算の根拠" data-testid="forecast-basis">
                 <div
                     v-for="(fact, index) in facts"
                     :key="fact.key"
                     class="flex flex-col gap-1 px-5 py-4"
-                    :class="index > 0 ? 'border-stone-200 max-sm:border-t sm:border-l' : ''"
+                    :class="index > 0 ? 'border-stone-200 max-sm:border-t sm:max-xl:even:border-l sm:max-xl:[&:nth-child(n+3)]:border-t xl:border-l' : ''"
                     :data-testid="fact.key"
                 >
                     <span class="text-[11px] tracking-wide text-stone-500">{{ fact.label }}</span>
@@ -414,6 +458,9 @@ const facts = computed(() => {
                     >
                     <span class="inline-flex items-center gap-1.5"><span class="text-[11px] font-medium text-amber-700">一部</span>一部のチャネルだけ予測できなかった</span>
                     <span class="inline-flex items-center gap-1.5"><span class="text-stone-400">—</span>そのチャネルでは販売していない</span>
+                    <span class="inline-flex items-center gap-1.5"
+                        ><span class="rounded-full bg-sky-100 px-1.5 text-[10px] font-medium text-sky-800">イベント</span>イベントの日を倍率で増やした月（欄にマウスを乗せると増やした数）</span
+                    >
                     <span class="text-stone-400">基準平均日販にマウスを乗せると内訳が出ます</span>
                     <span v-if="measure === 'amount'" class="text-stone-500" data-testid="amount-note">金額は税込の売値の概算（千円）。単価は単価の画面の単価、無ければ直近12か月の平均単価です</span>
                 </div>
@@ -464,7 +511,14 @@ const facts = computed(() => {
                                 <th v-for="(month, index) in months" :key="month.month" scope="col" class="px-1 pt-1 pb-2 text-center">
                                     <span class="inline-flex min-w-14 flex-col items-center px-1.5 py-1 leading-tight tabular-nums">
                                         {{ shortMonthLabel(month.month) }}
-                                        <span class="text-[10px] font-normal text-stone-400">{{ index === 0 ? "今月" : "&nbsp;" }}</span>
+                                        <span
+                                            v-if="monthEventNames[index]?.length"
+                                            class="max-w-16 truncate rounded-full bg-sky-100 px-1.5 text-[10px] font-medium text-sky-800"
+                                            :title="`イベントで需要を増やしています：${monthEventNames[index]!.join('・')}`"
+                                            data-testid="month-event"
+                                            >{{ monthEventNames[index]!.length > 1 ? `イベント${monthEventNames[index]!.length}件` : monthEventNames[index]![0] }}</span
+                                        >
+                                        <span v-else class="text-[10px] font-normal text-stone-400">{{ index === 0 ? "今月" : "&nbsp;" }}</span>
                                     </span>
                                 </th>
                                 <th scope="col" class="px-3 pt-1 pb-2 text-right whitespace-nowrap shadow-[inset_1px_0_0_var(--color-stone-200)]">
@@ -536,7 +590,16 @@ const facts = computed(() => {
                                         <span v-if="entry.row.figures.isPartial" class="ml-1 text-[10px] font-medium text-amber-700" data-testid="partial">一部</span>
                                     </td>
                                     <template v-if="entry.row.figures.monthly && !entry.row.unpriced">
-                                        <td v-for="(text, index) in entry.row.monthTexts" :key="index" class="px-3 text-right text-stone-700 tabular-nums">{{ text }}</td>
+                                        <td
+                                            v-for="(text, index) in entry.row.monthTexts"
+                                            :key="index"
+                                            class="px-3 text-right tabular-nums"
+                                            :class="entry.row.monthEventTitles[index] ? 'bg-sky-50/70 text-stone-900' : 'text-stone-700'"
+                                            :title="entry.row.monthEventTitles[index] ?? undefined"
+                                            :data-event="entry.row.monthEventTitles[index] ? true : undefined"
+                                        >
+                                            {{ text }}
+                                        </td>
                                         <td class="px-3 text-right text-stone-700 tabular-nums shadow-[inset_1px_0_0_var(--color-stone-200)]">{{ entry.row.yearText }}</td>
                                     </template>
                                     <td v-else-if="entry.row.unpriced" :colspan="months.length + 1" class="truncate px-3" data-testid="unpriced">

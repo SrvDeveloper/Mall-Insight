@@ -14,6 +14,8 @@ final readonly class SkuDemand
      * @param  float|null  $averageDaily  平均日販（在庫が持つ月数の目安に使う）
      * @param  string|null  $unavailableLabel  計算できない月の理由。すべての月を計算できれば null
      * @param  TrendStatus|null  $unavailableStatus  1か月も計算できないときの状態。null なら需要の種類で決める（需要予測は予測不能、販売試算は販売目標なし）
+     * @param  float|null  $currentMonthRemaining  今月の、今日から月末までの需要。null なら今月の需要を日数で按分する。需要予測では、
+     *                                             今日以降のイベントの日に倍率で増やした分（B-129、K-112）を按分せずに入れるため、先に求めて渡す
      */
     public function __construct(
         public array $monthly,
@@ -21,6 +23,7 @@ final readonly class SkuDemand
         public ?float $averageDaily,
         public ?string $unavailableLabel = null,
         public ?TrendStatus $unavailableStatus = null,
+        public ?float $currentMonthRemaining = null,
     ) {}
 
     public function shareAt(int $index): ?float
