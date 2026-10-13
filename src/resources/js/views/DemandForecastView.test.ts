@@ -386,14 +386,14 @@ describe("DemandForecastView", () => {
                       ...month,
                       quantity: month.quantity + 40,
                       event_quantity: 40,
-                      events: [{ event_id: 1, name: "楽天スーパーセール", channel: "boss", days: 4, multiplier: 6, is_candidate: true, quantity: 40 }],
+                      events: [{ period_id: 5, event_id: 1, name: "楽天スーパーセール", channel: "boss", days: 4, multiplier: 6, is_candidate: true, quantity: 40 }],
                   }
                 : month,
         );
         const target = sku(1, "fl-01-1-10", [withEvent]);
         target.monthly = withEvent.monthly;
         vi.mocked(fetchDemandForecasts).mockResolvedValue(
-            response({ events: [{ id: 1, name: "楽天スーパーセール", starts_on: "2026-12-04", ends_on: "2026-12-07", channels: ["boss"], status: "upcoming" }] }, [
+            response({ events: [{ id: 5, event_id: 1, name: "楽天スーパーセール", starts_on: "2026-12-04", ends_on: "2026-12-07", channels: ["boss"], status: "upcoming" }] }, [
                 { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [target] },
             ]),
         );

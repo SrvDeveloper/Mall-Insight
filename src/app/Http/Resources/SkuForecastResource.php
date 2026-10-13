@@ -81,6 +81,7 @@ class SkuForecastResource extends JsonResource
             'event_quantity' => round($month->eventQuantity(), 2),
             'seasonal_factor' => $month->seasonalFactor,
             'events' => array_map(fn (MonthlyEventDemand $event): array => [
+                'period_id' => $event->periodId,
                 'event_id' => $event->eventId,
                 'name' => $event->name,
                 'channel' => $event->channel->value,

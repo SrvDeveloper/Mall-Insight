@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ApiError } from "@/api/client";
-import { saveSalesEventMultipliers } from "@/api/salesEvents";
+import { saveSalesEventPeriodMultipliers } from "@/api/salesEvents";
 import { MAX_MULTIPLIER, formatChange, formatCount, formatMultiplier, parseMultiplier, periodLabel } from "@/components/salesEvent/eventFormat";
-import type { SalesEventCandidateItem, SalesEventDetailResponse, SalesEventMeasuredItem } from "@/types/api";
+import type { SalesEventCandidateItem, SalesEventMeasuredItem, SalesEventPeriodDetailResponse } from "@/types/api";
 
 /**
- * イベント1つの倍率（B-129、K-112）。一覧の下に、別のセクションとして出す。
+ * イベントの期間1つの倍率（B-129、K-112・K-114）。イベントの期間の一覧の下に、別のセクションとして出す。
  *
- * - これからのイベント：チャネルごとに、候補の根拠（同じ名前の過去のイベントで、普段なら売れた数と売れた数）と、品番ごとの候補・使う倍率・
- *   イベントの期間（今日以降）の普段の予測・倍率で増える数を出す。使う倍率を入れた品番は、候補の代わりにその倍率で需要予測を増やす。
+ * - これからの期間：チャネルごとに、候補の根拠（同じイベントの過去の期間で、普段なら売れた数と売れた数）と、品番ごとの候補・使う倍率・
+ *   期間（今日以降）の普段の予測・倍率で増える数を出す。使う倍率を入れた品番は、候補の代わりにその倍率でこの期間の需要予測を増やす。
  *   空欄の品番は候補を使う。「全品番に入れる」で、同じ倍率をまとめて入れられる。
- * - 終わったイベント：チャネルごとに、普段の何倍売れたか（品番ごとと全体）を出す。倍率は需要予測に使わないため直せない。
+ * - 終わった期間：チャネルごとに、普段の何倍売れたか（品番ごとと全体）を出す。倍率は需要予測に使わないため直せない。
  */
 
-const props = defineProps<{ detail: SalesEventDetailResponse; isLoading: boolean }>();
-const emit = defineEmits<{ saved: [detail: SalesEventDetailResponse]; close: [] }>();
+const props = defineProps<{ detail: SalesEventPeriodDetailResponse; isLoading: boolean }>();
+const emit = defineEmits<{ saved: [detail: SalesEventPeriodDetailResponse]; close: [] }>();
 
 const event = computed(() => props.detail.data);
 const isEnded = computed(() => event.value.status === "ended");
@@ -97,7 +97,7 @@ async function save(): Promise<void> {
         return [{ item_no: itemNo, channel, multiplier: parsed }];
     });
     try {
-        const saved = await saveSalesEventMultipliers(event.value.id, multipliers);
+        const saved = await saveSalesEventPeriodMultipliers(event.value.id, multipliers);
         savedNote.value = multipliers.length > 0 ? `${multipliers.length}品番の倍率を保存しました。需要予測と在庫予測に反映されます。` : "すべての品番を候補の倍率に戻しました。";
         emit("saved", saved);
     } catch (error) {
@@ -109,7 +109,7 @@ async function save(): Promise<void> {
 
 /** 候補の根拠の説明（「楽天スーパーセール 3回（新しい方から）」）。 */
 function basisLabel(count: number): string {
-    return count === 0 ? "同じ名前の過去のイベントがありません" : `同じ名前の過去のイベント ${count}回（新しい方から${props.detail.meta.recent_events}回まで）`;
+    return count === 0 ? "このイベントの終わった期間がありません" : `このイベントの過去の期間 ${count}回（新しい方から${props.detail.meta.recent_events}回まで）`;
 }
 
 const isMeasured = (item: SalesEventCandidateItem | SalesEventMeasuredItem): item is SalesEventMeasuredItem => "ratio" in item;
@@ -135,11 +135,12 @@ const statusClass = computed(() =>
         <header class="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
             <div class="flex flex-col gap-1">
                 <div class="flex flex-wrap items-center gap-2">
-                    <h2 id="event-detail-title" class="text-base font-bold text-stone-900">{{ event.name }}</h2>
+                    <h2 id="event-detail-title" class="text-base font-bold text-stone-900">{{ event.event.name }}</h2>
                     <span class="rounded-full px-2 py-px text-[11px] font-semibold ring-1" :class="statusClass">{{ event.status_label }}</span>
                 </div>
                 <p class="text-xs text-stone-500 tabular-nums">
-                    {{ periodLabel(event.starts_on, event.ends_on) }}（{{ event.days }}日間）・{{ event.malls.map((mall) => mall.label).join("・") }}
+                    {{ periodLabel(event.starts_on, event.ends_on) }}（{{ event.days }}日間）・{{ event.event.malls.map((mall) => mall.label).join("・")
+                    }}<template v-if="event.note">・{{ event.note }}</template>
                     <template v-if="!isEnded && event.remaining_days < event.days">・今日からの残り {{ event.remaining_days }}日に倍率を掛けます</template>
                 </p>
             </div>
@@ -157,7 +158,7 @@ const statusClass = computed(() =>
         </header>
 
         <div v-for="channel in event.channels" :key="channel.channel" class="border-b border-stone-200 last:border-b-0" :data-testid="`detail-${channel.channel}`">
-            <!-- 終わったイベント：普段の何倍売れたか -->
+            <!-- 終わった期間：普段の何倍売れたか -->
             <template v-if="channel.kind === 'measured'">
                 <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3">
                     <h3 class="text-sm font-semibold text-stone-900">{{ channel.label }}</h3>
@@ -194,7 +195,7 @@ const statusClass = computed(() =>
                 </div>
             </template>
 
-            <!-- これからのイベント：候補と使う倍率 -->
+            <!-- これからの期間：候補と使う倍率 -->
             <template v-else>
                 <div class="flex flex-col gap-2 px-4 py-3">
                     <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -205,7 +206,7 @@ const statusClass = computed(() =>
                                 >（{{ basisLabel(channel.basis.length) }}で、普段なら {{ formatCount(channel.expected) }}個のところ {{ formatCount(channel.actual) }}個）
                             </template>
                             <span v-else class="font-medium text-amber-700" data-testid="no-candidate"
-                                >{{ basisLabel(0) }}。過去のイベントを同じ名前で登録するか、使う倍率を入れてください（入れなければ、イベントの日も普段どおりに予測します）。</span
+                                >{{ basisLabel(0) }}。このイベントに過去の期間を登録するか、使う倍率を入れてください（入れなければ、イベントの日も普段どおりに予測します）。</span
                             >
                         </p>
                     </div>
@@ -254,10 +255,10 @@ const statusClass = computed(() =>
                         <thead class="text-xs text-stone-500 [&_th]:border-y [&_th]:border-stone-200 [&_th]:bg-stone-50 [&_th]:px-4 [&_th]:py-2 [&_th]:font-medium">
                             <tr>
                                 <th scope="col" class="text-left">品番</th>
-                                <th scope="col" class="text-right">過去のイベント<span class="block text-[10px] font-normal text-stone-400">普段なら→売れた数</span></th>
+                                <th scope="col" class="text-right">過去の期間<span class="block text-[10px] font-normal text-stone-400">普段なら→売れた数</span></th>
                                 <th scope="col" class="text-right">候補</th>
                                 <th scope="col" class="w-32 text-right">使う倍率<span class="block text-[10px] font-normal text-stone-400">空欄は候補</span></th>
-                                <th scope="col" class="text-right">普段の予測<span class="block text-[10px] font-normal text-stone-400">イベントの期間</span></th>
+                                <th scope="col" class="text-right">普段の予測<span class="block text-[10px] font-normal text-stone-400">この期間</span></th>
                                 <th scope="col" class="text-right">増える数<span class="block text-[10px] font-normal text-stone-400">保存した倍率で計算</span></th>
                             </tr>
                         </thead>
@@ -276,7 +277,7 @@ const statusClass = computed(() =>
                                     <span
                                         v-if="item.uses_overall"
                                         class="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500"
-                                        :title="`過去のイベントで普段なら売れた数が${detail.meta.min_expected}個未満のため、全体の倍率を使います`"
+                                        :title="`過去の期間で普段なら売れた数が${detail.meta.min_expected}個未満のため、全体の倍率を使います`"
                                         data-testid="uses-overall"
                                         >全体</span
                                     >

@@ -203,8 +203,9 @@ export interface AverageWindow {
     is_excluded: boolean;
 }
 
-/** 1か月のうち、イベントの日に倍率で増やした需要（K-112）。増やした数＝基準平均日販×（倍率－1）×日数。 */
+/** 1か月のうち、イベントの期間の日に倍率で増やした需要（K-112）。増やした数＝基準平均日販×（倍率－1）×日数。 */
 export interface MonthlyEventDemand {
+    period_id: number;
     event_id: number;
     name: string;
     channel: "boss" | "amazon";
@@ -273,7 +274,8 @@ export interface DemandForecastResponse {
         window_weights: { length: number; weight: number }[];
         min_sales_days: number;
         /** 登録したイベント（平均日販から日を除き、これからの日に倍率を掛けたもの） */
-        events: { id: number; name: string; starts_on: string; ends_on: string; channels: ("boss" | "amazon")[]; status: SalesEventStatus }[];
+        /** 登録したイベントの期間 */
+        events: { id: number; event_id: number; name: string; starts_on: string; ends_on: string; channels: ("boss" | "amazon")[]; status: SalesEventStatus }[];
         /** 季節係数を登録した品番 */
         seasonal_item_nos: string[];
     };
@@ -753,49 +755,76 @@ export interface ForecastBacktestSummaryResponse {
 /** イベント（B-129）の、今日から見た状態。 */
 export type SalesEventStatus = "upcoming" | "ongoing" | "ended";
 
-/** イベント（キャンペーン、B-129、K-112）。 */
-export interface SalesEvent {
+/** イベントの期間（B-129、K-114）。 */
+export interface SalesEventPeriod {
     id: number;
-    name: string;
+    event_id: number;
     starts_on: string;
     ends_on: string;
     days: number;
-    malls: { value: "rakuten" | "yahoo" | "au_pay" | "amazon"; label: string }[];
-    channels: ("boss" | "amazon")[];
     note: string | null;
     status: SalesEventStatus;
     status_label: string;
+    updated_by: string | null;
+    updated_at: string | null;
+}
+
+/** イベント（キャンペーン、B-129、K-112・K-114）。名前・モール・メモ。期間はいくつも持つ。 */
+export interface SalesEvent {
+    id: number;
+    name: string;
+    malls: { value: "rakuten" | "yahoo" | "au_pay" | "amazon"; label: string }[];
+    channels: ("boss" | "amazon")[];
+    note: string | null;
     created_by: string | null;
     updated_by: string | null;
     updated_at: string | null;
 }
 
-/** 一覧に添える、チャネルごとの倍率（品番の全体）。これからのイベントは候補、終わったイベントは普段の何倍売れたか。出せなければ null。 */
+/** 一覧に添える、期間・チャネルごとの倍率（品番の全体）。これからの期間は候補、終わった期間は普段の何倍売れたか。出せなければ null。 */
 export interface SalesEventChannelMultiplier {
     channel: "boss" | "amazon";
     label: string;
     kind: "candidate" | "measured";
     multiplier: number | null;
-    /** 候補を求めた過去のイベントの回数 */
+    /** 候補を求めた過去の期間の数 */
     basis_count: number;
     /** 担当者が倍率を入れた品番の数 */
     override_count: number;
 }
 
+export type SalesEventPeriodSummary = SalesEventPeriod & { multipliers: SalesEventChannelMultiplier[] };
+
+/** イベントと、その期間（初日の順）。 */
+export interface SalesEventWithPeriods extends SalesEvent {
+    periods: SalesEventPeriodSummary[];
+    /** 次の期間（開催中かこれから） */
+    next_period: SalesEventPeriodSummary | null;
+    /** 最後に終わった期間 */
+    last_period: SalesEventPeriodSummary | null;
+    upcoming_count: number;
+    ended_count: number;
+}
+
 export interface SalesEventListResponse {
-    data: (SalesEvent & { multipliers: SalesEventChannelMultiplier[] })[];
+    data: SalesEventWithPeriods[];
+    meta: SalesEventMeta;
+}
+
+export interface SalesEventResponse {
+    data: SalesEventWithPeriods;
     meta: SalesEventMeta;
 }
 
 export interface SalesEventMeta {
-    /** 候補に使う過去のイベントの回数（新しい方から） */
+    /** 候補に使う過去の期間の数（新しい方から） */
     recent_events: number;
     /** 品番の倍率を候補にするのに必要な、普段なら売れた数の合計 */
     min_expected: number;
     max_days: number;
 }
 
-/** これからのイベントの品番1つの倍率。usual は今日以降のイベントの日の普段の予測、extra は倍率で増やした数。 */
+/** これからの期間の品番1つの倍率。usual は今日以降の期間の日の普段の予測、extra は倍率で増やした数。 */
 export interface SalesEventCandidateItem {
     item_no: string;
     brand: string;
@@ -811,7 +840,7 @@ export interface SalesEventCandidateItem {
     extra: number | null;
 }
 
-/** 終わったイベントの品番1つの、普段なら売れた数と売れた数。 */
+/** 終わった期間の品番1つの、普段なら売れた数と売れた数。 */
 export interface SalesEventMeasuredItem {
     item_no: string;
     brand: string;
@@ -821,9 +850,11 @@ export interface SalesEventMeasuredItem {
     ratio: number | null;
 }
 
+/** 候補を求めた、同じイベントの過去の期間。 */
 export interface SalesEventBasis {
     id: number;
     name: string;
+    note: string | null;
     starts_on: string;
     ends_on: string;
     expected: number;
@@ -845,18 +876,24 @@ export type SalesEventChannelDetail =
           items: SalesEventMeasuredItem[];
       };
 
-export interface SalesEventDetailResponse {
-    /** channels は、一覧のチャネルの値ではなく、チャネルごとの倍率 */
-    data: Omit<SalesEvent, "channels"> & { remaining_days: number; channels: SalesEventChannelDetail[] };
+/** 期間1つの、チャネル・品番ごとの倍率。 */
+export interface SalesEventPeriodDetailResponse {
+    data: SalesEventPeriod & { event: SalesEvent; remaining_days: number; channels: SalesEventChannelDetail[] };
     meta: SalesEventMeta;
+}
+
+export interface SalesEventPeriodPayload {
+    starts_on: string;
+    ends_on: string;
+    note: string | null;
 }
 
 export interface SalesEventPayload {
     name: string;
-    starts_on: string;
-    ends_on: string;
     malls: string[];
     note: string | null;
+    /** 登録するときに一緒に入れる最初の期間 */
+    period?: SalesEventPeriodPayload | null;
 }
 
 /** 販売実績から求めた季節係数（B-106、K-113）。factors は1月～12月。 */

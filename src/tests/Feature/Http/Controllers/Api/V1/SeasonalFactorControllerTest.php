@@ -6,7 +6,7 @@ use App\Models\ForecastBacktest;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
 use App\Models\ItemSelection;
-use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Models\User;
@@ -55,8 +55,8 @@ class SeasonalFactorControllerTest extends TestCase
         // 普段は1日2個、9月は2倍の1日4個売れた
         $this->sellDaily('2026-04-01', '2026-10-06', fn (CarbonImmutable $day): int => $day->month === 9 ? 4 : 2);
         ItemSeasonalFactor::create(['item_no' => 'ph5099', 'factors' => self::FACTORS]);
-        $event = SalesEvent::factory()->period('2026-12-04', '2026-12-07')->create();
-        $event->multipliers()->create(['item_no' => 'ph5099', 'channel' => 'boss', 'multiplier' => 3]);
+        $period = SalesEventPeriod::factory()->period('2026-12-04', '2026-12-07')->create();
+        $period->multipliers()->create(['item_no' => 'ph5099', 'channel' => 'boss', 'multiplier' => 3]);
 
         $response = $this->getJson('/api/v1/demand-forecasts')->assertOk()->assertJsonPath('meta.seasonal_item_nos', ['ph5099']);
 

@@ -8,9 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * 担当者が入れた、イベント中の品番の売れ方の倍率（B-129、K-112）。入れていない品番は、システムが求めた候補を使う。
+ * 担当者が入れた、イベントの期間中の品番の売れ方の倍率（B-129、K-112・K-114）。期間ごとに持ち、入れていない品番は、システムが求めた候補を使う。
  */
-#[Fillable(['sales_event_id', 'item_no', 'channel', 'multiplier', 'updated_by_user_id'])]
+#[Fillable(['sales_event_period_id', 'item_no', 'channel', 'multiplier', 'updated_by_user_id'])]
 class SalesEventMultiplier extends Model
 {
     /**
@@ -27,11 +27,11 @@ class SalesEventMultiplier extends Model
     }
 
     /**
-     * @return BelongsTo<SalesEvent, $this>
+     * @return BelongsTo<SalesEventPeriod, $this>
      */
-    public function salesEvent(): BelongsTo
+    public function period(): BelongsTo
     {
-        return $this->belongsTo(SalesEvent::class);
+        return $this->belongsTo(SalesEventPeriod::class, 'sales_event_period_id');
     }
 
     /**

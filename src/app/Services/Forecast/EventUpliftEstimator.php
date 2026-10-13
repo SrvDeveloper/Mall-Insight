@@ -4,20 +4,20 @@ namespace App\Services\Forecast;
 
 use App\Enums\Channel;
 use App\Models\Item;
-use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
- * イベント（B-129、決定記録 K-112）の、平均日販から除く日と倍率を決める。
+ * イベント（B-129、決定記録 K-112・K-114）の期間の、平均日販から除く日と倍率を決める。以下の「イベント」は、イベントの1回の期間を指す。
  *
  * - 平均日販から除く日：登録したすべてのイベントの日。イベントのモールのチャネル（楽天市場・Yahoo!ショッピング・au PAY マーケットは BOSS）だけで除く。
  * - 終わったイベントの倍率：売れた数÷普段なら売れた数（EventMeasurement）。普段なら売れた数は、イベントの初日時点の基準平均日販×イベントの日数
  *   （季節係数を登録した品番は、日ごとにその月の係数を掛ける、B-106）。
  *   販売実績をイベントの初日から最終日まで取り込んでいるチャネルだけで測る。
- * - これからのイベントの倍率の候補（EventCandidate）：同じ名前（SalesEvent::nameKey()）の、終わった過去のイベントの新しい方から3回分を合わせて求める。
+ * - これからの期間の倍率の候補（EventCandidate）：同じイベントの、終わった過去の期間の新しい方から3回分を合わせて求める（K-114）。
  *   品番ごとに、売れた数の合計÷普段なら売れた数の合計とし、普段なら売れた数の合計が10個未満の品番は対象品番の全体の倍率を使う。
- * - 担当者が品番の倍率を入れていれば、候補より優先する。予測精度の測定（B-130）では、起点の前に終わったイベントの候補だけを使う。
+ * - 担当者が期間の品番の倍率を入れていれば、候補より優先する。予測精度の測定（B-130）では、起点の前に終わったイベントの候補だけを使う。
  */
 class EventUpliftEstimator
 {
@@ -28,19 +28,19 @@ class EventUpliftEstimator
     public const MIN_EXPECTED = 10.0;
 
     /**
-     * 登録したすべてのイベント（初日の順）。
+     * 登録したすべてのイベントの期間（初日の順）。イベント（名前・モール）と担当者が入れた倍率を読み込んでおく。
      *
-     * @return Collection<int, SalesEvent>
+     * @return Collection<int, SalesEventPeriod>
      */
-    public function events(): Collection
+    public function periods(): Collection
     {
-        return SalesEvent::query()->with('multipliers')->orderBy('starts_on')->orderBy('id')->get();
+        return SalesEventPeriod::query()->with(['salesEvent', 'multipliers'])->orderBy('starts_on')->orderBy('id')->get();
     }
 
     /**
      * チャネルごとの、平均日販から除く日。
      *
-     * @param  Collection<int, SalesEvent>  $events
+     * @param  Collection<int, SalesEventPeriod>  $events
      * @return array<string, array<string, true>> チャネルの値 => [Y-m-d => true]
      */
     public function excludedDates(Collection $events): array
@@ -66,7 +66,7 @@ class EventUpliftEstimator
      */
     public function plan(DemandForecaster $forecaster, CarbonImmutable $forecastFrom, Collection $items, array $channelRanges, ?Collection $events = null, array $seasonal = []): EventPlan
     {
-        $events ??= $this->events();
+        $events ??= $this->periods();
         $excluded = $this->excludedDates($events);
         $upcoming = $this->upcoming($events, $forecastFrom);
         if ($upcoming->isEmpty()) {
@@ -92,25 +92,25 @@ class EventUpliftEstimator
     }
 
     /**
-     * 候補を求めるのに測る、終わったイベント。これからのイベントと同じ名前で、チャネルごとに販売実績の期間に入る新しい方から3回分だけ
+     * 候補を求めるのに測る、終わった期間。これからの期間と同じイベントで、チャネルごとに販売実績の期間に入る新しい方から3回分だけ
      * （候補はそれより古いイベントを使わないため、測る期間を短くして速くする）。
      *
-     * @param  Collection<int, SalesEvent>  $events
-     * @param  Collection<int, SalesEvent>  $upcoming
+     * @param  Collection<int, SalesEventPeriod>  $events
+     * @param  Collection<int, SalesEventPeriod>  $upcoming
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channelRanges
-     * @return Collection<int, SalesEvent>
+     * @return Collection<int, SalesEventPeriod>
      */
     public function candidateBasis(Collection $events, Collection $upcoming, CarbonImmutable $day, array $channelRanges): Collection
     {
-        $names = $upcoming->map(fn (SalesEvent $event): string => $event->nameKey())->unique()->all();
-        $ended = $events->filter(fn (SalesEvent $event): bool => $event->hasEndedBefore($day) && in_array($event->nameKey(), $names, true))->sortByDesc(fn (SalesEvent $event): string => $event->starts_on->toDateString());
+        $names = $upcoming->map(fn (SalesEventPeriod $event): string => $event->eventKey())->unique()->all();
+        $ended = $events->filter(fn (SalesEventPeriod $event): bool => $event->hasEndedBefore($day) && in_array($event->eventKey(), $names, true))->sortByDesc(fn (SalesEventPeriod $event): string => $event->starts_on->toDateString());
         $basis = collect();
         foreach ($channelRanges as $range) {
             if ($range['from'] === null || $range['to'] === null) {
                 continue;
             }
-            $inRange = $ended->filter(fn (SalesEvent $event): bool => $event->isOn($range['channel']) && $event->starts_on->gte($range['from']) && $event->ends_on->lte($range['to']));
-            foreach ($inRange->groupBy(fn (SalesEvent $event): string => $event->nameKey()) as $group) {
+            $inRange = $ended->filter(fn (SalesEventPeriod $event): bool => $event->isOn($range['channel']) && $event->starts_on->gte($range['from']) && $event->ends_on->lte($range['to']));
+            foreach ($inRange->groupBy(fn (SalesEventPeriod $event): string => $event->eventKey()) as $group) {
                 $basis = $basis->merge($group->take(self::RECENT_EVENTS));
             }
         }
@@ -121,21 +121,21 @@ class EventUpliftEstimator
     /**
      * $day 時点でこれからのイベント（$day 以降に終わり、$day の月から12か月の間に始まるもの）。
      *
-     * @param  Collection<int, SalesEvent>  $events
-     * @return Collection<int, SalesEvent>
+     * @param  Collection<int, SalesEventPeriod>  $events
+     * @return Collection<int, SalesEventPeriod>
      */
     public function upcoming(Collection $events, CarbonImmutable $day): Collection
     {
         $horizonEnd = $day->startOfMonth()->addMonthsNoOverflow(DemandForecaster::MONTHS);
 
-        return $events->filter(fn (SalesEvent $event): bool => ! $event->hasEndedBefore($day) && $event->starts_on->lt($horizonEnd))->values();
+        return $events->filter(fn (SalesEventPeriod $event): bool => ! $event->hasEndedBefore($day) && $event->starts_on->lt($horizonEnd))->values();
     }
 
     /**
      * 終わったイベントが、チャネルごとに普段の何倍売れたか。販売実績をイベントの期間すべて取り込んでいないチャネルは測らない。
      *
      * @param  array<string, array<string, true>>  $excluded  チャネルごとの、平均日販から除く日
-     * @param  Collection<int, SalesEvent>  $targets
+     * @param  Collection<int, SalesEventPeriod>  $targets
      * @param  Collection<int, Item>  $items
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channelRanges
      * @param  array<string, array<int, float>>  $seasonal  品番 => 季節係数（B-106）。登録した品番は、普段なら売れた数に季節係数を掛ける
@@ -149,7 +149,7 @@ class EventUpliftEstimator
             if ($range['from'] === null || $range['to'] === null) {
                 continue;
             }
-            $measurable = $targets->filter(fn (SalesEvent $event): bool => $event->isOn($channel) && $event->starts_on->gte($range['from']) && $event->ends_on->lte($range['to']))->values();
+            $measurable = $targets->filter(fn (SalesEventPeriod $event): bool => $event->isOn($channel) && $event->starts_on->gte($range['from']) && $event->ends_on->lte($range['to']))->values();
             $skus = $items->flatMap(fn (Item $item) => $item->skus->filter(fn ($sku): bool => DemandForecaster::sellsOn($sku, $channel))->map(fn ($sku): array => [$item->item_no, $sku]))->values();
             if ($measurable->isEmpty() || $skus->isEmpty()) {
                 continue;
@@ -157,8 +157,8 @@ class EventUpliftEstimator
 
             // 平均日販の期間（初日の180日前から）とイベントの期間の販売実績・欠品を、1回で読む
             $windowDays = array_sum(array_keys(DemandForecaster::WINDOW_WEIGHTS));
-            $loadFrom = $measurable->min(fn (SalesEvent $event): CarbonImmutable => $event->starts_on)->subDays($windowDays)->max($range['from']);
-            $loadTo = $measurable->max(fn (SalesEvent $event): CarbonImmutable => $event->ends_on);
+            $loadFrom = $measurable->min(fn (SalesEventPeriod $event): CarbonImmutable => $event->starts_on)->subDays($windowDays)->max($range['from']);
+            $loadTo = $measurable->max(fn (SalesEventPeriod $event): CarbonImmutable => $event->ends_on);
             $skuIds = $skus->map(fn (array $entry): int => $entry[1]->id)->all();
             $sales = $forecaster->channelDailySales($skuIds, $channel, $loadFrom, $loadTo);
             $stockouts = $forecaster->channelStockoutDates($skuIds, $channel, $loadFrom, $loadTo);
@@ -206,23 +206,23 @@ class EventUpliftEstimator
     }
 
     /**
-     * $event の、$asOf 時点の倍率の候補。$asOf より前に終わり、$event より前に始まった同じ名前のイベントのうち、
+     * $event の、$asOf 時点の倍率の候補。$asOf より前に終わり、$event より前に始まった同じイベントの期間のうち、
      * そのチャネルで測れたものを新しい方から3回分使う。倍率は小数2桁に丸める（画面に出す値と計算に使う値をそろえる）。
      *
-     * @param  Collection<int, SalesEvent>  $events
+     * @param  Collection<int, SalesEventPeriod>  $events
      * @param  array<int, array<string, EventMeasurement>>  $measurements
      */
-    public function candidate(SalesEvent $event, Channel $channel, Collection $events, array $measurements, CarbonImmutable $asOf): EventCandidate
+    public function candidate(SalesEventPeriod $event, Channel $channel, Collection $events, array $measurements, CarbonImmutable $asOf): EventCandidate
     {
         $basis = $events
-            ->filter(fn (SalesEvent $past): bool => $past->id !== $event->id
-                && $past->nameKey() === $event->nameKey()
+            ->filter(fn (SalesEventPeriod $past): bool => $past->id !== $event->id
+                && $past->eventKey() === $event->eventKey()
                 && $past->hasEndedBefore($asOf)
                 && $past->starts_on->lt($event->starts_on)
                 && ($measurements[$past->id][$channel->value] ?? null)?->expected > 0)
-            ->sortByDesc(fn (SalesEvent $past): string => $past->starts_on->toDateString())
+            ->sortByDesc(fn (SalesEventPeriod $past): string => $past->starts_on->toDateString())
             ->take(self::RECENT_EVENTS)
-            ->map(fn (SalesEvent $past): EventMeasurement => $measurements[$past->id][$channel->value])
+            ->map(fn (SalesEventPeriod $past): EventMeasurement => $measurements[$past->id][$channel->value])
             ->values()
             ->all();
 

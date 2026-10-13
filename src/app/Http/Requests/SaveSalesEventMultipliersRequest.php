@@ -3,15 +3,15 @@
 namespace App\Http\Requests;
 
 use App\Enums\Channel;
-use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * イベントの品番ごとの倍率を、担当者が入れる（B-129、K-112）。送った内容でまるごと置き換え、送らなかった品番はシステムの候補に戻す。
- * 終わったイベントの倍率は需要予測に使わないため、入れられない。チャネルはイベントのモールのチャネルだけ。
+ * イベントの期間の品番ごとの倍率を、担当者が入れる（B-129、K-112・K-114）。送った内容でまるごと置き換え、送らなかった品番はシステムの候補に戻す。
+ * 終わった期間の倍率は需要予測に使わないため、入れられない。チャネルはイベントのモールのチャネルだけ。
  */
 class SaveSalesEventMultipliersRequest extends FormRequest
 {
@@ -33,8 +33,8 @@ class SaveSalesEventMultipliersRequest extends FormRequest
      */
     public function rules(): array
     {
-        /** @var SalesEvent $event */
-        $event = $this->route('salesEvent');
+        /** @var SalesEventPeriod $event */
+        $event = $this->route('salesEventPeriod');
 
         return [
             'multipliers' => ['present', 'array'],
@@ -51,10 +51,10 @@ class SaveSalesEventMultipliersRequest extends FormRequest
     {
         return [
             function (Validator $validator): void {
-                /** @var SalesEvent $event */
-                $event = $this->route('salesEvent');
+                /** @var SalesEventPeriod $event */
+                $event = $this->route('salesEventPeriod');
                 if ($event->hasEndedBefore(today()->toImmutable())) {
-                    $validator->errors()->add('multipliers', '終わったイベントの倍率は、需要予測に使わないため変えられません。');
+                    $validator->errors()->add('multipliers', '終わった期間の倍率は、需要予測に使わないため変えられません。');
 
                     return;
                 }

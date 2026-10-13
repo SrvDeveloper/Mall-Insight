@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysBetween, eventNames, formatChange, formatMultiplier, parseMultiplier, periodLabel } from "@/components/salesEvent/eventFormat";
+import { daysBetween, formatChange, formatMultiplier, parseMultiplier, periodLabel } from "@/components/salesEvent/eventFormat";
 
 describe("eventFormat", () => {
     it("names the period, adding the year to the end only when it changes", () => {
@@ -20,9 +20,5 @@ describe("eventFormat", () => {
         expect(formatMultiplier(null)).toBe("—");
         // 倍率が1未満なら、イベントで減る
         expect([formatChange(40.2), formatChange(-1.26), formatChange(0.3), formatChange(null)]).toEqual(["+40", "−1", "0", "—"]);
-    });
-
-    it("lists the names already used once each", () => {
-        expect(eventNames([{ name: "楽天スーパーセール" }, { name: "プライムデー" }, { name: "楽天スーパーセール" }])).toEqual(["楽天スーパーセール", "プライムデー"]);
     });
 });

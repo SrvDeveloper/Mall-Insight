@@ -3,74 +3,107 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\SaveSalesEventMultipliersRequest;
 use App\Http\Requests\SaveSalesEventRequest;
+use App\Http\Resources\SalesEventPeriodResource;
 use App\Http\Resources\SalesEventResource;
 use App\Models\SalesEvent;
+use App\Models\SalesEventMultiplier;
+use App\Models\SalesEventPeriod;
 use App\Services\Forecast\EventUpliftEstimator;
 use App\Services\Forecast\SalesEventReport;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class SalesEventController extends Controller
 {
     /**
-     * イベントの一覧（初日の新しい順、B-129）。チャネルごとに、これからのイベントは倍率の候補（品番の全体）、終わったイベントは普段の何倍売れたかを添える。
+     * イベントの一覧（B-129、K-114）。イベントごとに、期間（初日の順）と、期間・チャネルごとの倍率（これからの期間は候補、
+     * 終わった期間は普段の何倍売れたか）を添える。次の期間（開催中かこれから）の早い順、無ければ最後の期間の新しい順に並べる。
      */
     public function index(SalesEventReport $report): JsonResponse
     {
         $today = CarbonImmutable::today();
-        $events = SalesEvent::query()->with(['multipliers', 'createdBy', 'updatedBy'])->orderBy('starts_on')->orderBy('id')->get();
-        $overview = $report->overview($events, $today);
+        $events = SalesEvent::query()->with(['periods.multipliers', 'periods.updatedBy', 'createdBy', 'updatedBy'])->get();
+        $periods = $events->flatMap(fn (SalesEvent $event) => $event->periods->each(fn (SalesEventPeriod $period) => $period->setRelation('salesEvent', $event)))->sortBy(fn (SalesEventPeriod $period): string => $period->starts_on->toDateString())->values();
+        $overview = $report->overview($periods, $today);
+
+        $rows = $events->map(fn (SalesEvent $event): array => $this->eventData($event, $overview, $today));
 
         return response()->json([
-            'data' => $events->sortByDesc(fn (SalesEvent $event): string => $event->starts_on->toDateString().sprintf('%010d', $event->id))->values()->map(fn (SalesEvent $event): array => [
-                ...SalesEventResource::make($event)->resolve(),
-                'multipliers' => $overview[$event->id] ?? [],
-            ])->all(),
+            'data' => $rows->sort(function (array $a, array $b): int {
+                // 次の期間のあるイベントを先に、その初日の早い順。無いイベントは、最後の期間の初日の新しい順
+                if (($a['next_period'] === null) !== ($b['next_period'] === null)) {
+                    return $a['next_period'] === null ? 1 : -1;
+                }
+                if ($a['next_period'] !== null) {
+                    return [$a['next_period']['starts_on'], $a['id']] <=> [$b['next_period']['starts_on'], $b['id']];
+                }
+
+                return [$b['last_period']['starts_on'] ?? '', $b['id']] <=> [$a['last_period']['starts_on'] ?? '', $a['id']];
+            })->values()->all(),
             'meta' => $this->meta(),
         ]);
     }
 
     /**
-     * 1つのイベントの、チャネル・品番ごとの倍率と根拠。
+     * 1つのイベントと、その期間・倍率。
      */
     public function show(SalesEvent $salesEvent, SalesEventReport $report): JsonResponse
     {
-        $salesEvent->load(['createdBy', 'updatedBy']);
+        $today = CarbonImmutable::today();
+        $salesEvent->load(['periods.multipliers', 'periods.updatedBy', 'createdBy', 'updatedBy']);
+        $all = app(EventUpliftEstimator::class)->periods();
 
         return response()->json([
-            'data' => [
-                ...SalesEventResource::make($salesEvent)->resolve(),
-                ...$report->detail($salesEvent, CarbonImmutable::today()),
-            ],
+            'data' => $this->eventData($salesEvent, $report->overview($all, $today), $today),
             'meta' => $this->meta(),
         ]);
     }
 
-    public function store(SaveSalesEventRequest $request): JsonResponse
+    /**
+     * イベントを登録する。最初の期間を一緒に入れられる。
+     */
+    public function store(SaveSalesEventRequest $request, SalesEventReport $report): JsonResponse
     {
-        $event = SalesEvent::create([...$this->attributes($request), 'created_by_user_id' => $request->user()?->id, 'updated_by_user_id' => $request->user()?->id]);
+        $event = DB::transaction(function () use ($request): SalesEvent {
+            $event = SalesEvent::create([...$this->attributes($request), 'created_by_user_id' => $request->user()?->id, 'updated_by_user_id' => $request->user()?->id]);
+            $period = $request->validated('period');
+            if (is_array($period) && ($period['starts_on'] ?? null) !== null) {
+                $event->periods()->create([
+                    'starts_on' => $period['starts_on'],
+                    'ends_on' => $period['ends_on'],
+                    'note' => $period['note'] ?? null,
+                    'created_by_user_id' => $request->user()?->id,
+                    'updated_by_user_id' => $request->user()?->id,
+                ]);
+            }
 
-        return SalesEventResource::make($event->load(['createdBy', 'updatedBy']))->response()->setStatusCode(201);
+            return $event;
+        });
+
+        return $this->show($event, $report)->setStatusCode(201);
     }
 
     /**
      * イベントを変更する。モールを変えてチャネルが外れたら、そのチャネルで担当者が入れた倍率は消す。
      */
-    public function update(SaveSalesEventRequest $request, SalesEvent $salesEvent): SalesEventResource
+    public function update(SaveSalesEventRequest $request, SalesEvent $salesEvent, SalesEventReport $report): JsonResponse
     {
         DB::transaction(function () use ($request, $salesEvent): void {
             $salesEvent->update([...$this->attributes($request), 'updated_by_user_id' => $request->user()?->id]);
             $channels = array_map(fn ($channel): string => $channel->value, $salesEvent->channels());
-            $salesEvent->multipliers()->whereNotIn('channel', $channels)->delete();
+            SalesEventMultiplier::query()->whereIn('sales_event_period_id', $salesEvent->periods()->select('id'))->whereNotIn('channel', $channels)->delete();
         });
 
-        return SalesEventResource::make($salesEvent->load(['createdBy', 'updatedBy']));
+        return $this->show($salesEvent->refresh(), $report);
     }
 
+    /**
+     * イベントを、期間と担当者が入れた倍率ごと削除する。
+     */
     public function destroy(SalesEvent $salesEvent): Response
     {
         $salesEvent->delete();
@@ -79,34 +112,37 @@ class SalesEventController extends Controller
     }
 
     /**
-     * 担当者が入れた品番ごとの倍率を、送った内容で置き換える。送らなかった品番はシステムの候補を使う。
+     * @param  array<int, list<array<string, mixed>>>  $overview  期間ID => チャネルごとの倍率
+     * @return array<string, mixed>
      */
-    public function updateMultipliers(SaveSalesEventMultipliersRequest $request, SalesEvent $salesEvent, SalesEventReport $report): JsonResponse
+    private function eventData(SalesEvent $event, array $overview, CarbonImmutable $today): array
     {
-        DB::transaction(function () use ($request, $salesEvent): void {
-            $salesEvent->multipliers()->delete();
-            $salesEvent->multipliers()->createMany(array_map(fn (array $row): array => [
-                'item_no' => $row['item_no'],
-                'channel' => $row['channel'],
-                'multiplier' => round((float) $row['multiplier'], 2),
-                'updated_by_user_id' => $request->user()?->id,
-            ], $request->validated('multipliers')));
-            $salesEvent->touch();
-            $salesEvent->update(['updated_by_user_id' => $request->user()?->id]);
-        });
+        /** @var Collection<int, SalesEventPeriod> $periods */
+        $periods = $event->periods;
+        $periodRows = $periods->map(fn (SalesEventPeriod $period): array => [
+            ...SalesEventPeriodResource::make($period)->resolve(),
+            'multipliers' => $overview[$period->id] ?? [],
+        ])->values();
+        $next = $periodRows->first(fn (array $period): bool => $period['status'] !== 'ended');
+        $last = $periodRows->filter(fn (array $period): bool => $period['status'] === 'ended')->last();
 
-        return $this->show($salesEvent->refresh(), $report);
+        return [
+            ...SalesEventResource::make($event)->resolve(),
+            'periods' => $periodRows->all(),
+            'next_period' => $next,
+            'last_period' => $last,
+            'upcoming_count' => $periodRows->filter(fn (array $period): bool => $period['status'] !== 'ended')->count(),
+            'ended_count' => $periodRows->filter(fn (array $period): bool => $period['status'] === 'ended')->count(),
+        ];
     }
 
     /**
-     * @return array{name: string, starts_on: string, ends_on: string, malls: list<string>, note: ?string}
+     * @return array{name: string, malls: list<string>, note: ?string}
      */
     private function attributes(SaveSalesEventRequest $request): array
     {
         return [
             'name' => trim((string) $request->validated('name')),
-            'starts_on' => $request->validated('starts_on'),
-            'ends_on' => $request->validated('ends_on'),
             'malls' => array_values($request->validated('malls')),
             'note' => $request->validated('note'),
         ];
@@ -122,7 +158,7 @@ class SalesEventController extends Controller
         return [
             'recent_events' => EventUpliftEstimator::RECENT_EVENTS,
             'min_expected' => EventUpliftEstimator::MIN_EXPECTED,
-            'max_days' => SalesEvent::MAX_DAYS,
+            'max_days' => SalesEventPeriod::MAX_DAYS,
         ];
     }
 }

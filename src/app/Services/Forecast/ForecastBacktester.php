@@ -7,7 +7,7 @@ use App\Enums\Warehouse;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
 use App\Models\ItemSelection;
-use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 use App\Models\SalesLine;
 use App\Services\Actuals\StockoutHistory;
 use App\Services\InventoryTrend\TrendSettings;
@@ -23,7 +23,7 @@ use Illuminate\Support\Collection;
  * - 方式（BacktestMethod）：今の方式（イベント＋登録した季節係数、B-106・K-113）、イベントの補正だけ（B-129・K-112）、
  *   補正を入れる前の基準平均日販（B-006）と、
  *   比べるための単純な方式（直近30日の平均・前年同月の実績）。
- *   イベントの補正は、登録したイベントの日を平均日販から除き、起点以降のイベントの日に、起点より前に終わった同じ名前のイベントから求めた倍率の候補を掛ける。
+ *   イベントの補正は、登録したイベントの日を平均日販から除き、起点以降のイベントの日に、起点より前に終わった同じイベントの期間から求めた倍率の候補を掛ける。
  *   担当者が入れた倍率は、後から分かったことで決めた値のため使わない。
  *   季節係数は担当者が登録した今の係数をすべての起点で使う（起点の時点で登録していたかは問わない。係数が当たるかを確かめるため）。
  * - 対象は対象品番（最新の選定）の有効なSKU。チャネル（BOSS・Amazon）ごとに予測と販売実績を比べ、子ASINの無いSKUは Amazon で比べない（K-042）。
@@ -80,12 +80,13 @@ class ForecastBacktester
             'origins' => $origins,
             'item_count' => $items->count(),
             'sku_count' => $skus->count(),
-            'events' => $this->eventUplifts->events()->map(fn (SalesEvent $event): array => [
+            'events' => $this->eventUplifts->periods()->map(fn (SalesEventPeriod $event): array => [
                 'id' => $event->id,
+                'event_id' => $event->sales_event_id,
                 'name' => $event->name,
                 'starts_on' => $event->starts_on->toDateString(),
                 'ends_on' => $event->ends_on->toDateString(),
-                'malls' => $event->malls->map(fn ($mall): string => $mall->value)->all(),
+                'malls' => $event->salesEvent->malls->map(fn ($mall): string => $mall->value)->all(),
             ])->all(),
             'seasonal_factors' => ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()),
             'rows' => $rows,
@@ -114,7 +115,7 @@ class ForecastBacktester
         }
 
         // イベント：平均日販から除く日と、終わったイベントごとの倍率（起点ごとの候補は、起点より前に終わったものから求める）
-        $events = $this->eventUplifts->events();
+        $events = $this->eventUplifts->periods();
         $excludedDates = $this->eventUplifts->excludedDates($events);
         $today = $lastMonthEnd->addDay();
         $measurements = $this->eventUplifts->measure($this->forecaster, $excludedDates, $events->filter(fn ($event): bool => $event->hasEndedBefore($today)), collect($items), $channelRanges);
@@ -310,9 +311,9 @@ class ForecastBacktester
     }
 
     /**
-     * 起点時点の、品番ごとのこれからのイベントの倍率の候補（起点より前に終わった同じ名前のイベントから求める）。倍率は起点以降の日に掛ける。
+     * 起点時点の、品番ごとのこれからのイベントの倍率の候補（起点より前に終わった同じイベントの期間から求める）。倍率は起点以降の日に掛ける。
      *
-     * @param  Collection<int, SalesEvent>  $events
+     * @param  Collection<int, SalesEventPeriod>  $events
      * @param  array<int, array<string, EventMeasurement>>  $measurements
      * @param  list<Item>  $items
      * @return array<string, list<EventUplift>> 品番 => イベント

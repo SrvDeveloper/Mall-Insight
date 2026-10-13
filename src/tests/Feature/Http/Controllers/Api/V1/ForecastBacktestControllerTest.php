@@ -6,6 +6,7 @@ use App\Models\ForecastBacktest;
 use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Models\User;
@@ -129,8 +130,9 @@ class ForecastBacktestControllerTest extends TestCase
         $sku = Sku::factory()->create(['item_id' => Item::query()->where('item_no', 'fl-01')->value('id'), 'sku_code' => 'fl-01-1-10', 'child_asin' => null]);
         $isSale = fn (CarbonImmutable $day): bool => in_array($day->month, [3, 6, 9, 12], true) && $day->day >= 4 && $day->day <= 7;
         $this->sellDaily($sku, '2024-07-01', '2026-10-06', fn (CarbonImmutable $day): int => $isSale($day) ? 5 : 1);
+        $sale = SalesEvent::factory()->create();
         foreach (['2024-09', '2024-12', '2025-03', '2025-06', '2025-09', '2025-12', '2026-03', '2026-06', '2026-09'] as $month) {
-            SalesEvent::factory()->period("{$month}-04", "{$month}-07")->create();
+            SalesEventPeriod::factory()->for($sale)->period("{$month}-04", "{$month}-07")->create();
         }
 
         $id = $this->postJson('/api/v1/forecast-backtests')->assertCreated()->json('data.id');

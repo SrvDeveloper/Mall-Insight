@@ -1,5 +1,3 @@
-import type { SalesEvent } from "@/types/api";
-
 /**
  * イベント（B-129、K-112）の表示の整え方。
  */
@@ -63,9 +61,4 @@ export function parseMultiplier(input: string): number | null | undefined {
     }
     const value = Number(text);
     return value <= MAX_MULTIPLIER ? value : undefined;
-}
-
-/** 登録済みのイベントの名前（名前の入力欄の候補に出す）。一覧の順（初日の新しい順）に、重ねずに並べる。 */
-export function eventNames(events: Pick<SalesEvent, "name">[]): string[] {
-    return [...new Set(events.map((event) => event.name))];
 }

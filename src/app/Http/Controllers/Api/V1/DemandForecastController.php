@@ -6,7 +6,7 @@ use App\Enums\Channel;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SkuForecastResource;
 use App\Models\Item;
-use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\Forecast\SkuForecast;
 use App\Services\Pricing\UnitPriceCatalog;
@@ -57,14 +57,15 @@ class DemandForecastController extends Controller
                 ],
                 'window_weights' => array_map(fn (int $length, float $weight): array => ['length' => $length, 'weight' => $weight], array_keys(DemandForecaster::WINDOW_WEIGHTS), DemandForecaster::WINDOW_WEIGHTS),
                 'min_sales_days' => DemandForecaster::MIN_SALES_DAYS,
-                // 平均日販から日を除き、これからの日に倍率を掛けたイベント（B-129、K-112）
-                'events' => $forecast->events->map(fn (SalesEvent $event): array => [
-                    'id' => $event->id,
-                    'name' => $event->name,
-                    'starts_on' => $event->starts_on->toDateString(),
-                    'ends_on' => $event->ends_on->toDateString(),
-                    'channels' => array_map(fn (Channel $channel): string => $channel->value, $event->channels()),
-                    'status' => $event->status($forecast->forecastFrom)->value,
+                // 平均日販から日を除き、これからの日に倍率を掛けたイベントの期間（B-129、K-112・K-114）
+                'events' => $forecast->events->map(fn (SalesEventPeriod $period): array => [
+                    'id' => $period->id,
+                    'event_id' => $period->sales_event_id,
+                    'name' => $period->name,
+                    'starts_on' => $period->starts_on->toDateString(),
+                    'ends_on' => $period->ends_on->toDateString(),
+                    'channels' => array_map(fn (Channel $channel): string => $channel->value, $period->channels()),
+                    'status' => $period->status($forecast->forecastFrom)->value,
                 ])->values()->all(),
                 // 季節係数を登録した品番（B-106、K-113）
                 'seasonal_item_nos' => array_keys($forecast->seasonalFactors),

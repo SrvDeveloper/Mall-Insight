@@ -3,7 +3,7 @@
 namespace App\Services\Forecast;
 
 use App\Enums\Channel;
-use App\Models\SalesEvent;
+use App\Models\SalesEventPeriod;
 
 /**
  * 終わったイベント1つ・チャネル1つで、普段より何倍売れたか（B-129、K-112）。
@@ -16,7 +16,7 @@ final readonly class EventMeasurement
      * @param  array<string, array{expected: float, actual: int}>  $items  品番 => 普段なら売れた数・売れた数
      */
     public function __construct(
-        public SalesEvent $event,
+        public SalesEventPeriod $event,
         public Channel $channel,
         public array $items,
         public float $expected,

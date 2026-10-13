@@ -61,7 +61,7 @@ class DemandForecaster
         $items = $this->items(collect($itemNos ?? $selection?->items->pluck('item_no')->all() ?? []));
         $skuIds = $items->flatMap(fn (Item $item) => $item->skus)->pluck('id')->all();
         $channelRanges = $this->channelSalesRanges($forecastFrom);
-        $events = $this->eventUplifts->events();
+        $events = $this->eventUplifts->periods();
         $seasonal = ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all());
         $eventPlan = $this->eventUplifts->plan($this, $forecastFrom, $items, $channelRanges, $events, $seasonal);
 
@@ -444,7 +444,7 @@ class DemandForecaster
             $events = [];
             foreach ($eventDays[$month[0]->format('Y-m')] ?? [] as $index => $days) {
                 $uplift = $uplifts[$index];
-                $events[] = new MonthlyEventDemand($uplift->event->id, $uplift->event->name, $channel, $days, $uplift->multiplier, $uplift->isCandidate, $daily * ($uplift->multiplier - 1) * $days);
+                $events[] = new MonthlyEventDemand($uplift->event->id, $uplift->event->sales_event_id, $uplift->event->name, $channel, $days, $uplift->multiplier, $uplift->isCandidate, $daily * ($uplift->multiplier - 1) * $days);
             }
             $extra = array_sum(array_map(fn (MonthlyEventDemand $event): float => $event->quantity, $events));
 

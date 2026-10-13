@@ -11,6 +11,7 @@ use App\Enums\Channel;
 final readonly class MonthlyEventDemand
 {
     public function __construct(
+        public int $periodId,
         public int $eventId,
         public string $name,
         public Channel $channel,

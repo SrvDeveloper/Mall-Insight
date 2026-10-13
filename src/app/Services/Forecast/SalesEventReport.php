@@ -6,14 +6,14 @@ use App\Enums\Channel;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
 use App\Models\ItemSelection;
-use App\Models\SalesEvent;
 use App\Models\SalesEventMultiplier;
+use App\Models\SalesEventPeriod;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
- * イベントの画面（B-129、K-112）に出す倍率。これからのイベント（始まる前・開催中）は倍率の候補とその根拠、
- * 終わったイベントは普段の何倍売れたか（測れたチャネルだけ）。対象品番（最新の選定）のSKUで求める。
+ * イベントの画面（B-129、K-112・K-114）に出す、期間ごとの倍率。これからの期間（始まる前・開催中）は倍率の候補とその根拠、
+ * 終わった期間は普段の何倍売れたか（測れたチャネルだけ）。対象品番（最新の選定）のSKUで求める。以下の $event はイベントの1回の期間。
  * 季節係数を登録した品番は、普段なら売れた数に季節係数を掛けて比べる（B-106）。
  */
 class SalesEventReport
@@ -21,16 +21,16 @@ class SalesEventReport
     public function __construct(private DemandForecaster $forecaster, private EventUpliftEstimator $estimator) {}
 
     /**
-     * 一覧に添える、チャネルごとの倍率（品番の全体）。
+     * 一覧に添える、期間・チャネルごとの倍率（品番の全体）。
      *
-     * @param  Collection<int, SalesEvent>  $events
-     * @return array<int, list<array<string, mixed>>> イベントID => チャネルごとの倍率
+     * @param  Collection<int, SalesEventPeriod>  $events  登録したすべての期間（イベントを読み込んだもの）
+     * @return array<int, list<array<string, mixed>>> 期間ID => チャネルごとの倍率
      */
     public function overview(Collection $events, CarbonImmutable $today): array
     {
         $items = $this->targetItems();
         $ranges = $this->forecaster->channelSalesRanges($today);
-        $measurements = $this->estimator->measure($this->forecaster, $this->estimator->excludedDates($events), $events->filter(fn (SalesEvent $event): bool => $event->hasEndedBefore($today)), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
+        $measurements = $this->estimator->measure($this->forecaster, $this->estimator->excludedDates($events), $events->filter(fn (SalesEventPeriod $event): bool => $event->hasEndedBefore($today)), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
 
         $overview = [];
         foreach ($events as $event) {
@@ -64,15 +64,15 @@ class SalesEventReport
     }
 
     /**
-     * 1つのイベントの、チャネル・品番ごとの倍率。これからのイベントでは、今の需要予測の基準平均日販から、
-     * イベントの期間（今日以降）の普段の予測と、倍率で増やした数を添える。
+     * 1つの期間の、チャネル・品番ごとの倍率。これからの期間では、今の需要予測の基準平均日販から、
+     * 期間（今日以降）の普段の予測と、倍率で増やした数を添える。
      *
      * @return array{remaining_days: int, channels: list<array<string, mixed>>}
      */
-    public function detail(SalesEvent $event, CarbonImmutable $today): array
+    public function detail(SalesEventPeriod $event, CarbonImmutable $today): array
     {
-        $events = $this->estimator->events();
-        $event = $events->firstWhere('id', $event->id) ?? $event->load('multipliers');
+        $events = $this->estimator->periods();
+        $event = $events->firstWhere('id', $event->id) ?? $event->load(['salesEvent', 'multipliers']);
         $items = $this->targetItems();
         $ranges = $this->forecaster->channelSalesRanges($today);
         $excluded = $this->estimator->excludedDates($events);
@@ -92,15 +92,16 @@ class SalesEventReport
 
         return [
             'remaining_days' => $remainingDays,
-            'channels' => array_map(fn (Channel $channel): array => $this->candidateChannel($event, $channel, $this->estimator->candidate($event, $channel, $events, $measurements, $today), $forecast, $remainingDays), $event->channels()),
+            'channels' => array_map(fn (Channel $channel): array => $this->candidateChannel($event, $channel, $this->estimator->candidate($event, $channel, $events, $measurements, $today), $forecast, $today), $event->channels()),
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function candidateChannel(SalesEvent $event, Channel $channel, EventCandidate $candidate, DemandForecast $forecast, int $remainingDays): array
+    private function candidateChannel(SalesEventPeriod $event, Channel $channel, EventCandidate $candidate, DemandForecast $forecast, CarbonImmutable $today): array
     {
+        $remainingDates = array_values(array_filter($event->dates(), fn (string $date): bool => $date >= $today->toDateString()));
         $rows = [];
         foreach ($forecast->items as $entry) {
             /** @var Item $item */
@@ -115,7 +116,7 @@ class SalesEventReport
                     $baseAverage = ($baseAverage ?? 0.0) + $channelForecast->baseAverage;
                     foreach ($channelForecast->monthly as $month) {
                         foreach ($month->events as $monthEvent) {
-                            if ($monthEvent->eventId === $event->id) {
+                            if ($monthEvent->periodId === $event->id) {
                                 $extra += $monthEvent->quantity;
                             }
                         }
@@ -136,7 +137,7 @@ class SalesEventReport
                 'override' => $override?->multiplier,
                 'multiplier' => $override?->multiplier ?? $candidateValue,
                 'base_average' => $baseAverage === null ? null : round($baseAverage, 4),
-                'usual' => $baseAverage === null ? null : round($baseAverage * $remainingDays, 2),
+                'usual' => $baseAverage === null ? null : round($baseAverage * $this->seasonalDays($remainingDates, $forecast->seasonalFactors[$item->item_no] ?? null), 2),
                 'extra' => $baseAverage === null ? null : round($extra, 2),
             ];
         }
@@ -151,6 +152,7 @@ class SalesEventReport
             'basis' => array_map(fn (EventMeasurement $measurement): array => [
                 'id' => $measurement->event->id,
                 'name' => $measurement->event->name,
+                'note' => $measurement->event->note,
                 'starts_on' => $measurement->event->starts_on->toDateString(),
                 'ends_on' => $measurement->event->ends_on->toDateString(),
                 'expected' => round($measurement->expected, 2),
@@ -199,6 +201,17 @@ class SalesEventReport
                 ];
             })->values()->all(),
         ];
+    }
+
+    /**
+     * 日数（季節係数を登録した品番は、日ごとにその月の係数を掛けて足す）。
+     *
+     * @param  list<string>  $dates
+     * @param  array<int, float>|null  $factors
+     */
+    private function seasonalDays(array $dates, ?array $factors): float
+    {
+        return array_sum(array_map(fn (string $date): float => $factors === null ? 1.0 : $factors[(int) substr($date, 5, 2)], $dates));
     }
 
     /**

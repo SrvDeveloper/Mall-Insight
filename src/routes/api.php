@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\V1\ItemUnitPriceController;
 use App\Http\Controllers\Api\V1\MonthlySalesRatioController;
 use App\Http\Controllers\Api\V1\RatioCategoryController;
 use App\Http\Controllers\Api\V1\SalesEventController;
+use App\Http\Controllers\Api\V1\SalesEventPeriodController;
 use App\Http\Controllers\Api\V1\SalesImportController;
 use App\Http\Controllers\Api\V1\SalesTargetCarryOverController;
 use App\Http\Controllers\Api\V1\SalesTargetController;
@@ -40,7 +41,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
         Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
         Route::apiResource('sales-events', SalesEventController::class)->parameters(['sales-events' => 'salesEvent']);
-        Route::put('/sales-events/{salesEvent}/multipliers', [SalesEventController::class, 'updateMultipliers'])->name('sales-events.multipliers.update');
+        Route::post('/sales-events/{salesEvent}/periods', [SalesEventPeriodController::class, 'store'])->name('sales-events.periods.store');
+        Route::apiResource('sales-event-periods', SalesEventPeriodController::class)->only(['show', 'update', 'destroy'])->parameters(['sales-event-periods' => 'salesEventPeriod']);
+        Route::put('/sales-event-periods/{salesEventPeriod}/multipliers', [SalesEventPeriodController::class, 'updateMultipliers'])->name('sales-event-periods.multipliers.update');
         Route::get('/seasonal-factors', [SeasonalFactorController::class, 'index'])->name('seasonal-factors.index');
         Route::get('/seasonal-factors/{itemNo}', [SeasonalFactorController::class, 'show'])->name('seasonal-factors.show');
         Route::put('/seasonal-factors/{itemNo}', [SeasonalFactorController::class, 'update'])->name('seasonal-factors.update');
