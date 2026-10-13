@@ -23,6 +23,14 @@ enum Mall: string
     }
 
     /**
+     * そのモールの販売チャネル。楽天市場・Yahoo!ショッピング・au PAY マーケットは BOSS で受注して BOSS の倉庫から出荷する（K-038）。
+     */
+    public function channel(): Channel
+    {
+        return $this === self::Amazon ? Channel::Amazon : Channel::Boss;
+    }
+
+    /**
      * BOSS受注実績の `ショップID` からモールを判定する。該当しなければ null。
      */
     public static function fromBossShopId(string $shopId): ?self

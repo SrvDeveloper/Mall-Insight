@@ -29,7 +29,10 @@ export const navigation: NavGroup[] = [
     },
     {
         label: "販売実績",
-        pages: [{ name: "item-sales", label: "品番別売上", path: "/item-sales" }],
+        pages: [
+            { name: "item-sales", label: "品番別売上", path: "/item-sales" },
+            { name: "store-sales", label: "店舗売上", path: "/store-sales" },
+        ],
     },
     {
         label: "在庫試算",

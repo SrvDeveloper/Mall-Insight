@@ -7,10 +7,18 @@ import type { SalesActualsResponse, SalesUnit } from "@/types/api";
 
 /**
  * 品番別売上・SKU別売上の一覧の上の操作欄（月別と日別・数量と金額・表とグラフ・絞り込み・期間）と凡例。
- * 表とグラフの切り替えと絞り込みは、view・searchLabel を渡したときだけ出す（SKU別売上は1画面のため出さない）。
+ * 表とグラフの切り替えと絞り込みは、view・searchLabel を渡したときだけ出す（SKU別売上は1画面のため出さない）。店舗売上でも使う（B-126）。
  */
 
-defineProps<{ unit: SalesUnit; measure: ActualMeasure; view?: SalesView; rangeNote: string; searchLabel?: string; meta: SalesActualsResponse["meta"]; periodError: string | null }>();
+defineProps<{
+    unit: SalesUnit;
+    measure: ActualMeasure;
+    view?: SalesView;
+    rangeNote: string;
+    searchLabel?: string;
+    meta: Pick<SalesActualsResponse["meta"], "from" | "to" | "calculated_at">;
+    periodError: string | null;
+}>();
 const keyword = defineModel<string>("keyword", { default: "" });
 const emit = defineEmits<{ update: [changes: { unit?: SalesUnit; measure?: ActualMeasure; view?: SalesView; period?: SalesPeriod }] }>();
 

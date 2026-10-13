@@ -614,6 +614,29 @@ export interface SalesActualsResponse {
     };
 }
 
+/** 店舗売上で集める商品。all は全商品（CrossWalkerに未登録のSKUを含む）、target は対象品番だけ（K-088）。 */
+export type StoreSalesProducts = "all" | "target";
+
+/** 店舗（楽天市場・Yahoo!ショッピング・au PAY マーケット・Amazon）の販売数と金額。販売実績を取り込んでいない期間は null。 */
+export interface StoreSales {
+    mall: "rakuten" | "yahoo" | "au_pay" | "amazon";
+    label: string;
+    channel: "boss" | "amazon";
+    /** 期間ごとの、その店舗の販売実績がそろっているか */
+    coverage: ("full" | "partial" | "none")[];
+    quantities: (number | null)[];
+    amounts: (number | null)[];
+    /** 前の期間（前月・前日）と前年の同じ期間の値（K-082）。比べられない期間は null */
+    previous: { quantities: (number | null)[]; amounts: (number | null)[] };
+    last_year: { quantities: (number | null)[]; amounts: (number | null)[] };
+}
+
+/** 店舗売上（B-126）。期間と単位は品番別売上と同じ（K-080）。 */
+export interface StoreSalesResponse {
+    data: StoreSales[];
+    meta: Pick<SalesActualsResponse["meta"], "calculated_at" | "selection" | "unit" | "from" | "to" | "periods" | "channels"> & { products: StoreSalesProducts };
+}
+
 /** 日ごとの在庫数（直近31日）。在庫を取得していない日は、販売実績から推定した在庫を SKU の estimates に持つ（K-087）。 */
 export interface StockActualsResponse {
     data: ActualItem[];

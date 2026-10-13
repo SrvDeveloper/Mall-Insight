@@ -1,6 +1,6 @@
 import { formatQuantity, shortMonthLabel } from "@/components/inventoryTrend/trendRows";
 import { formatThousandYen } from "@/components/salesTarget/format";
-import type { ActualItem, ActualSku, SalesActualsResponse, StockActualDate, StockActualsResponse, StockEstimate, StockoutPeriod } from "@/types/api";
+import type { ActualItem, ActualSku, SalesActualsResponse, StockActualDate, StockActualsResponse, StockEstimate, StockoutPeriod, StoreSales } from "@/types/api";
 
 /**
  * 実績（B-124）の表示用データ。販売実績（月ごと）と在庫実績（日ごと）で共通に使う。表とグラフの両方で使い、
@@ -89,7 +89,7 @@ function noEstimateTitle(date: StockActualDate): string | undefined {
     }
 }
 
-export function salesColumns(meta: SalesActualsResponse["meta"]): ActualColumn[] {
+export function salesColumns(meta: Pick<SalesActualsResponse["meta"], "unit" | "periods" | "calculated_at">): ActualColumn[] {
     const isDay = meta.unit === "day";
     // 今月（今日）は計算した日時から決める（期間を指定すると、最後の列が今月とは限らない）
     const today = meta.calculated_at.slice(0, 10);
@@ -258,6 +258,18 @@ export const MALL_SERIES: { key: "boss" | "amazon"; label: string; color: string
     { key: "boss", label: "BOSS", color: SERIES_COLORS[0]! },
     { key: "amazon", label: "Amazon", color: SERIES_COLORS[1]! },
 ];
+
+/**
+ * 店舗の色（B-126、K-088）。Amazon はどの画面とも同じ橙、BOSS の3店舗は楽天市場を BOSS と同じ青にし、Yahoo!ショッピング・au PAY マーケットは
+ * グラフの指針の検証済みの並びの水色・紫とする（隣り合う積み上げの色が見分けられることを確かめた並び）。赤は在庫不足（K-074）に使っているため使わない。
+ */
+export const STORE_COLORS: Record<StoreSales["mall"], string> = { rakuten: SERIES_COLORS[0]!, yahoo: "#1baf7a", au_pay: "#4a3aa7", amazon: SERIES_COLORS[1]! };
+
+/** 店舗ごとの販売数（金額）の積み上げ。 */
+export function storeSeries(stores: StoreSales[], measure: ActualMeasure): ChartSeries[] {
+    const pick = (values: { quantities: (number | null)[]; amounts: (number | null)[] }): (number | null)[] => (measure === "amount" ? values.amounts : values.quantities);
+    return stores.map((store) => ({ key: store.mall, label: store.label, color: STORE_COLORS[store.mall], values: pick(store), previous: pick(store.previous), lastYear: pick(store.last_year) }));
+}
 
 /** 列ごとに値を足す。どの値もデータ無しの列は null。 */
 function sumColumns(lists: (number | null)[][], length: number): (number | null)[] {

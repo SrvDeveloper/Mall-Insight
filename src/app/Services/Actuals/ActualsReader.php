@@ -202,39 +202,7 @@ class ActualsReader
      */
     private function comparisons(SalesUnit $unit, array $periods, array $channels, array $ranges, array $skuIds, array $warehouses): array
     {
-        // 期間の位置 => モール => 比べ方 => 比べる期間の日付（比べられなければ null）
-        $windows = [];
-        $first = null;
-        $last = null;
-        foreach ($periods as $index => $period) {
-            foreach ($channels as $channel) {
-                $range = $ranges[$channel->value] ?? null;
-                $end = $range === null ? null : $period['end']->min($range['to']);
-                foreach (['previous', 'last_year'] as $kind) {
-                    $windows[$index][$channel->value][$kind] = null;
-                    if ($range === null || $range['from']->gt($period['start']) || $end->lt($period['start'])) {
-                        continue;
-                    }
-                    $start = match (true) {
-                        $kind === 'last_year' => $period['start']->subYearNoOverflow(),
-                        $unit === SalesUnit::Day => $period['start']->subDay(),
-                        default => $period['start']->subMonthNoOverflow(),
-                    };
-                    $periodEnd = $unit === SalesUnit::Day ? $start : $start->endOfMonth()->startOfDay();
-                    $windowEnd = $start->addDays((int) $period['start']->diffInDays($end))->min($periodEnd);
-                    if ($range['from']->gt($start) || $range['to']->lt($windowEnd)) {
-                        continue;
-                    }
-                    $dates = [];
-                    for ($day = $start; $day->lte($windowEnd); $day = $day->addDay()) {
-                        $dates[] = $day->toDateString();
-                    }
-                    $windows[$index][$channel->value][$kind] = $dates;
-                    $first = $first === null ? $start : $first->min($start);
-                    $last = $last === null ? $windowEnd : $last->max($windowEnd);
-                }
-            }
-        }
+        ['windows' => $windows, 'first' => $first, 'last' => $last] = $this->comparisonWindows($unit, $periods, $channels, $ranges);
 
         // SKU ID => モール => 日付 => [販売数, 金額]
         $daily = [];
@@ -286,6 +254,54 @@ class ActualsReader
     }
 
     /**
+     * 前の期間（月ごとは前月、日ごとは前日）と前年の同じ期間として比べる日付（K-082）。モールごとに、そのモールの販売実績がある日までと
+     * 同じ日数で比べる。そのモールの販売実績が期間の初日からそろっていない期間と、比べる期間の販売実績を一部でも取り込んでいないときは null。
+     * first・last は比べる日付の最初と最後（比べる期間が無ければ null）。
+     *
+     * @param  list<array{start: CarbonImmutable, end: CarbonImmutable, coverage: Coverage}>  $periods
+     * @param  list<Channel>  $channels
+     * @param  array<string, array{from: CarbonImmutable, to: CarbonImmutable}>  $ranges
+     * @return array{windows: array<int, array<string, array{previous: list<string>|null, last_year: list<string>|null}>>, first: CarbonImmutable|null, last: CarbonImmutable|null} windows は期間の位置 => モール => 比べ方 => 日付
+     */
+    public function comparisonWindows(SalesUnit $unit, array $periods, array $channels, array $ranges): array
+    {
+        $windows = [];
+        $first = null;
+        $last = null;
+        foreach ($periods as $index => $period) {
+            foreach ($channels as $channel) {
+                $range = $ranges[$channel->value] ?? null;
+                $end = $range === null ? null : $period['end']->min($range['to']);
+                foreach (['previous', 'last_year'] as $kind) {
+                    $windows[$index][$channel->value][$kind] = null;
+                    if ($range === null || $range['from']->gt($period['start']) || $end->lt($period['start'])) {
+                        continue;
+                    }
+                    $start = match (true) {
+                        $kind === 'last_year' => $period['start']->subYearNoOverflow(),
+                        $unit === SalesUnit::Day => $period['start']->subDay(),
+                        default => $period['start']->subMonthNoOverflow(),
+                    };
+                    $periodEnd = $unit === SalesUnit::Day ? $start : $start->endOfMonth()->startOfDay();
+                    $windowEnd = $start->addDays((int) $period['start']->diffInDays($end))->min($periodEnd);
+                    if ($range['from']->gt($start) || $range['to']->lt($windowEnd)) {
+                        continue;
+                    }
+                    $dates = [];
+                    for ($day = $start; $day->lte($windowEnd); $day = $day->addDay()) {
+                        $dates[] = $day->toDateString();
+                    }
+                    $windows[$index][$channel->value][$kind] = $dates;
+                    $first = $first === null ? $start : $first->min($start);
+                    $last = $last === null ? $windowEnd : $last->max($windowEnd);
+                }
+            }
+        }
+
+        return ['windows' => $windows, 'first' => $first, 'last' => $last];
+    }
+
+    /**
      * 期間を指定しないときの最初と最後（月ごとは月の初日）。
      *
      * @return array{0: CarbonImmutable, 1: CarbonImmutable}
@@ -304,7 +320,7 @@ class ActualsReader
      *
      * @return list<array{0: CarbonImmutable, 1: CarbonImmutable, 2: bool}>
      */
-    private function periods(SalesUnit $unit, CarbonImmutable $today, CarbonImmutable $from, CarbonImmutable $to): array
+    public function periods(SalesUnit $unit, CarbonImmutable $today, CarbonImmutable $from, CarbonImmutable $to): array
     {
         $periods = [];
         if ($unit === SalesUnit::Day) {
@@ -457,7 +473,7 @@ class ActualsReader
      * @param  list<Channel>  $channels  販売実績を取り込んだ、対象のモール
      * @param  array<string, array{from: CarbonImmutable, to: CarbonImmutable}>  $ranges
      */
-    private function coverage(array $channels, array $ranges, CarbonImmutable $start, CarbonImmutable $end, bool $isIncomplete): Coverage
+    public function coverage(array $channels, array $ranges, CarbonImmutable $start, CarbonImmutable $end, bool $isIncomplete): Coverage
     {
         $overlapping = array_filter($channels, fn (Channel $channel): bool => $ranges[$channel->value]['from']->lte($end) && $ranges[$channel->value]['to']->gte($start));
         if ($overlapping === []) {

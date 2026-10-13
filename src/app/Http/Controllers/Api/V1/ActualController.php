@@ -3,14 +3,17 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\Channel;
+use App\Enums\Mall;
 use App\Enums\Warehouse;
 use App\Http\Controllers\Controller;
 use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\Sku;
 use App\Services\Actuals\ActualsReader;
+use App\Services\Actuals\Coverage;
 use App\Services\Actuals\SalesUnit;
 use App\Services\Actuals\StockoutHistory;
+use App\Services\Actuals\StoreSalesReader;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\InventoryTrend\TrendScope;
 use Carbon\CarbonImmutable;
@@ -99,6 +102,60 @@ class ActualController extends Controller
                     'estimate' => $date['estimate']?->value,
                     'estimate_base_date' => $date['baseDate']?->toDateString(),
                 ], $stock['dates']),
+            ],
+        ]);
+    }
+
+    /**
+     * 店舗ごとの販売数と金額（税込）（バックログ B-126）。unit・from・to は販売実績（sales）と同じ。products で全商品（初期値、CrossWalkerに
+     * 未登録のSKUを含む）か対象品番（target）だけかを選ぶ（K-088）。店舗の販売実績を取り込んでいない期間は null。
+     * previous・last_year は前月（前日）と前年の比べる値（K-082）。
+     */
+    public function stores(Request $request, ActualsReader $reader, StoreSalesReader $stores): JsonResponse
+    {
+        $request->validate(['unit' => ['nullable', Rule::enum(SalesUnit::class)], 'products' => ['nullable', Rule::in(['all', 'target'])]]);
+        $unit = $request->enum('unit', SalesUnit::class) ?? SalesUnit::Month;
+        $isTarget = $request->input('products') === 'target';
+        $now = CarbonImmutable::now();
+        [$from, $to] = $this->period($request, $reader, $unit, $now);
+        $skuIds = null;
+        if ($isTarget) {
+            $skuIds = [];
+            foreach ($reader->items() as $item) {
+                foreach ($item->skus as $sku) {
+                    $skuIds[] = $sku->id;
+                }
+            }
+        }
+        $sales = $stores->sales($now, $unit, $from, $to, $skuIds);
+        $ranges = $reader->salesRanges();
+        $format = fn (CarbonImmutable $date): string => $unit === SalesUnit::Month ? $date->format('Y-m') : $date->toDateString();
+
+        return response()->json([
+            'data' => array_map(fn (Mall $mall): array => [
+                'mall' => $mall->value,
+                'label' => $mall->label(),
+                'channel' => $mall->channel()->value,
+                'coverage' => array_map(fn (Coverage $coverage): string => $coverage->value, $sales['stores'][$mall->value]['coverage']),
+                'quantities' => $sales['stores'][$mall->value]['quantities'],
+                'amounts' => $sales['stores'][$mall->value]['amounts'],
+                'previous' => $sales['stores'][$mall->value]['previous'],
+                'last_year' => $sales['stores'][$mall->value]['last_year'],
+            ], Mall::cases()),
+            'meta' => [
+                'calculated_at' => $now->toIso8601String(),
+                'unit' => $unit->value,
+                'from' => $format($from),
+                'to' => $format($to),
+                'products' => $isTarget ? 'target' : 'all',
+                'selection' => $this->meta(TrendScope::Total)['selection'],
+                'periods' => array_map(fn (array $period): array => ['period' => $format($period['start']), 'coverage' => $period['coverage']->value], $sales['periods']),
+                'channels' => array_map(fn (Channel $channel): array => [
+                    'channel' => $channel->value,
+                    'label' => $channel->label(),
+                    'sales_data_from' => ($ranges[$channel->value]['from'] ?? null)?->toDateString(),
+                    'sales_data_to' => ($ranges[$channel->value]['to'] ?? null)?->toDateString(),
+                ], Channel::cases()),
             ],
         ]);
     }

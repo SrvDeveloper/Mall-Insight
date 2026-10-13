@@ -53,6 +53,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/inventory-trends', [InventoryTrendController::class, 'index'])->name('inventory-trends.index');
         Route::get('/actuals/sales', [ActualController::class, 'sales'])->name('actuals.sales');
         Route::get('/actuals/stock', [ActualController::class, 'stock'])->name('actuals.stock');
+        Route::get('/actuals/stores', [ActualController::class, 'stores'])->name('actuals.stores');
         Route::post('/inventory-trend-settings', [InventoryTrendSettingController::class, 'store'])->name('inventory-trend-settings.store');
         Route::get('/unregistered-skus', [UnregisteredSkuController::class, 'index'])->name('unregistered-skus.index');
         Route::get('/crosswalker-syncs/latest', [CrossWalkerSyncController::class, 'latest'])->name('crosswalker-syncs.latest');

@@ -1,5 +1,5 @@
 import { apiClient } from "@/api/client";
-import type { SalesActualsResponse, SalesUnit, StockActualsResponse, TrendScope } from "@/types/api";
+import type { SalesActualsResponse, SalesUnit, StockActualsResponse, StoreSalesProducts, StoreSalesResponse, TrendScope } from "@/types/api";
 
 /** 品番別売上・SKU別売上の期間（月ごとは YYYY-MM、日ごとは YYYY-MM-DD）。null なら初期値（直近12か月と今月、直近30日）。 */
 export type SalesPeriod = { from: string; to: string } | null;
@@ -16,5 +16,11 @@ export async function fetchSalesActuals(scope: TrendScope = "total", unit: Sales
 /** 対象品番のSKUの、日ごとの在庫数（直近31日）。scope で全体（6区分の合計）・Amazon・BOSSを選ぶ。 */
 export async function fetchStockActuals(scope: TrendScope = "total"): Promise<StockActualsResponse> {
     const { data } = await apiClient.get<StockActualsResponse>("/actuals/stock", { params: { scope } });
+    return data;
+}
+
+/** 店舗ごとの、月ごと（直近12か月＋今月）か日ごと（直近30日）の販売数と金額。products で全商品か対象品番だけかを選ぶ（K-088）。period で期間を指定できる（K-080）。 */
+export async function fetchStoreSales(unit: SalesUnit = "month", products: StoreSalesProducts = "all", period: SalesPeriod = null): Promise<StoreSalesResponse> {
+    const { data } = await apiClient.get<StoreSalesResponse>("/actuals/stores", { params: { unit, products, from: period?.from, to: period?.to } });
     return data;
 }

@@ -10,6 +10,7 @@ import ItemListView from "@/views/ItemListView.vue";
 import LoginView from "@/views/LoginView.vue";
 import ItemSalesView from "@/views/ItemSalesView.vue";
 import SkuSalesView from "@/views/SkuSalesView.vue";
+import StoreSalesView from "@/views/StoreSalesView.vue";
 import SalesImportView from "@/views/SalesImportView.vue";
 import SalesTargetView from "@/views/SalesTargetView.vue";
 import StockActualsView from "@/views/StockActualsView.vue";
@@ -45,6 +46,7 @@ const routes: RouteRecordRaw[] = [
                     { path: ":itemNo", name: "sku-sales", component: SkuSalesView, meta: { title: "SKU別売上" } },
                 ],
             },
+            { path: "store-sales", name: "store-sales", component: StoreSalesView, meta: { title: "店舗売上" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
             { path: "sales-targets", name: "sales-targets", component: SalesTargetView, meta: { title: "販売目標" } },
             { path: "inbound-plans", name: "inbound-plans", component: InboundPlanView, meta: { title: "入荷予定" } },

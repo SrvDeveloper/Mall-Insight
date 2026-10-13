@@ -391,6 +391,70 @@ class ActualControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.estimates.29', ['quantity' => 3, 'base_quantity' => 3, 'sold' => 0]);
     }
 
+    public function test_sums_sales_by_store_for_all_products_or_only_the_target_items(): void
+    {
+        $sku = $this->sku('fl-01-1-10');
+        $unregistered = Sku::factory()->create(['item_id' => null]);
+        $sellAt = function (Sku $sku, string $date, int $quantity, string $mall): void {
+            static $orderId = 1000;
+            $isAmazon = $mall === 'amazon';
+            SalesLine::create(['source' => $isAmazon ? 'amazon' : 'boss', 'source_order_id' => (string) $orderId++, 'sales_date' => $date, 'mall' => $mall, 'sku_id' => $sku->id, 'warehouse' => $isAmazon ? 'amazon_fba' : 'boss_own', 'quantity' => $quantity, 'amount' => 1000 * $quantity]);
+        };
+        // BOSS は 2025-09-01～2026-10-06、Amazon は 2026-09-10～2026-10-06 を取り込んだ
+        $sellAt($sku, '2025-09-01', 2, 'rakuten');
+        $sellAt($sku, '2025-10-03', 4, 'rakuten');
+        $sellAt($sku, '2026-09-02', 3, 'rakuten');
+        $sellAt($sku, '2026-10-02', 5, 'rakuten');
+        $sellAt($unregistered, '2026-10-03', 7, 'rakuten');
+        $sellAt($sku, '2026-10-06', 1, 'yahoo');
+        $sellAt($sku, '2026-09-10', 6, 'amazon');
+        $sellAt($sku, '2026-10-06', 2, 'amazon');
+
+        $this->getJson('/api/v1/actuals/stores')
+            ->assertOk()
+            ->assertJsonPath('meta.products', 'all')
+            ->assertJsonPath('meta.from', '2025-10')
+            ->assertJsonPath('meta.to', '2026-10')
+            ->assertJsonCount(13, 'meta.periods')
+            ->assertJsonPath('data.*.mall', ['rakuten', 'yahoo', 'au_pay', 'amazon'])
+            ->assertJsonPath('data.*.label', ['楽天市場', 'Yahoo!ショッピング', 'au PAY マーケット', 'Amazon'])
+            // 全商品は、CrossWalkerに未登録のSKUも含める
+            ->assertJsonPath('data.0.quantities.0', 4)
+            ->assertJsonPath('data.0.quantities.11', 3)
+            ->assertJsonPath('data.0.quantities.12', 12)
+            ->assertJsonPath('data.0.amounts.12', 12000)
+            ->assertJsonPath('data.0.coverage.12', 'partial')
+            ->assertJsonPath('data.2.quantities.12', 0)
+            // Amazon は取り込んだ期間の外の月を null にし、取り込みが月の途中から始まる月は途中まで
+            ->assertJsonPath('data.3.quantities.10', null)
+            ->assertJsonPath('data.3.coverage.10', 'none')
+            ->assertJsonPath('data.3.quantities.11', 6)
+            ->assertJsonPath('data.3.coverage.11', 'partial')
+            // 前月比・前年比は、同じ日数で比べる（今月は 10月1日～6日を、9月・前年10月の1日～6日と）
+            ->assertJsonPath('data.0.previous.quantities.12', 3)
+            ->assertJsonPath('data.0.last_year.quantities.12', 4)
+            ->assertJsonPath('data.0.last_year.quantities.11', 2)
+            // 前の期間の販売実績を取り込んでいなければ比べない
+            ->assertJsonPath('data.3.previous.quantities.12', null);
+
+        $this->getJson('/api/v1/actuals/stores?products=target')
+            ->assertOk()
+            ->assertJsonPath('meta.products', 'target')
+            ->assertJsonPath('data.0.quantities.12', 5);
+
+        $this->getJson('/api/v1/actuals/stores?unit=day&from=2026-10-01&to=2026-10-07')
+            ->assertOk()
+            ->assertJsonCount(7, 'meta.periods')
+            ->assertJsonPath('data.0.quantities.2', 7)
+            ->assertJsonPath('data.1.quantities.5', 1)
+            // 今日はまだ取り込んでいない
+            ->assertJsonPath('data.1.quantities.6', null)
+            ->assertJsonPath('data.0.previous.quantities.2', 5);
+
+        $this->getJson('/api/v1/actuals/stores?products=sku')->assertUnprocessable()->assertJsonValidationErrors('products');
+        $this->getJson('/api/v1/actuals/stores?unit=day&from=2026-01-01&to=2026-10-07')->assertUnprocessable()->assertJsonValidationErrors('from');
+    }
+
     public function test_returns_only_the_requested_target_item_for_the_sku_screen(): void
     {
         Item::factory()->create(['item_no' => 'fl-02']);
