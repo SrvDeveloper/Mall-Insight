@@ -12,7 +12,8 @@ import type { SalesUnit } from "@/types/api";
  * 1行目は店舗の合計。販売実績を取り込んでいない店舗を除いた合計には「※」を付ける。データの無い列は見出しを薄くし「—」で示す。
  * 月・日の欄にマウスを乗せる（またはフォーカスする）と、グラフと同じツールチップ（合計と店舗ごとの値・構成比・前月比・前年比、K-082）を
  * 欄の下（下に入らなければ上）に出し、マウスを乗せた店舗を目立たせる。背景はグラフの折れ線のツールチップと同じく墨色を不透明度85%で透かす（K-085）。
- * ドラッグで横に動かしている間は出さない。販売実績のある欄を押す（Enter キー）と、その店舗（合計の行なら全店舗）の売上上位を開く（K-091）。
+ * ドラッグで横に動かしている間は出さない。販売実績のある欄を押す（Enter キー）と、その店舗（合計の行なら全店舗）の売上上位を表の下に出し、
+ * その欄を枠で示す（K-091・K-092）。
  */
 
 const props = defineProps<{
@@ -26,6 +27,8 @@ const props = defineProps<{
     /** ツールチップの値の表示（表の千円単位ではなく、円・個で出す） */
     formatValue: (value: number) => string;
     unit: SalesUnit;
+    /** 売上上位を表の下に出している欄（列の位置と店舗。合計の行は null） */
+    selected?: { index: number; key: string | null } | null;
 }>();
 const emit = defineEmits<{ pick: [index: number, key: string | null] }>();
 
@@ -50,7 +53,10 @@ function hide(): void {
     hovered.value = null;
 }
 
-/** 販売実績のある欄を押したら、売上上位を開く（ドラッグで横に動かしたときは開かない）。 */
+/** 欄が売上上位を出している欄か。 */
+const isSelected = (index: number, key: string | null): boolean => props.selected?.index === index && props.selected.key === key;
+
+/** 販売実績のある欄を押したら、売上上位を出す（ドラッグで横に動かしたときは出さない）。 */
 function pick(index: number, key: string | null, hasData: boolean): void {
     if (!hasData || isDragging.value) {
         return;
@@ -130,7 +136,12 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
                         v-for="(cell, index) in total.cells"
                         :key="index"
                         class="px-2 text-right font-semibold tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
-                        :class="[hovered?.index === index && hovered.key === null ? 'bg-stone-200/70' : '', cell.tone === 'none' ? '' : 'cursor-pointer']"
+                        :class="[
+                            hovered?.index === index && hovered.key === null ? 'bg-stone-200/70' : '',
+                            cell.tone === 'none' ? '' : 'cursor-pointer',
+                            isSelected(index, null) ? 'bg-stone-100 shadow-[inset_0_0_0_2px_var(--color-stone-900)]' : '',
+                        ]"
+                        :data-selected="isSelected(index, null) || undefined"
                         tabindex="0"
                         @mouseenter="show($event, index, null)"
                         @mouseleave="hide"
@@ -157,7 +168,12 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
                         v-for="(cell, index) in row.cells"
                         :key="index"
                         class="px-2 text-right tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
-                        :class="[hovered?.index === index && hovered.key === row.key ? 'bg-stone-200/70' : '', cell.tone === 'none' ? '' : 'cursor-pointer']"
+                        :class="[
+                            hovered?.index === index && hovered.key === row.key ? 'bg-stone-200/70' : '',
+                            cell.tone === 'none' ? '' : 'cursor-pointer',
+                            isSelected(index, row.key) ? 'bg-stone-100 shadow-[inset_0_0_0_2px_var(--color-stone-900)]' : '',
+                        ]"
+                        :data-selected="isSelected(index, row.key) || undefined"
                         tabindex="0"
                         @mouseenter="show($event, index, row.key)"
                         @mouseleave="hide"
@@ -182,7 +198,7 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
         >
             <SalesTooltipContent :tooltip="tooltip" :format-value="formatValue" :unit="unit" :highlight-key="hovered.key" />
             <p v-if="tooltip.total !== null" class="mt-1 border-t border-white/10 pt-1 text-[10px] text-stone-400" data-testid="tooltip-pick-hint">
-                押すと{{ hovered.key === null ? "全店舗" : "この店舗" }}の売上上位の品番・SKUを見られます
+                押すと{{ hovered.key === null ? "全店舗" : "この店舗" }}の売上上位の品番・SKUを表の下に出します
             </p>
         </div>
     </div>

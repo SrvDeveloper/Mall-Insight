@@ -5,7 +5,7 @@ import { ApiError } from "@/api/client";
 import { fetchStoreSales, type SalesPeriod } from "@/api/actuals";
 import SalesActualsToolbar from "@/components/actuals/SalesActualsToolbar.vue";
 import SalesChart from "@/components/actuals/SalesChart.vue";
-import StoreRankingDialog from "@/components/actuals/StoreRankingDialog.vue";
+import StoreRankingPanel from "@/components/actuals/StoreRankingPanel.vue";
 import StoreSalesTable from "@/components/actuals/StoreSalesTable.vue";
 import { chartFormats, salesColumns, storeSeries, type ActualColumn, type ActualMeasure } from "@/components/actuals/actualRows";
 import { buildStoreRows } from "@/components/actuals/storeSalesRows";
@@ -17,7 +17,7 @@ import type { SalesUnit, StoreSales, StoreSalesProducts, StoreSalesResponse } fr
  * 月ごと（直近12か月＋今月）か日ごと（直近30日）に表・グラフで見る。期間の指定と前月比・前年比のツールチップは品番別売上とそろえる（K-080・K-082）。
  * 商品は全商品（CrossWalkerに未登録のSKUを含む）と対象品番だけを切り替えられる。初めは店舗の売上として金額を出す（K-088）。
  * 販売実績を取り込んでいない月・日は0とせず「—」で示す（原則2）。表でもグラフと同じツールチップで詳細を見られ、欄を押すと
- * その店舗・月（日）の売上上位の品番・SKUを開ける（K-091）。
+ * その店舗・月（日）の売上上位の品番・SKUを表の下に出す（K-091・K-092）。
  * 選んだ商品・月ごとと日ごと・数量と金額・見せ方・期間は URL に持たせる。
  */
 
@@ -103,21 +103,26 @@ const needsSelection = computed(() => products.value === "target" && result.valu
 const formatDate = (value: string): string => value.replaceAll("-", "/");
 
 /** 売上上位を開いている欄。 */
-const rankingTarget = ref<{ period: string; label: string; mall: StoreSales["mall"] | null; storeLabel: string } | null>(null);
+const rankingTarget = ref<{ index: number; key: string | null; period: string; label: string; mall: StoreSales["mall"] | null; storeLabel: string } | null>(null);
 
 function openRanking(index: number, key: string | null): void {
     const column = columns.value[index];
     if (!column) {
         return;
     }
+    // 出している欄をもう一度押したら閉じる
+    if (rankingTarget.value?.index === index && rankingTarget.value.key === key) {
+        rankingTarget.value = null;
+        return;
+    }
     const [year, month, day] = column.key.split("-").map(Number);
     const label = `${year}年${month}月${day ? `${day}日` : ""}${column.current ? (unit.value === "month" ? "（今日まで）" : "") : ""}`;
     const store = result.value?.data.find((item) => item.mall === key);
-    rankingTarget.value = { period: column.key, label, mall: store?.mall ?? null, storeLabel: store?.label ?? "全店舗" };
+    rankingTarget.value = { index, key, period: column.key, label, mall: store?.mall ?? null, storeLabel: store?.label ?? "全店舗" };
 }
 
-// 選択を変えたら閉じる
-watch(requestKey, () => {
+// 商品・単位・期間や見せ方を変えたら閉じる
+watch([requestKey, view], () => {
     rankingTarget.value = null;
 });
 
@@ -198,11 +203,13 @@ const rangeNote = computed(() =>
                     :series="series"
                     :format-value="formats.formatValue"
                     :unit="unit"
+                    :selected="rankingTarget ? { index: rankingTarget.index, key: rankingTarget.key } : null"
                     @pick="openRanking"
                 />
                 <p v-if="rows.total.cells.some((cell) => cell.excludes)" class="border-t border-stone-200 px-4 py-2.5 text-xs text-stone-500" data-testid="excludes-note">
                     ※ 販売実績を取り込んでいない店舗を除いた合計です
                 </p>
+                <StoreRankingPanel :target="rankingTarget" :unit="unit" :products="products" :measure="measure" @close="rankingTarget = null" />
             </div>
             <div v-else class="flex flex-col gap-4 p-4" data-testid="store-sales-chart">
                 <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="店舗ごとの期間計">
@@ -220,7 +227,5 @@ const rangeNote = computed(() =>
                 <SalesChart :columns="columns" :series="series" :format-value="formats.formatValue" :format-axis="formats.formatAxis" :axis-unit="formats.axisUnit" :unit="unit" :height="340" />
             </div>
         </section>
-
-        <StoreRankingDialog :target="rankingTarget" :unit="unit" :products="products" :measure="measure" @close="rankingTarget = null" />
     </div>
 </template>

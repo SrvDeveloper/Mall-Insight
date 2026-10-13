@@ -78,7 +78,7 @@ describe("StoreSalesView", () => {
         expect(tooltip.exists()).toBe(true);
         // 背景は透かす（K-085）
         expect(tooltip.classes()).toContain("bg-stone-900/85");
-        expect(tooltip.find('[data-testid="tooltip-pick-hint"]').text()).toContain("この店舗の売上上位");
+        expect(tooltip.find('[data-testid="tooltip-pick-hint"]').text()).toContain("この店舗の売上上位の品番・SKUを表の下に出します");
         expect(tooltip.text()).toContain("26/10");
         // 金額は千円単位ではなく円で出す
         expect(tooltip.find('[data-testid="tooltip-total"]').text()).toBe("53,000円");
@@ -97,17 +97,21 @@ describe("StoreSalesView", () => {
         expect(wrapper.find('[data-testid="table-tooltip"] [data-highlighted="true"]').exists()).toBe(false);
     });
 
-    it("opens the top items and SKUs of the store and month when a cell is clicked", async () => {
+    it("shows the top items and SKUs of the store and month under the table when a cell is clicked", async () => {
         const { wrapper } = await mountView();
 
         // 販売実績の無い欄は押しても開かない
         await wrapper.findAll('[data-testid="store-row"]')[3]!.findAll("td[tabindex]")[0]!.trigger("click");
-        expect(wrapper.find('[data-testid="ranking-dialog"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(false);
 
-        await wrapper.findAll('[data-testid="store-row"]')[0]!.findAll("td[tabindex]")[2]!.trigger("click");
+        const cell = wrapper.findAll('[data-testid="store-row"]')[0]!.findAll("td[tabindex]")[2]!;
+        await cell.trigger("click");
         await flushPromises();
+        // 表の下に出し、押した欄を枠で示す
+        expect(wrapper.find('[data-testid="store-sales-table"] ~ [data-testid="ranking-panel"]').exists()).toBe(true);
+        expect(cell.attributes("data-selected")).toBe("true");
         expect(fetchStoreRanking).toHaveBeenCalledWith("month", "2026-10", "rakuten", "all", "amount");
-        const dialog = wrapper.find('[data-testid="ranking-dialog"]');
+        const dialog = wrapper.find('[data-testid="ranking-panel"]');
         expect(dialog.find("h2").text()).toBe("楽天市場・2026年10月（今日まで）の売上上位");
         expect(dialog.find('[data-testid="ranking-summary"]').text()).toBe("2026/10/01〜2026/10/07・全商品・合計 25,000円（5個）");
         const items = dialog.findAll('[data-testid="ranking-item"]');
@@ -123,14 +127,27 @@ describe("StoreSalesView", () => {
         expect(fetchStoreRanking).toHaveBeenLastCalledWith("month", "2026-10", "rakuten", "all", "quantity");
         expect(wrapper.find('[data-testid="ranking-item"]').text()).toContain("3個");
 
-        await wrapper.find('[aria-label="閉じる"]').trigger("click");
-        expect(wrapper.find('[data-testid="ranking-dialog"]').exists()).toBe(false);
+        await wrapper.find('[aria-label="売上上位を閉じる"]').trigger("click");
+        expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(false);
+        expect(cell.attributes("data-selected")).toBeUndefined();
 
         // 合計の行は全店舗
         await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[1]!.trigger("keydown", { key: "Enter" });
         await flushPromises();
         expect(fetchStoreRanking).toHaveBeenLastCalledWith("month", "2026-09", null, "all", "amount");
-        expect(wrapper.find('[data-testid="ranking-dialog"] h2').text()).toBe("全店舗・2026年9月の売上上位");
+        expect(wrapper.find('[data-testid="ranking-panel"] h2').text()).toBe("全店舗・2026年9月の売上上位");
+
+        // 同じ欄をもう一度押すと閉じる。見せ方を変えても閉じる
+        await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[1]!.trigger("click");
+        expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(false);
+        await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[0]!.trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(true);
+        await wrapper.find('[data-testid="view-graph"]').trigger("click");
+        await flushPromises();
+        await wrapper.find('[data-testid="view-table"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(false);
     });
 
     it("switches to the target items, quantities and the graph, keeping them in the URL", async () => {
