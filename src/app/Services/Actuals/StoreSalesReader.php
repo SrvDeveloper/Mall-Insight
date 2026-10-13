@@ -41,7 +41,7 @@ class StoreSalesReader
         $daily = $this->daily($loadFrom, $today, $skuIds);
 
         $stores = [];
-        foreach (Mall::cases() as $mall) {
+        foreach (Mall::displayOrder() as $mall) {
             $channel = $mall->channel();
             $sold = $daily[$mall->value] ?? [];
             $store = ['coverage' => [], 'quantities' => [], 'amounts' => [], 'previous' => ['quantities' => [], 'amounts' => []], 'last_year' => ['quantities' => [], 'amounts' => []]];

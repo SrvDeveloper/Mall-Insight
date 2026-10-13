@@ -261,7 +261,8 @@ export const MALL_SERIES: { key: "boss" | "amazon"; label: string; color: string
 
 /**
  * 店舗の色（B-126、K-088）。Amazon はどの画面とも同じ橙、BOSS の3店舗は楽天市場を BOSS と同じ青にし、Yahoo!ショッピング・au PAY マーケットは
- * グラフの指針の検証済みの並びの水色・紫とする（隣り合う積み上げの色が見分けられることを確かめた並び）。赤は在庫不足（K-074）に使っているため使わない。
+ * グラフの指針の検証済みの並びの水色・紫とする。積み上げの順（楽天市場・Amazon・Yahoo!ショッピング・au PAY マーケット、K-093）で隣り合う色が
+ * 見分けられることを確かめた。赤は在庫不足（K-074）に使っているため使わない。
  */
 export const STORE_COLORS: Record<StoreSales["mall"], string> = { rakuten: SERIES_COLORS[0]!, yahoo: "#1baf7a", au_pay: "#4a3aa7", amazon: SERIES_COLORS[1]! };
 

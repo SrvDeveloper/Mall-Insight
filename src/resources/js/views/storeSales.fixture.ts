@@ -14,14 +14,14 @@ function store(mall: StoreSales["mall"], label: string, quantities: (number | nu
     };
 }
 
-/** 店舗売上のテストで使う販売実績（3か月）。Amazon は 2026年8月の販売実績を取り込んでいない。 */
+/** 店舗売上のテストで使う販売実績（3か月、API と同じ店舗の順）。Amazon は 2026年8月の販売実績を取り込んでいない。 */
 export function storeSalesResponse(): StoreSalesResponse {
     return {
         data: [
             store("rakuten", "楽天市場", [6, 9, 5], 5000),
+            store("amazon", "Amazon", [null, 4, 2], 4000),
             store("yahoo", "Yahoo!ショッピング", [3, 5, 4], 5000),
             store("au_pay", "au PAY マーケット", [1, 1, 0], 5000),
-            store("amazon", "Amazon", [null, 4, 2], 4000),
         ],
         meta: {
             calculated_at: "2026-10-07T10:00:00+09:00",

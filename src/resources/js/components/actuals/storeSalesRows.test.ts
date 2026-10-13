@@ -7,8 +7,8 @@ describe("storeSalesRows", () => {
     it("sums the stores into the total, leaving stores without sales data out with a note", () => {
         const { total, stores } = buildStoreRows(storeSalesResponse().data, "quantity");
 
-        expect(stores.map((row) => row.label)).toEqual(["楽天市場", "Yahoo!ショッピング", "au PAY マーケット", "Amazon"]);
-        expect(stores[3]!.cells.map((cell) => cell.text)).toEqual(["—", "4", "2"]);
+        expect(stores.map((row) => row.label)).toEqual(["楽天市場", "Amazon", "Yahoo!ショッピング", "au PAY マーケット"]);
+        expect(stores[1]!.cells.map((cell) => cell.text)).toEqual(["—", "4", "2"]);
         expect(total.cells.map((cell) => [cell.text, cell.excludes ?? false])).toEqual([
             ["10", true],
             ["19", false],
@@ -27,9 +27,9 @@ describe("storeSalesRows", () => {
         const series = storeSeries(storeSalesResponse().data, "amount");
         expect(series.map((item) => [item.key, item.color])).toEqual([
             ["rakuten", "#2a78d6"],
+            ["amazon", "#eb6834"],
             ["yahoo", "#1baf7a"],
             ["au_pay", "#4a3aa7"],
-            ["amazon", "#eb6834"],
         ]);
         expect(series[0]!.previous).toEqual([null, 30000, 45000]);
     });

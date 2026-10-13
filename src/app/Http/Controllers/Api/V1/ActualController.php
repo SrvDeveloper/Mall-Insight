@@ -132,7 +132,7 @@ class ActualController extends Controller
                 'amounts' => $sales['stores'][$mall->value]['amounts'],
                 'previous' => $sales['stores'][$mall->value]['previous'],
                 'last_year' => $sales['stores'][$mall->value]['last_year'],
-            ], Mall::cases()),
+            ], Mall::displayOrder()),
             'meta' => [
                 'calculated_at' => $now->toIso8601String(),
                 'unit' => $unit->value,

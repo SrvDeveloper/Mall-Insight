@@ -59,9 +59,9 @@ describe("StoreSalesView", () => {
         expect(wrapper.find('[data-testid="description"]').text()).toContain("CrossWalkerに未登録のSKUを含む");
         expect(wrapper.findAll("thead th").map((th) => th.text())).toEqual(["店舗", "期間計（千円）", "構成比", "26/8", "26/9", "26/10 今月"]);
         const rows = wrapper.findAll('[data-testid="store-row"]');
-        expect(rows.map((row) => row.find("th").text())).toEqual(["楽天市場", "Yahoo!ショッピング", "au PAY マーケット", "Amazon"]);
+        expect(rows.map((row) => row.find("th").text())).toEqual(["楽天市場", "Amazon", "Yahoo!ショッピング", "au PAY マーケット"]);
         expect(rows[0]!.findAll('[data-testid="store-cell"]').map((cell) => cell.text())).toEqual(["30", "45", "25"]);
-        expect(rows[3]!.findAll('[data-testid="store-cell"]')[0]!.text()).toBe("—");
+        expect(rows[1]!.findAll('[data-testid="store-cell"]')[0]!.text()).toBe("—");
         const total = wrapper.find('[data-testid="store-total-row"]');
         expect(total.find('[data-testid="store-summary"]').text()).toBe("194");
         expect(total.findAll('[data-testid="store-cell-excludes"]')).toHaveLength(1);
@@ -101,7 +101,7 @@ describe("StoreSalesView", () => {
         const { wrapper } = await mountView();
 
         // 販売実績の無い欄は押しても開かない
-        await wrapper.findAll('[data-testid="store-row"]')[3]!.findAll("td[tabindex]")[0]!.trigger("click");
+        await wrapper.findAll('[data-testid="store-row"]')[1]!.findAll("td[tabindex]")[0]!.trigger("click");
         expect(wrapper.find('[data-testid="ranking-panel"]').exists()).toBe(false);
 
         const cell = wrapper.findAll('[data-testid="store-row"]')[0]!.findAll("td[tabindex]")[2]!;
@@ -166,7 +166,7 @@ describe("StoreSalesView", () => {
         await wrapper.find('[data-testid="view-graph"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query).toEqual({ products: "target", measure: "quantity", view: "graph" });
-        expect(wrapper.findAll('[data-testid="store-tile"]').map((tile) => tile.text())).toEqual(["楽天市場2050.0%", "Yahoo!ショッピング1230.0%", "au PAY マーケット25.0%", "Amazon615.0%"]);
+        expect(wrapper.findAll('[data-testid="store-tile"]').map((tile) => tile.text())).toEqual(["楽天市場2050.0%", "Amazon615.0%", "Yahoo!ショッピング1230.0%", "au PAY マーケット25.0%"]);
         expect(wrapper.findAll('[data-testid="legend-rakuten"]')).toHaveLength(1);
     });
 

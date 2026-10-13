@@ -23,6 +23,16 @@ enum Mall: string
     }
 
     /**
+     * 画面（店舗売上）に並べる順。売上の大きい楽天市場・Amazonを先にする（K-093）。
+     *
+     * @return list<self>
+     */
+    public static function displayOrder(): array
+    {
+        return [self::Rakuten, self::Amazon, self::Yahoo, self::AuPay];
+    }
+
+    /**
      * そのモールの販売チャネル。楽天市場・Yahoo!ショッピング・au PAY マーケットは BOSS で受注して BOSS の倉庫から出荷する（K-038）。
      */
     public function channel(): Channel

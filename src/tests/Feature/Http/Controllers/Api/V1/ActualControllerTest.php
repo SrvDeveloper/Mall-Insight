@@ -416,26 +416,27 @@ class ActualControllerTest extends TestCase
             ->assertJsonPath('meta.from', '2025-10')
             ->assertJsonPath('meta.to', '2026-10')
             ->assertJsonCount(13, 'meta.periods')
-            ->assertJsonPath('data.*.mall', ['rakuten', 'yahoo', 'au_pay', 'amazon'])
-            ->assertJsonPath('data.*.label', ['楽天市場', 'Yahoo!ショッピング', 'au PAY マーケット', 'Amazon'])
+            // 楽天市場・Amazon・Yahoo!ショッピング・au PAY マーケットの順（K-093）
+            ->assertJsonPath('data.*.mall', ['rakuten', 'amazon', 'yahoo', 'au_pay'])
+            ->assertJsonPath('data.*.label', ['楽天市場', 'Amazon', 'Yahoo!ショッピング', 'au PAY マーケット'])
             // 全商品は、CrossWalkerに未登録のSKUも含める
             ->assertJsonPath('data.0.quantities.0', 4)
             ->assertJsonPath('data.0.quantities.11', 3)
             ->assertJsonPath('data.0.quantities.12', 12)
             ->assertJsonPath('data.0.amounts.12', 12000)
             ->assertJsonPath('data.0.coverage.12', 'partial')
-            ->assertJsonPath('data.2.quantities.12', 0)
+            ->assertJsonPath('data.3.quantities.12', 0)
             // Amazon は取り込んだ期間の外の月を null にし、取り込みが月の途中から始まる月は途中まで
-            ->assertJsonPath('data.3.quantities.10', null)
-            ->assertJsonPath('data.3.coverage.10', 'none')
-            ->assertJsonPath('data.3.quantities.11', 6)
-            ->assertJsonPath('data.3.coverage.11', 'partial')
+            ->assertJsonPath('data.1.quantities.10', null)
+            ->assertJsonPath('data.1.coverage.10', 'none')
+            ->assertJsonPath('data.1.quantities.11', 6)
+            ->assertJsonPath('data.1.coverage.11', 'partial')
             // 前月比・前年比は、同じ日数で比べる（今月は 10月1日～6日を、9月・前年10月の1日～6日と）
             ->assertJsonPath('data.0.previous.quantities.12', 3)
             ->assertJsonPath('data.0.last_year.quantities.12', 4)
             ->assertJsonPath('data.0.last_year.quantities.11', 2)
             // 前の期間の販売実績を取り込んでいなければ比べない
-            ->assertJsonPath('data.3.previous.quantities.12', null);
+            ->assertJsonPath('data.1.previous.quantities.12', null);
 
         $this->getJson('/api/v1/actuals/stores?products=target')
             ->assertOk()
@@ -446,9 +447,9 @@ class ActualControllerTest extends TestCase
             ->assertOk()
             ->assertJsonCount(7, 'meta.periods')
             ->assertJsonPath('data.0.quantities.2', 7)
-            ->assertJsonPath('data.1.quantities.5', 1)
+            ->assertJsonPath('data.2.quantities.5', 1)
             // 今日はまだ取り込んでいない
-            ->assertJsonPath('data.1.quantities.6', null)
+            ->assertJsonPath('data.2.quantities.6', null)
             ->assertJsonPath('data.0.previous.quantities.2', 5);
 
         $this->getJson('/api/v1/actuals/stores?products=sku')->assertUnprocessable()->assertJsonValidationErrors('products');
