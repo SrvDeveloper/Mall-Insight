@@ -1,18 +1,77 @@
 <script setup lang="ts">
-import { useTemplateRef } from "vue";
-import type { ActualColumn } from "@/components/actuals/actualRows";
+import { computed, ref, useTemplateRef, watch, watchPostEffect } from "vue";
+import type { ActualColumn, ChartSeries } from "@/components/actuals/actualRows";
+import SalesTooltipContent from "@/components/actuals/SalesTooltipContent.vue";
+import { buildSalesTooltip } from "@/components/actuals/salesTooltip";
 import type { StoreSalesRow } from "@/components/actuals/storeSalesRows";
 import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
+import type { SalesUnit } from "@/types/api";
 
 /**
  * 店舗売上（B-126）の表。品番別売上の表（K-047・K-074）とそろえ、月・日を列に並べ、2列目の期間計と3列目の構成比は薄い灰色を敷いて区切る。
- * 1行目は店舗の合計。販売実績を取り込んでいない店舗を除いた合計には「※」を付け、ホバーで除いた店舗を出す。データの無い列は見出しを薄くし「—」で示す。
+ * 1行目は店舗の合計。販売実績を取り込んでいない店舗を除いた合計には「※」を付ける。データの無い列は見出しを薄くし「—」で示す。
+ * 月・日の欄にマウスを乗せる（またはフォーカスする）と、グラフと同じツールチップ（合計と店舗ごとの値・構成比・前月比・前年比、K-082）を
+ * 欄の下（下に入らなければ上）に出し、マウスを乗せた店舗を目立たせる。ドラッグで横に動かしている間は出さない。
  */
 
-defineProps<{ total: StoreSalesRow; stores: StoreSalesRow[]; columns: ActualColumn[]; summaryLabel: string; columnWidth: number }>();
+const props = defineProps<{
+    total: StoreSalesRow;
+    stores: StoreSalesRow[];
+    columns: ActualColumn[];
+    summaryLabel: string;
+    columnWidth: number;
+    /** ツールチップに使う、店舗ごとの値（表示している数か金額） */
+    series: ChartSeries[];
+    /** ツールチップの値の表示（表の千円単位ではなく、円・個で出す） */
+    formatValue: (value: number) => string;
+    unit: SalesUnit;
+}>();
 
 const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
-const { isDragging, onPointerDown, onPointerMove, onPointerEnd, onPointerLeave } = useHorizontalDragScroll(scrollBox);
+const tooltipElement = useTemplateRef<HTMLDivElement>("tooltipElement");
+const { isDragging, onPointerDown, onPointerMove, onPointerEnd, onPointerLeave } = useHorizontalDragScroll(scrollBox, () => {
+    hovered.value = null;
+});
+
+/** マウスを乗せた欄（列の位置と店舗。合計の行は null）と、その欄の画面上の位置。 */
+const hovered = ref<{ index: number; key: string | null; rect: ReturnType<HTMLElement["getBoundingClientRect"]> } | null>(null);
+const tooltipPosition = ref({ left: 0, top: 0 });
+
+function show(event: Event, index: number, key: string | null): void {
+    if (isDragging.value) {
+        return;
+    }
+    hovered.value = { index, key, rect: (event.currentTarget as HTMLElement).getBoundingClientRect() };
+}
+
+function hide(): void {
+    hovered.value = null;
+}
+
+const tooltip = computed(() => (hovered.value ? buildSalesTooltip(props.series, props.columns[hovered.value.index]!, hovered.value.index, { kind: "bar", unit: props.unit, withShare: true }) : null));
+
+// 表の内容が変わったら閉じる（期間などを切り替えたとき）
+watch(
+    () => [props.columns, props.series],
+    () => hide(),
+);
+
+// 欄の下に置き、画面の下に入らなければ上に置く。左右は画面の幅に収める
+watchPostEffect(() => {
+    if (!hovered.value || !tooltipElement.value) {
+        return;
+    }
+    const { rect } = hovered.value;
+    const bounds = tooltipElement.value.getBoundingClientRect();
+    const width = bounds.width || 320;
+    const height = bounds.height || 0;
+    const gap = 6;
+    const margin = 8;
+    const left = Math.min(Math.max(margin, rect.left + rect.width / 2 - width / 2), Math.max(margin, window.innerWidth - width - margin));
+    const below = rect.bottom + gap;
+    const top = below + height + margin <= window.innerHeight ? below : Math.max(margin, rect.top - height - gap);
+    tooltipPosition.value = { left, top };
+});
 
 const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
 </script>
@@ -29,6 +88,7 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
         @pointercancel="onPointerEnd"
         @lostpointercapture="onPointerEnd"
         @pointerleave="onPointerLeave"
+        @scroll="hide"
     >
         <table class="w-full table-fixed border-separate border-spacing-0 text-left text-sm" :style="{ minWidth: `${(208 + 96 + 72 + columns.length * columnWidth) / 16}rem` }">
             <colgroup>
@@ -55,8 +115,18 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
                     <th scope="row" class="sticky left-0 z-10 bg-stone-50 px-4 text-left font-semibold text-stone-900">{{ total.label }}</th>
                     <td class="bg-stone-100 px-3 text-right font-semibold text-stone-900 tabular-nums" data-testid="store-summary">{{ total.summaryText }}</td>
                     <td :class="`bg-stone-100 px-3 text-right text-stone-500 tabular-nums ${SUMMARY_EDGE}`">{{ total.shareText }}</td>
-                    <td v-for="(cell, index) in total.cells" :key="index" class="px-2 text-right font-semibold tabular-nums">
-                        <span class="inline-flex min-w-8 justify-end px-2 py-0.5" :class="cell.tone === 'none' ? 'text-stone-300' : 'text-stone-900'" :title="cell.title" data-testid="store-cell"
+                    <td
+                        v-for="(cell, index) in total.cells"
+                        :key="index"
+                        class="px-2 text-right font-semibold tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
+                        :class="hovered?.index === index && hovered.key === null ? 'bg-stone-200/70' : ''"
+                        tabindex="0"
+                        @mouseenter="show($event, index, null)"
+                        @mouseleave="hide"
+                        @focus="show($event, index, null)"
+                        @blur="hide"
+                    >
+                        <span class="inline-flex min-w-8 justify-end px-2 py-0.5" :class="cell.tone === 'none' ? 'text-stone-300' : 'text-stone-900'" data-testid="store-cell"
                             >{{ cell.text }}<sup v-if="cell.excludes" class="ml-0.5 text-[10px] font-normal text-stone-400" data-testid="store-cell-excludes">※</sup></span
                         >
                     </td>
@@ -70,13 +140,32 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
                     </th>
                     <td class="bg-stone-50 px-3 text-right font-medium text-stone-900 tabular-nums group-hover:bg-stone-100" data-testid="store-summary">{{ row.summaryText }}</td>
                     <td :class="`bg-stone-50 px-3 text-right text-stone-500 tabular-nums group-hover:bg-stone-100 ${SUMMARY_EDGE}`" data-testid="store-share">{{ row.shareText }}</td>
-                    <td v-for="(cell, index) in row.cells" :key="index" class="px-2 text-right tabular-nums">
-                        <span class="inline-flex min-w-8 justify-end px-2 py-0.5" :class="cell.tone === 'none' ? 'text-stone-300' : 'text-stone-700'" :title="cell.title" data-testid="store-cell">{{
-                            cell.text
-                        }}</span>
+                    <td
+                        v-for="(cell, index) in row.cells"
+                        :key="index"
+                        class="px-2 text-right tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
+                        :class="hovered?.index === index && hovered.key === row.key ? 'bg-stone-200/70' : ''"
+                        tabindex="0"
+                        @mouseenter="show($event, index, row.key)"
+                        @mouseleave="hide"
+                        @focus="show($event, index, row.key)"
+                        @blur="hide"
+                    >
+                        <span class="inline-flex min-w-8 justify-end px-2 py-0.5" :class="cell.tone === 'none' ? 'text-stone-300' : 'text-stone-700'" data-testid="store-cell">{{ cell.text }}</span>
                     </td>
                 </tr>
             </tbody>
         </table>
+
+        <div
+            v-if="tooltip && hovered"
+            ref="tooltipElement"
+            role="tooltip"
+            class="pointer-events-none fixed z-40 w-80 max-w-[calc(100vw-1rem)] rounded-lg bg-stone-900 px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
+            :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px` }"
+            data-testid="table-tooltip"
+        >
+            <SalesTooltipContent :tooltip="tooltip" :format-value="formatValue" :unit="unit" :highlight-key="hovered.key" />
+        </div>
     </div>
 </template>

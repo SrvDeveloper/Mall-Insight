@@ -11,9 +11,8 @@ import type { StoreSales } from "@/types/api";
 export interface StoreCell {
     text: string;
     tone: "normal" | "none";
-    /** 販売実績を取り込んでいない店舗を除いた合計 */
+    /** 販売実績を取り込んでいない店舗を除いた合計（除いた店舗はツールチップで示す） */
     excludes?: boolean;
-    title?: string;
 }
 
 export interface StoreSalesRow {
@@ -51,7 +50,7 @@ export function buildStoreRows(stores: StoreSales[], measure: ActualMeasure): { 
             label: store.label,
             color: STORE_COLORS[store.mall],
             values,
-            cells: values.map((value) => (value === null ? { text: "—", tone: "none", title: `${store.label}の販売実績を取り込んでいません` } : { text: format(value), tone: "normal" })),
+            cells: values.map((value) => (value === null ? { text: "—", tone: "none" } : { text: format(value), tone: "normal" })),
             summaryText: text(total),
             shareText: share(total),
         };
@@ -67,10 +66,7 @@ export function buildStoreRows(stores: StoreSales[], measure: ActualMeasure): { 
                 if (value === null) {
                     return { text: "—", tone: "none" };
                 }
-                const missing = stores.filter((store) => (valuesOf(store)[index] ?? null) === null).map((store) => store.label);
-                return missing.length === 0
-                    ? { text: format(value), tone: "normal" }
-                    : { text: format(value), tone: "normal", excludes: true, title: `${missing.join("・")}の販売実績を取り込んでいないため、合計に含みません` };
+                return { text: format(value), tone: "normal", excludes: stores.some((store) => (valuesOf(store)[index] ?? null) === null) };
             }),
             summaryText: text(grandTotal),
             shareText: grandTotal === null ? "—" : "100%",

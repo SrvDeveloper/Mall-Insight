@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watchPostEffect } from "vue";
 import type { ActualColumn, ChartSeries } from "@/components/actuals/actualRows";
-import { formatQuantity } from "@/components/inventoryTrend/trendRows";
-import type { SalesUnit, StockoutPeriod } from "@/types/api";
+import SalesTooltipContent from "@/components/actuals/SalesTooltipContent.vue";
+import { buildSalesTooltip, seriesTotal } from "@/components/actuals/salesTooltip";
+import type { SalesUnit } from "@/types/api";
 
 /**
  * 販売実績のグラフ（B-127、K-079）。kind が bar なら積み上げ棒グラフ（品番別売上の BOSS・Amazon）、line なら系列ごとの折れ線
@@ -10,8 +11,8 @@ import type { SalesUnit, StockoutPeriod } from "@/types/api";
  * 線は2pxで角を丸め、目盛り線は1pxの薄い実線とする。縦軸はきりのよい数の目盛り（棒は積み上げた合計、折れ線は一番大きい系列に合わせる）。
  * 月・日の帯にマウスを乗せる（またはフォーカスする）と、縦の線と点で示し、その月・日の合計と内訳をツールチップで出す。系列が2つ以上なら凡例を出す。
  * 販売実績を取り込んでいない月・日は棒も点も描かず（折れ線は前後の点を点線でつなぐ）、見出しを薄くしてツールチップでそのことを示す（原則2）。
- * ツールチップには、合計とモールごとに前月比（日ごとは前日比）と前年比を出す（K-082）。比べる期間の販売実績が無い・0のときは「—」。
- * SKU別売上の月ごとの折れ線には、モールごとの欠品日数と、在庫記録が途中からある場合の確認日数を添える（K-084）。
+ * ツールチップの中身（合計とモールごとの前月比・前年比、K-082。SKU別売上の月ごとの折れ線では欠品日数、K-084）は、店舗売上の表と共通の
+ * SalesTooltipContent で出す。
  */
 
 const props = withDefaults(
@@ -61,12 +62,7 @@ const band = computed(() => plotWidth.value / Math.max(1, props.columns.length))
 const barWidth = computed(() => Math.max(2, Math.min(MAX_BAR, band.value * 0.68)));
 
 /** 列ごとの合計（表示している系列）。データの無い列は null。 */
-const totals = computed(() =>
-    props.columns.map((_, index) => {
-        const values = props.series.map((series) => series.values[index] ?? null);
-        return values.every((value) => value === null) ? null : values.reduce<number>((total, value) => total + Math.max(0, value ?? 0), 0);
-    }),
-);
+const totals = computed(() => props.columns.map((_, index) => seriesTotal(props.series, index)));
 
 /** きりのよい目盛り（0から、4～5本）。 */
 const ticks = computed(() => {
@@ -144,68 +140,12 @@ const xLabels = computed(() => {
 // ツールチップ
 const hovered = ref<number | null>(null);
 
-/** 比べる期間の値の合計（表示している系列）。値のある系列のどれかが比べられなければ null。 */
-function comparisonTotal(index: number, key: "previous" | "lastYear"): number | null {
-    let total = 0;
-    for (const series of props.series) {
-        if ((series.values[index] ?? null) === null) {
-            continue;
-        }
-        const value = series[key]?.[index] ?? null;
-        if (value === null) {
-            return null;
-        }
-        total += Math.max(0, value);
-    }
-    return total;
-}
-
-/** 比べる期間に対する割合（「112%」）。比べる値が無い・0なら「—」。 */
-function ratio(value: number | null, base: number | null): string {
-    return value === null || base === null || base <= 0 ? "—" : `${formatQuantity(Math.round((value / base) * 100))}%`;
-}
-
-const comparisonLabels = computed(() => (props.unit === "day" ? ["前日比", "前年比"] : ["前月比", "前年比"]));
-
-function stockoutLabel(period: StockoutPeriod | undefined): string {
-    if (period?.days === null || period === undefined) {
-        return "—";
-    }
-    return period.known_days < period.period_days ? `${period.days}日（確認${period.known_days}/${period.period_days}日）` : `${period.days}日`;
-}
-
 const tooltip = computed(() => {
     if (hovered.value === null) {
         return null;
     }
     const index = hovered.value;
-    const column = props.columns[index]!;
-    const total = totals.value[index] ?? null;
-    // 折れ線は0の系列も出す（2本のどちらが売れていないかも分かるように）
-    const rows = props.series
-        .map((series) => {
-            const value = series.values[index] ?? null;
-            return {
-                key: series.key,
-                label: series.label,
-                color: series.color,
-                value,
-                previous: ratio(value, series.previous?.[index] ?? null),
-                lastYear: ratio(value, series.lastYear?.[index] ?? null),
-            };
-        })
-        .filter((row) => row.value !== null && (props.kind === "line" || row.value > 0))
-        .sort((a, b) => b.value! - a.value!);
-    const stockouts = props.kind === "line" && props.unit === "month" ? props.series.map((series) => ({ key: series.key, label: series.label, value: stockoutLabel(series.stockouts?.[index]) })) : [];
-    return {
-        column,
-        total,
-        previous: ratio(total, comparisonTotal(index, "previous")),
-        lastYear: ratio(total, comparisonTotal(index, "lastYear")),
-        rows,
-        stockouts,
-        anchorX: xCenter(index),
-    };
+    return { ...buildSalesTooltip(props.series, props.columns[index]!, index, { kind: props.kind, unit: props.unit }), anchorX: xCenter(index) };
 });
 
 // 高さはグラフ上部にそろえ、ホバーした列の左右だけを切り替える。凡例とツールチップの実際の幅を反映する。
@@ -327,46 +267,7 @@ watchPostEffect(() => {
             :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px` }"
             data-testid="chart-tooltip"
         >
-            <div class="flex items-baseline justify-between gap-2 border-b border-white/10 pb-1">
-                <span class="font-semibold text-white">{{ tooltip.column.label }}</span>
-                <span class="text-[10px] text-stone-400">{{ tooltip.column.sub }}</span>
-            </div>
-            <template v-if="tooltip.total === null">
-                <p class="pt-1 text-stone-300">販売実績を取り込んでいません</p>
-            </template>
-            <template v-else>
-                <div class="grid grid-cols-[minmax(0,1fr)_auto_3.25rem_3.25rem] items-center gap-x-2 gap-y-0.5 pt-1 tabular-nums">
-                    <span />
-                    <span />
-                    <span class="text-right text-[10px] text-stone-400">{{ comparisonLabels[0] }}</span>
-                    <span class="text-right text-[10px] text-stone-400">{{ comparisonLabels[1] }}</span>
-
-                    <span class="text-stone-300">合計</span>
-                    <span class="text-right font-semibold text-white" data-testid="tooltip-total">{{ formatValue(tooltip.total) }}</span>
-                    <span class="text-right" :class="tooltip.previous === '—' ? 'text-stone-500' : 'text-white'" data-testid="tooltip-total-previous">{{ tooltip.previous }}</span>
-                    <span class="text-right" :class="tooltip.lastYear === '—' ? 'text-stone-500' : 'text-white'" data-testid="tooltip-total-last-year">{{ tooltip.lastYear }}</span>
-
-                    <template v-for="row in tooltip.rows" :key="row.key">
-                        <span class="flex min-w-0 items-center gap-1.5 text-stone-300"
-                            ><span class="h-2 w-2 shrink-0 rounded-sm" :style="{ backgroundColor: row.color }" /><span class="truncate">{{ row.label }}</span></span
-                        >
-                        <span class="text-right">{{ formatValue(row.value!) }}</span>
-                        <span class="text-right" :class="row.previous === '—' ? 'text-stone-500' : ''" :data-testid="`tooltip-previous-${row.key}`">{{ row.previous }}</span>
-                        <span class="text-right" :class="row.lastYear === '—' ? 'text-stone-500' : ''" :data-testid="`tooltip-last-year-${row.key}`">{{ row.lastYear }}</span>
-                    </template>
-                </div>
-                <p v-if="tooltip.column.current && unit === 'month'" class="mt-1 border-t border-white/10 pt-1 text-[10px] leading-snug text-stone-400" data-testid="tooltip-note">
-                    今月は、前月・前年の同じ月の同じ日までと比べています
-                </p>
-            </template>
-            <div v-if="tooltip.stockouts.length" class="mt-1 border-t border-white/10 pt-1" data-testid="tooltip-stockouts">
-                <p class="text-[10px] text-stone-400">欠品日数{{ tooltip.column.current ? "（今日まで）" : "" }}</p>
-                <div v-for="row in tooltip.stockouts" :key="row.key" class="flex justify-between gap-2 tabular-nums">
-                    <span class="text-stone-300">{{ row.label }}</span>
-                    <span :class="row.value === '—' ? 'text-stone-500' : 'text-white'" :data-testid="`tooltip-stockouts-${row.key}`">{{ row.value }}</span>
-                </div>
-                <p v-if="tooltip.stockouts.some((row) => row.value === '—')" class="text-[10px] text-stone-400">—：判定できる在庫記録なし</p>
-            </div>
+            <SalesTooltipContent :tooltip="tooltip" :format-value="formatValue" :unit="unit" />
         </div>
     </div>
 </template>

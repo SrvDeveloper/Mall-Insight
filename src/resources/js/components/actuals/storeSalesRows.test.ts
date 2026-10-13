@@ -9,13 +9,11 @@ describe("storeSalesRows", () => {
 
         expect(stores.map((row) => row.label)).toEqual(["楽天市場", "Yahoo!ショッピング", "au PAY マーケット", "Amazon"]);
         expect(stores[3]!.cells.map((cell) => cell.text)).toEqual(["—", "4", "2"]);
-        expect(stores[3]!.cells[0]!.title).toBe("Amazonの販売実績を取り込んでいません");
         expect(total.cells.map((cell) => [cell.text, cell.excludes ?? false])).toEqual([
             ["10", true],
             ["19", false],
             ["11", false],
         ]);
-        expect(total.cells[0]!.title).toBe("Amazonの販売実績を取り込んでいないため、合計に含みません");
         expect(total.summaryText).toBe("40");
         expect(stores[0]!.summaryText).toBe("20");
         expect(stores[0]!.shareText).toBe("50.0%");

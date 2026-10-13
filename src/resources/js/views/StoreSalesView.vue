@@ -15,7 +15,8 @@ import type { SalesUnit, StoreSalesProducts, StoreSalesResponse } from "@/types/
  * 店舗売上（バックログ B-126）。左メニュー「販売実績」の画面。楽天市場・Yahoo!ショッピング・au PAY マーケット・Amazon の店舗ごとの売上を、
  * 月ごと（直近12か月＋今月）か日ごと（直近30日）に表・グラフで見る。期間の指定と前月比・前年比のツールチップは品番別売上とそろえる（K-080・K-082）。
  * 商品は全商品（CrossWalkerに未登録のSKUを含む）と対象品番だけを切り替えられる。初めは店舗の売上として金額を出す（K-088）。
- * 販売実績を取り込んでいない月・日は0とせず「—」で示す（原則2）。選んだ商品・月ごとと日ごと・数量と金額・見せ方・期間は URL に持たせる。
+ * 販売実績を取り込んでいない月・日は0とせず「—」で示す（原則2）。表でもグラフと同じツールチップで詳細を見られる。
+ * 選んだ商品・月ごとと日ごと・数量と金額・見せ方・期間は URL に持たせる。
  */
 
 const PRODUCTS: { value: StoreSalesProducts; label: string }[] = [
@@ -165,7 +166,16 @@ const rangeNote = computed(() =>
         <section v-else class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
             <SalesActualsToolbar :unit="unit" :measure="measure" :view="view" :range-note="rangeNote" :meta="result.meta" :period-error="periodError" @update="updateQuery" />
             <div v-if="view === 'table'" class="flex flex-col">
-                <StoreSalesTable :total="rows.total" :stores="rows.stores" :columns="columns" :summary-label="summaryLabel" :column-width="unit === 'day' ? 72 : 84" />
+                <StoreSalesTable
+                    :total="rows.total"
+                    :stores="rows.stores"
+                    :columns="columns"
+                    :summary-label="summaryLabel"
+                    :column-width="unit === 'day' ? 72 : 84"
+                    :series="series"
+                    :format-value="formats.formatValue"
+                    :unit="unit"
+                />
                 <p v-if="rows.total.cells.some((cell) => cell.excludes)" class="border-t border-stone-200 px-4 py-2.5 text-xs text-stone-500" data-testid="excludes-note">
                     ※ 販売実績を取り込んでいない店舗を除いた合計です
                 </p>
