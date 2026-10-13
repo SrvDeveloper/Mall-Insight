@@ -299,9 +299,11 @@ class ActualControllerTest extends TestCase
         $this->getJson('/api/v1/actuals/stock')
             ->assertOk()
             ->assertJsonCount(31, 'meta.dates')
-            ->assertJsonPath('meta.dates.0', ['date' => '2026-09-07', 'has_data' => false])
-            ->assertJsonPath('meta.dates.28', ['date' => '2026-10-05', 'has_data' => true])
-            ->assertJsonPath('meta.dates.30', ['date' => '2026-10-07', 'has_data' => false])
+            // 販売実績を取り込んでいないため、在庫を取得していない日は推定しない（K-087）
+            ->assertJsonPath('meta.dates.0', ['date' => '2026-09-07', 'has_data' => false, 'estimate' => 'no_sales_data', 'estimate_base_date' => '2026-08-31'])
+            ->assertJsonPath('meta.dates.28', ['date' => '2026-10-05', 'has_data' => true, 'estimate' => null, 'estimate_base_date' => null])
+            ->assertJsonPath('meta.dates.30', ['date' => '2026-10-07', 'has_data' => false, 'estimate' => 'no_sales_data', 'estimate_base_date' => '2026-10-06'])
+            ->assertJsonPath('data.0.skus.0.estimates.30', null)
             ->assertJsonPath('meta.scope_warehouses.4.label', 'フリー在庫')
             // 全体は6区分の合計。在庫を取得していない日と、記録の無いSKUは null
             ->assertJsonPath('data.0.skus.0.quantities.28', 35)
@@ -318,6 +320,75 @@ class ActualControllerTest extends TestCase
         $this->getJson('/api/v1/actuals/stock?scope=boss')
             ->assertJsonPath('data.0.skus.0.quantities.28', 20)
             ->assertJsonPath('data.0.skus.0.quantities.29', null);
+    }
+
+    public function test_estimates_the_stock_of_days_without_stock_data_from_the_previous_stock_and_sales(): void
+    {
+        $sku = $this->sku('fl-01-1-10');
+        $dropped = $this->sku('fl-01-1-15', 1);
+        // 期間（2026-09-07～）より前の最後の在庫基準日から推定する
+        $this->stock($sku, '2026-09-04', ['boss_own' => 10, 'amazon_fba' => 5]);
+        $this->stock($sku, '2026-10-02', ['boss_own' => 8, 'amazon_fba' => 4, 'free_stock' => 100]);
+        $this->stock($sku, '2026-10-05', ['boss_own' => 3, 'amazon_fba' => 1]);
+        // 2026-10-05 には記録が無い（調査の対象から外れた）SKU
+        $this->stock($dropped, '2026-10-02', ['boss_own' => 7]);
+        // 販売実績は BOSS が 2026-10-06 まで、Amazon が 2026-10-05 まで
+        $other = Sku::factory()->create(['item_id' => null]);
+        $this->sell($other, '2026-09-01', 1);
+        $this->sell($other, '2026-09-01', 1, 'amazon_fba');
+        $this->sell($other, '2026-10-05', 1, 'amazon_fba');
+        $this->sell($sku, '2026-10-02', 2);
+        $this->sell($sku, '2026-10-03', 1, 'boss_rfc');
+        $this->sell($sku, '2026-10-03', 1, 'amazon_fba');
+        $this->sell($sku, '2026-10-05', 5);
+        $this->sell($sku, '2026-10-06', 1);
+        $this->sell($sku, '2026-10-07', 4);
+
+        $this->getJson('/api/v1/actuals/stock?scope=boss')
+            ->assertOk()
+            ->assertJsonPath('meta.dates.0', ['date' => '2026-09-07', 'has_data' => false, 'estimate' => 'estimated', 'estimate_base_date' => '2026-09-04'])
+            ->assertJsonPath('data.0.skus.0.estimates.0', ['quantity' => 10, 'base_quantity' => 10, 'sold' => 0])
+            // 在庫を取得した日は推定しない
+            ->assertJsonPath('data.0.skus.0.quantities.25', 8)
+            ->assertJsonPath('data.0.skus.0.estimates.25', null)
+            // 在庫基準日の在庫は、その日の販売を引く前の在庫とみなす
+            ->assertJsonPath('data.0.skus.0.quantities.26', null)
+            ->assertJsonPath('data.0.skus.0.estimates.26', ['quantity' => 6, 'base_quantity' => 8, 'sold' => 2])
+            ->assertJsonPath('data.0.skus.0.estimates.27', ['quantity' => 5, 'base_quantity' => 8, 'sold' => 3])
+            // 0未満にしない。今日（在庫の取得前）も、前日までの販売実績があれば推定する
+            ->assertJsonPath('data.0.skus.0.estimates.29', ['quantity' => 0, 'base_quantity' => 3, 'sold' => 5])
+            ->assertJsonPath('meta.dates.30', ['date' => '2026-10-07', 'has_data' => false, 'estimate' => 'estimated', 'estimate_base_date' => '2026-10-05'])
+            ->assertJsonPath('data.0.skus.0.estimates.30', ['quantity' => 0, 'base_quantity' => 3, 'sold' => 6])
+            // 直前に在庫を取得した日に記録の無いSKUは推定しない
+            ->assertJsonPath('data.0.skus.1.estimates.26', ['quantity' => 7, 'base_quantity' => 7, 'sold' => 0])
+            ->assertJsonPath('data.0.skus.1.estimates.29', null);
+
+        // Amazon は 2026-10-05 までの販売実績で、2026-10-06 まで推定できる
+        $this->getJson('/api/v1/actuals/stock?scope=amazon')
+            ->assertJsonPath('data.0.skus.0.estimates.28', null)
+            ->assertJsonPath('data.0.skus.0.estimates.27', ['quantity' => 3, 'base_quantity' => 4, 'sold' => 1])
+            ->assertJsonPath('data.0.skus.0.estimates.29', ['quantity' => 1, 'base_quantity' => 1, 'sold' => 0])
+            ->assertJsonPath('meta.dates.30.estimate', 'no_sales_data')
+            ->assertJsonPath('data.0.skus.0.estimates.30', null);
+
+        // 全体は6区分の在庫から BOSS・Amazon の販売数を引き、両方の販売実績がそろう日まで推定する
+        $this->getJson('/api/v1/actuals/stock')
+            ->assertJsonPath('data.0.skus.0.estimates.27', ['quantity' => 108, 'base_quantity' => 112, 'sold' => 4])
+            ->assertJsonPath('data.0.skus.0.estimates.29', ['quantity' => 0, 'base_quantity' => 4, 'sold' => 5])
+            ->assertJsonPath('meta.dates.30.estimate', 'no_sales_data');
+    }
+
+    public function test_does_not_estimate_the_stock_before_the_stock_history_begins(): void
+    {
+        $sku = $this->sku('fl-01-1-10');
+        $this->stock($sku, '2026-10-05', ['boss_own' => 3]);
+        $this->sell($sku, '2026-09-01', 1);
+        $this->sell($sku, '2026-10-06', 1);
+
+        $this->getJson('/api/v1/actuals/stock?scope=boss')
+            ->assertJsonPath('meta.dates.27', ['date' => '2026-10-04', 'has_data' => false, 'estimate' => 'no_base', 'estimate_base_date' => null])
+            ->assertJsonPath('data.0.skus.0.estimates.27', null)
+            ->assertJsonPath('data.0.skus.0.estimates.29', ['quantity' => 3, 'base_quantity' => 3, 'sold' => 0]);
     }
 
     public function test_returns_only_the_requested_target_item_for_the_sku_screen(): void

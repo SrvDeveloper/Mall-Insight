@@ -18,7 +18,7 @@ use Carbon\CarbonImmutable;
  * - 販売数は販売実績の出荷倉庫でモールに分ける（K-038）。モールの販売実績を取り込んだ期間の外の月は0とせず、データ無しとする（原則2）。
  *   期間の途中で始まる・終わる月、取り込んでいないモールのある日、今月・今日は「途中まで」とする。
  * - 在庫数は在庫基準日ごとの、そのモールの在庫の区分の合計（全体は6区分、K-028）。在庫を取得していない日（調査の無い日など）と、
- *   その日にSKUの記録が無いときは0とせず、データ無しとする。
+ *   その日にSKUの記録が無いときは0とせず、データ無しとする。在庫を取得していない日は、販売実績から推定した在庫を別に返す（K-087）。
  * - 販売実績は販売数と金額（税込、取り込んだ金額の合計）を集める。
  * - SKUは廃番も含める（過去には売れているため）。
  */
@@ -323,10 +323,13 @@ class ActualsReader
     }
 
     /**
-     * 日ごとの在庫数。
+     * 日ごとの在庫数。在庫を取得していない日（調査の無い日・今日の取得前）は、直前に在庫を取得した日の在庫から、その日から前日までの
+     * 販売数を引いて推定する（K-087）。在庫基準日の在庫は、その日の販売を引く前の在庫とみなす。推定は入荷・区分の間の移動を含まず、
+     * 0未満にしない。直前に在庫を取得した日にそのSKUの記録が無いとき（調査の対象から外れたSKUなど）と、推定に使う日の販売実績を
+     * 対象のモールのどれかで取り込んでいないときは推定しない。推定した値は保存せず、取り込んだ在庫も変えない（原則3）。
      *
      * @param  list<Item>  $items
-     * @return array{dates: list<array{date: CarbonImmutable, hasData: bool}>, quantities: array<int, list<int|null>>} quantities は SKU ID => 日ごとの在庫数（データ無しの日は null）
+     * @return array{dates: list<array{date: CarbonImmutable, hasData: bool, estimate: StockEstimateStatus|null, baseDate: CarbonImmutable|null}>, quantities: array<int, list<int|null>>, estimates: array<int, list<array{quantity: int, base_quantity: int, sold: int}|null>>} quantities は SKU ID => 日ごとの在庫数（データ無しの日は null）。estimates は推定した日だけの推定値と根拠（それ以外の日は null）
      */
     public function stock(array $items, CarbonImmutable $today, TrendScope $scope): array
     {
@@ -335,23 +338,28 @@ class ActualsReader
         $skuIds = $this->skuIds($items);
         $warehouses = array_map(fn (Warehouse $warehouse): string => $warehouse->value, $scope->warehouses());
 
+        // 期間の初めの日を推定するため、期間より前の最後の在庫基準日から読む
+        $previousDate = Inventory::query()->where('stock_date', '<', $from->toDateString())->max('stock_date');
+        $loadFrom = $previousDate === null ? $from : CarbonImmutable::parse($previousDate)->startOfDay();
+
         // 在庫を取得した日（どのSKUでも記録のある日）
         $dataDates = Inventory::query()
             ->select('stock_date')
             ->distinct()
-            ->where('stock_date', '>=', $from->toDateString())
+            ->where('stock_date', '>=', $loadFrom->toDateString())
             ->where('stock_date', '<', $to->addDay()->toDateString())
             ->pluck('stock_date')
             ->map(fn ($date): string => CarbonImmutable::parse($date)->toDateString())
             ->flip();
 
         $stocks = [];
+        $sold = [];
         foreach (array_chunk($skuIds, 500) as $chunk) {
             $rows = Inventory::query()
                 ->select(['sku_id', 'stock_date', 'quantity'])
                 ->whereIn('sku_id', $chunk)
                 ->whereIn('warehouse', $warehouses)
-                ->where('stock_date', '>=', $from->toDateString())
+                ->where('stock_date', '>=', $loadFrom->toDateString())
                 ->where('stock_date', '<', $to->addDay()->toDateString())
                 ->toBase()
                 ->get();
@@ -359,20 +367,87 @@ class ActualsReader
                 $date = CarbonImmutable::parse($row->stock_date)->toDateString();
                 $stocks[(int) $row->sku_id][$date] = ($stocks[(int) $row->sku_id][$date] ?? 0) + (int) $row->quantity;
             }
-        }
-
-        $dates = [];
-        $quantities = array_fill_keys($skuIds, []);
-        foreach (range(0, self::STOCK_DAYS - 1) as $index) {
-            $date = $from->addDays($index);
-            $key = $date->toDateString();
-            $dates[] = ['date' => $date, 'hasData' => $dataDates->has($key)];
-            foreach ($skuIds as $skuId) {
-                $quantities[$skuId][] = $stocks[$skuId][$key] ?? null;
+            // 推定に使う販売数（今日の販売は今日の在庫から引かない）
+            $salesRows = SalesLine::query()
+                ->selectRaw('sku_id, sales_date, sum(quantity) as quantity')
+                ->whereIn('sku_id', $chunk)
+                ->whereIn('warehouse', $warehouses)
+                ->where('sales_date', '>=', $loadFrom->toDateString())
+                ->where('sales_date', '<', $to->toDateString())
+                ->groupBy('sku_id', 'sales_date')
+                ->toBase()
+                ->get();
+            foreach ($salesRows as $row) {
+                $sold[(int) $row->sku_id][CarbonImmutable::parse($row->sales_date)->toDateString()] = (int) $row->quantity;
             }
         }
 
-        return ['dates' => $dates, 'quantities' => $quantities];
+        $ranges = $this->salesRanges();
+        $channels = $scope->channel() === null ? Channel::cases() : [$scope->channel()];
+
+        $dates = [];
+        $quantities = array_fill_keys($skuIds, []);
+        $estimates = array_fill_keys($skuIds, []);
+        $baseDate = $previousDate === null ? null : $loadFrom;
+        foreach (range(0, self::STOCK_DAYS - 1) as $index) {
+            $date = $from->addDays($index);
+            $key = $date->toDateString();
+            $hasData = $dataDates->has($key);
+            $status = $hasData ? null : $this->estimateStatus($baseDate, $date, $channels, $ranges);
+            $dates[] = ['date' => $date, 'hasData' => $hasData, 'estimate' => $status, 'baseDate' => $hasData ? null : $baseDate];
+            foreach ($skuIds as $skuId) {
+                $quantities[$skuId][] = $stocks[$skuId][$key] ?? null;
+                $estimates[$skuId][] = $status === StockEstimateStatus::Estimated ? $this->estimate($stocks[$skuId] ?? [], $sold[$skuId] ?? [], $baseDate, $date) : null;
+            }
+            if ($hasData) {
+                $baseDate = $date;
+            }
+        }
+
+        return ['dates' => $dates, 'quantities' => $quantities, 'estimates' => $estimates];
+    }
+
+    /**
+     * 在庫を取得していない日を推定できるか。直前に在庫を取得した日が無ければ推定しない。直前に在庫を取得した日から前日までの販売実績を、
+     * 対象のモール（全体はBOSS・Amazonの両方）で取り込んでいなければ推定しない（販売実績の最後の販売日で判断する）。
+     *
+     * @param  list<Channel>  $channels
+     * @param  array<string, array{from: CarbonImmutable, to: CarbonImmutable}>  $ranges
+     */
+    private function estimateStatus(?CarbonImmutable $baseDate, CarbonImmutable $date, array $channels, array $ranges): StockEstimateStatus
+    {
+        if ($baseDate === null) {
+            return StockEstimateStatus::NoBase;
+        }
+        foreach ($channels as $channel) {
+            $range = $ranges[$channel->value] ?? null;
+            if ($range === null || $range['from']->gt($baseDate) || $range['to']->lt($date->subDay())) {
+                return StockEstimateStatus::NoSalesData;
+            }
+        }
+
+        return StockEstimateStatus::Estimated;
+    }
+
+    /**
+     * SKUの推定在庫（直前に在庫を取得した日の在庫 − その日から前日までの販売数、0未満にしない）。直前に在庫を取得した日にSKUの記録が無ければ null。
+     *
+     * @param  array<string, int>  $stocks  在庫基準日 => 在庫数
+     * @param  array<string, int>  $sold  販売日 => 販売数
+     * @return array{quantity: int, base_quantity: int, sold: int}|null
+     */
+    private function estimate(array $stocks, array $sold, CarbonImmutable $baseDate, CarbonImmutable $date): ?array
+    {
+        $baseQuantity = $stocks[$baseDate->toDateString()] ?? null;
+        if ($baseQuantity === null) {
+            return null;
+        }
+        $soldQuantity = 0;
+        for ($day = $baseDate; $day->lt($date); $day = $day->addDay()) {
+            $soldQuantity += $sold[$day->toDateString()] ?? 0;
+        }
+
+        return ['quantity' => max(0, $baseQuantity - $soldQuantity), 'base_quantity' => $baseQuantity, 'sold' => $soldQuantity];
     }
 
     /**

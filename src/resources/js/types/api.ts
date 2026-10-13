@@ -559,6 +559,26 @@ export interface ActualSku {
      * previous は前の期間（前月・前日）、last_year は前年の同じ期間の値で、グラフのツールチップの前月比・前年比に使う（K-082）。比べられない列は null
      */
     channels?: Partial<Record<"boss" | "amazon", ActualChannelSales>>;
+    /** 在庫実績のときだけ、在庫を取得していない日の推定在庫（K-087）。推定していない日は null */
+    estimates?: (StockEstimate | null)[];
+}
+
+/** 推定在庫。直前に在庫を取得した日の在庫（base_quantity）から、その日から前日までの販売数（sold）を引き、0未満にしない（K-087）。 */
+export interface StockEstimate {
+    quantity: number;
+    base_quantity: number;
+    sold: number;
+}
+
+/** 在庫を取得していない日を推定できたか。no_base は在庫の履歴より前、no_sales_data は推定に使う日の販売実績を取り込んでいない。 */
+export type StockEstimateStatus = "estimated" | "no_base" | "no_sales_data";
+
+/** 在庫実績の日。在庫を取得していない日は、推定できたかと、推定の元にした在庫基準日を持つ。 */
+export interface StockActualDate {
+    date: string;
+    has_data: boolean;
+    estimate: StockEstimateStatus | null;
+    estimate_base_date: string | null;
 }
 
 export interface ActualItem {
@@ -594,11 +614,11 @@ export interface SalesActualsResponse {
     };
 }
 
-/** 日ごとの在庫数（直近31日）。has_data は在庫を取得した日か。 */
+/** 日ごとの在庫数（直近31日）。在庫を取得していない日は、販売実績から推定した在庫を SKU の estimates に持つ（K-087）。 */
 export interface StockActualsResponse {
     data: ActualItem[];
     meta: ActualMeta & {
         scope_warehouses: { warehouse: string; label: string }[];
-        dates: { date: string; has_data: boolean }[];
+        dates: StockActualDate[];
     };
 }

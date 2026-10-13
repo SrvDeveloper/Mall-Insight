@@ -4,7 +4,8 @@ import { actualSparkline, type ActualColumn, type ActualItemRows } from "@/compo
 
 /**
  * 実績（B-124）のグラフ。在庫推移のグラフ（K-047）とそろえ、品番ごとのカードにSKUの推移を小さなグラフで並べる。
- * データの無い列では線を切り、在庫0の点は赤く示す。グラフは画面の幅に合わせて自動で折り返す。
+ * データの無い列では線を切り、在庫0の点は赤く示す。推定在庫（K-087）へつなぐ線は点線、推定の点は白抜きにする。
+ * グラフは画面の幅に合わせて自動で折り返す。
  */
 
 const props = defineProps<{ items: ActualItemRows[]; columns: ActualColumn[]; kind: "sales" | "stock"; summaryLabel: string; notSoldLabel: string }>();
@@ -12,7 +13,7 @@ const props = defineProps<{ items: ActualItemRows[]; columns: ActualColumn[]; ki
 const tiles = computed(() =>
     props.items.map((group) => ({
         group,
-        rows: group.rows.map((row) => ({ row, line: row.sku.not_sold ? null : actualSparkline(row.values, props.kind) })),
+        rows: group.rows.map((row) => ({ row, line: row.sku.not_sold ? null : actualSparkline(row.values, props.kind, row.estimated) })),
     })),
 );
 const axis = computed(() => ({ first: props.columns[0]?.label ?? "", last: props.columns.at(-1)?.label ?? "" }));
@@ -38,13 +39,24 @@ const axis = computed(() => ({ first: props.columns[0]?.label ?? "", last: props
                         <svg viewBox="0 0 240 56" preserveAspectRatio="none" class="block h-14 w-full" role="img" :aria-label="`${entry.row.sku.sku_code} の推移`">
                             <line x1="0" x2="240" y1="51" y2="51" class="stroke-stone-300" stroke-width="1" />
                             <path v-for="(segment, index) in entry.line.segments" :key="index" :d="segment" fill="none" class="stroke-stone-900" stroke-width="1.6" stroke-linejoin="round" />
+                            <path
+                                v-for="(segment, index) in entry.line.estimatedSegments"
+                                :key="`e${index}`"
+                                :d="segment"
+                                fill="none"
+                                class="stroke-stone-400"
+                                stroke-width="1.4"
+                                stroke-dasharray="3 2"
+                                data-testid="estimated-segment"
+                            />
                             <circle
                                 v-for="(point, index) in entry.line.points"
                                 :key="`p${index}`"
                                 :cx="point.x"
                                 :cy="point.y"
                                 :r="point.isEmpty ? 2.6 : 1.6"
-                                :class="point.isEmpty ? 'fill-red-600' : 'fill-stone-900'"
+                                :class="point.isEstimated ? (point.isEmpty ? 'fill-white stroke-red-600' : 'fill-white stroke-stone-400') : point.isEmpty ? 'fill-red-600' : 'fill-stone-900'"
+                                :stroke-width="point.isEstimated ? 1 : undefined"
                             />
                         </svg>
                         <div class="flex justify-between text-[10px] text-stone-400">

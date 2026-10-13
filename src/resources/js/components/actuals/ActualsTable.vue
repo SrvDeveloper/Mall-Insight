@@ -8,7 +8,8 @@ import { useVirtualRows } from "@/composables/useVirtualRows";
 /**
  * 実績（B-124）の表。月（販売実績）か日（在庫実績）を列に並べ、品番の行に合計を出す。在庫推移の表（K-047・K-074）とそろえ、
  * 2列目（販売実績は期間の合計、在庫実績は最新の在庫）は薄い灰色を敷いて区切り線を入れる。在庫0は赤い角丸の札、データの無い列は
- * 見出しを薄くし「—」で示す。表は大きくなるため、見えている行だけを描く。
+ * 見出しを薄くし「—」で示す。推定在庫（K-087）は斜体の薄い字にし、推定の在庫0は赤い点線の札にする。ホバーで根拠を出す。
+ * 表は大きくなるため、見えている行だけを描く。
  * itemLink を渡すと、品番ごとの合計だけを1行ずつ並べ、品番からその品番の画面（SKU別売上）へ移れるようにする。SKUの行は出さない。
  */
 
@@ -45,6 +46,9 @@ const { onScroll, renderedRows, topSpacerHeight, bottomSpacerHeight } = useVirtu
 const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
 
 function cellClass(cell: ActualCell): string {
+    if (cell.estimated) {
+        return cell.tone === "empty" ? "bg-red-50 italic text-red-600 outline-1 -outline-offset-1 outline-red-300 outline-dashed" : "italic text-stone-400";
+    }
     return cell.tone === "empty" ? "bg-red-100 font-semibold text-red-700" : cell.tone === "none" ? "text-stone-300" : "text-stone-700";
 }
 </script>
@@ -116,7 +120,14 @@ function cellClass(cell: ActualCell): string {
                             {{ entry.group.summaryText }}
                         </td>
                         <td v-for="(cell, index) in entry.group.totals" :key="index" class="px-2 text-right tabular-nums">
-                            <span class="inline-flex min-w-8 justify-end rounded-md px-2 py-0.5" :class="cellClass(cell)" data-testid="actual-cell">{{ cell.text }}</span>
+                            <span
+                                class="inline-flex min-w-8 justify-end rounded-md px-2 py-0.5"
+                                :class="cellClass(cell)"
+                                :title="cell.title"
+                                :data-estimated="cell.estimated || undefined"
+                                data-testid="actual-cell"
+                                >{{ cell.text }}</span
+                            >
                         </td>
                     </tr>
                     <tr v-else-if="entry.kind === 'item'" class="h-[40px] bg-stone-50 [&>*]:border-t [&>*]:border-stone-200" data-testid="item-row">
@@ -130,7 +141,12 @@ function cellClass(cell: ActualCell): string {
                         </th>
                         <td :class="`bg-stone-100 px-3 text-right font-semibold text-stone-900 tabular-nums ${SUMMARY_EDGE}`" data-testid="item-summary">{{ entry.group.summaryText }}</td>
                         <td v-for="(cell, index) in entry.group.totals" :key="index" class="px-2 text-right font-semibold tabular-nums">
-                            <span class="inline-flex min-w-8 justify-end rounded-md px-2 py-0.5" :class="cell.tone === 'normal' ? 'text-stone-900' : cellClass(cell)">{{ cell.text }}</span>
+                            <span
+                                class="inline-flex min-w-8 justify-end rounded-md px-2 py-0.5"
+                                :class="cell.tone === 'normal' && !cell.estimated ? 'text-stone-900' : cellClass(cell)"
+                                :title="cell.title"
+                                >{{ cell.text }}</span
+                            >
                         </td>
                     </tr>
                     <tr v-else class="group h-[40px] hover:bg-stone-50 [&>*]:border-t [&>*]:border-stone-100" data-testid="sku-row">
@@ -147,7 +163,14 @@ function cellClass(cell: ActualCell): string {
                             <span class="rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-stone-500">{{ notSoldLabel }}</span>
                         </td>
                         <td v-for="(cell, index) in entry.row.cells" v-else :key="index" class="px-2 text-right tabular-nums">
-                            <span class="inline-flex min-w-8 justify-end rounded-md px-2 py-0.5" :class="cellClass(cell)" data-testid="actual-cell">{{ cell.text }}</span>
+                            <span
+                                class="inline-flex min-w-8 justify-end rounded-md px-2 py-0.5"
+                                :class="cellClass(cell)"
+                                :title="cell.title"
+                                :data-estimated="cell.estimated || undefined"
+                                data-testid="actual-cell"
+                                >{{ cell.text }}</span
+                            >
                         </td>
                     </tr>
                 </template>

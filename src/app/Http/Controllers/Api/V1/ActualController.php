@@ -79,7 +79,8 @@ class ActualController extends Controller
 
     /**
      * 対象品番のSKUの、日ごとの在庫数（直近31日、バックログ B-124）。scope で全体（6区分の合計）・Amazon・BOSSを選ぶ。
-     * 在庫を取得していない日と、その日にSKUの記録が無いときは null。
+     * 在庫を取得していない日と、その日にSKUの記録が無いときは null。在庫を取得していない日は、販売実績から推定した在庫を
+     * estimates に、推定できたかと元にした在庫基準日を meta.dates に返す（K-087）。
      */
     public function stock(Request $request, ActualsReader $reader): JsonResponse
     {
@@ -88,11 +89,16 @@ class ActualController extends Controller
         $stock = $reader->stock($items, CarbonImmutable::now(), $scope);
 
         return response()->json([
-            'data' => $this->rows($items, $stock['quantities'], $scope),
+            'data' => $this->rows($items, $stock['quantities'], $scope, estimates: $stock['estimates']),
             'meta' => [
                 ...$this->meta($scope),
                 'scope_warehouses' => array_map(fn (Warehouse $warehouse): array => ['warehouse' => $warehouse->value, 'label' => $warehouse->label()], $scope->warehouses()),
-                'dates' => array_map(fn (array $date): array => ['date' => $date['date']->toDateString(), 'has_data' => $date['hasData']], $stock['dates']),
+                'dates' => array_map(fn (array $date): array => [
+                    'date' => $date['date']->toDateString(),
+                    'has_data' => $date['hasData'],
+                    'estimate' => $date['estimate']?->value,
+                    'estimate_base_date' => $date['baseDate']?->toDateString(),
+                ], $stock['dates']),
             ],
         ]);
     }
@@ -159,9 +165,10 @@ class ActualController extends Controller
      * @param  array<int, list<float|int|null>>  $quantities
      * @param  array<int, list<float|null>>|null  $amounts  販売実績のときだけ、月ごとの金額（税込）
      * @param  array<int, array<string, array{quantities: list<float|null>, amounts: list<float|null>}>>|null  $byChannel  販売実績のときだけ、モールごとの内訳（グラフの積み上げに使う）
+     * @param  array<int, list<array{quantity: int, base_quantity: int, sold: int}|null>>|null  $estimates  在庫実績のときだけ、在庫を取得していない日の推定在庫（K-087）
      * @return list<array<string, mixed>>
      */
-    private function rows(array $items, array $quantities, TrendScope $scope, ?array $amounts = null, ?array $byChannel = null): array
+    private function rows(array $items, array $quantities, TrendScope $scope, ?array $amounts = null, ?array $byChannel = null, ?array $estimates = null): array
     {
         return array_map(fn (Item $item): array => [
             'item_no' => $item->item_no,
@@ -179,6 +186,7 @@ class ActualController extends Controller
                 'quantities' => $quantities[$sku->id] ?? [],
                 ...($amounts === null ? [] : ['amounts' => $amounts[$sku->id] ?? []]),
                 ...($byChannel === null ? [] : ['channels' => $byChannel[$sku->id] ?? []]),
+                ...($estimates === null ? [] : ['estimates' => $estimates[$sku->id] ?? []]),
             ])->all(),
         ], $items);
     }

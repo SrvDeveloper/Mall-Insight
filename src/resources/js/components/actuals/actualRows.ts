@@ -1,10 +1,11 @@
 import { formatQuantity, shortMonthLabel } from "@/components/inventoryTrend/trendRows";
 import { formatThousandYen } from "@/components/salesTarget/format";
-import type { ActualItem, ActualSku, SalesActualsResponse, StockActualsResponse, StockoutPeriod } from "@/types/api";
+import type { ActualItem, ActualSku, SalesActualsResponse, StockActualDate, StockActualsResponse, StockEstimate, StockoutPeriod } from "@/types/api";
 
 /**
  * 実績（B-124）の表示用データ。販売実績（月ごと）と在庫実績（日ごと）で共通に使う。表とグラフの両方で使い、
  * データを読み込んだときに一度だけ作る。データの無い列（取り込んでいない月、在庫を取得していない日）は0とせず「—」にする（原則2）。
+ * 在庫を取得していない日に推定在庫があれば、実際の在庫と見分けられるようにして出し、推定の根拠を添える（K-087）。
  */
 
 /** 列（月か日）の見出し。muted はデータの無い列、current は今月（今日）の列。 */
@@ -22,6 +23,10 @@ export type ActualTone = "normal" | "empty" | "none";
 export interface ActualCell {
     text: string;
     tone: ActualTone;
+    /** 推定在庫（在庫実績で在庫を取得していない日、K-087） */
+    estimated?: boolean;
+    /** ホバーで出す説明（推定の根拠や、推定できない理由） */
+    title?: string;
 }
 
 /** 数で見るか、金額（税込、千円）で見るか。金額は販売実績だけ。 */
@@ -29,8 +34,10 @@ export type ActualMeasure = "quantity" | "amount";
 
 export interface ActualSkuRow {
     sku: ActualSku;
-    /** 見ている方の列ごとの値（数か金額） */
+    /** 見ている方の列ごとの値（数か金額）。在庫実績では推定在庫を含む */
     values: (number | null)[];
+    /** 列ごとに、値が推定在庫か */
+    estimated: boolean[];
     cells: ActualCell[];
     /** 列の合計（販売数）か、最後にデータのある日の在庫数 */
     summaryText: string;
@@ -50,6 +57,37 @@ const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 const dayLabel = (date: string): string => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 const weekday = (date: string): string => WEEKDAYS[new Date(`${date}T00:00:00`).getDay()]!;
+const dayWithWeekday = (date: string): string => `${dayLabel(date)}(${weekday(date)})`;
+
+/** 日付の前日（YYYY-MM-DD）。 */
+function previousDay(date: string): string {
+    const day = new Date(`${date}T00:00:00`);
+    day.setDate(day.getDate() - 1);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+}
+
+/** 推定在庫の根拠（例：「推定：10/9(金)の在庫 12 − 10/9(金)〜10/11(日)の販売数 3」）。販売数が在庫を上回ったときは0にしたことを添える。 */
+function estimateTitle(estimate: StockEstimate, date: StockActualDate): string {
+    const base = date.estimate_base_date!;
+    const last = previousDay(date.date);
+    const period = base === last ? dayWithWeekday(base) : `${dayWithWeekday(base)}〜${dayWithWeekday(last)}`;
+    const note = estimate.base_quantity - estimate.sold < 0 ? "（販売数が在庫を上回ったため0としています）" : "";
+    return `推定：${dayWithWeekday(base)}の在庫 ${formatQuantity(estimate.base_quantity)} − ${period}の販売数 ${formatQuantity(estimate.sold)}${note}`;
+}
+
+/** 在庫を取得していない日に推定在庫を出せないときの理由。 */
+function noEstimateTitle(date: StockActualDate): string | undefined {
+    switch (date.estimate) {
+        case "no_base":
+            return "在庫の記録より前のため、推定できません";
+        case "no_sales_data":
+            return "販売実績を取り込んでいないため、推定できません";
+        case "estimated":
+            return `${dayWithWeekday(date.estimate_base_date!)}の在庫の記録が無いため、推定できません`;
+        default:
+            return undefined;
+    }
+}
 
 export function salesColumns(meta: SalesActualsResponse["meta"]): ActualColumn[] {
     const isDay = meta.unit === "day";
@@ -72,7 +110,7 @@ export function stockColumns(meta: StockActualsResponse["meta"]): ActualColumn[]
     return meta.dates.map((date) => ({
         key: date.date,
         label: dayLabel(date.date),
-        sub: date.has_data ? weekday(date.date) : "調査なし",
+        sub: date.has_data ? weekday(date.date) : date.estimate === "estimated" ? "推定" : "調査なし",
         muted: !date.has_data,
     }));
 }
@@ -84,7 +122,7 @@ function cell(value: number | null, kind: "sales" | "stock", format: (value: num
     return { text: format(value), tone: kind === "stock" && Math.round(value) <= 0 ? "empty" : "normal" };
 }
 
-/** 販売実績は期間の合計、在庫実績は最後にデータのある日の在庫数。 */
+/** 販売実績は期間の合計、在庫実績は最後にデータのある日の在庫数（推定在庫は使わない）。 */
 function summary(values: (number | null)[], kind: "sales" | "stock", format: (value: number) => string): string {
     const known = values.filter((value): value is number => value !== null);
     if (known.length === 0) {
@@ -93,27 +131,51 @@ function summary(values: (number | null)[], kind: "sales" | "stock", format: (va
     return format(kind === "sales" ? known.reduce((total, value) => total + value, 0) : known.at(-1)!);
 }
 
-export function buildActualRows(items: ActualItem[], kind: "sales" | "stock", measure: ActualMeasure = "quantity"): ActualItemRows[] {
-    const valuesOf = (sku: ActualSku): (number | null)[] => (measure === "amount" ? (sku.amounts ?? []) : sku.quantities);
+/**
+ * stockDates（在庫実績の meta.dates）を渡すと、在庫を取得していない日に推定在庫を出す（K-087）。品番の合計は、推定在庫を含む列を推定として示す。
+ */
+export function buildActualRows(items: ActualItem[], kind: "sales" | "stock", measure: ActualMeasure = "quantity", stockDates: StockActualDate[] = []): ActualItemRows[] {
+    const actualsOf = (sku: ActualSku): (number | null)[] => (measure === "amount" ? (sku.amounts ?? []) : sku.quantities);
+    const estimatesOf = (sku: ActualSku): (StockEstimate | null)[] => (kind === "stock" ? actualsOf(sku).map((value, index) => (value === null ? (sku.estimates?.[index] ?? null) : null)) : []);
     const format = measure === "amount" ? formatThousandYen : formatQuantity;
     return items.map((item) => {
-        const skus = item.skus.filter((sku) => !sku.not_sold);
+        const rows: ActualSkuRow[] = item.skus.map((sku) => {
+            const actuals = actualsOf(sku);
+            const estimates = estimatesOf(sku);
+            const values = actuals.map((value, index) => value ?? estimates[index]?.quantity ?? null);
+            return {
+                sku,
+                values,
+                estimated: actuals.map((_, index) => estimates[index] != null),
+                cells: values.map((value, index) => {
+                    const estimate = estimates[index];
+                    const date = stockDates[index];
+                    if (estimate && date) {
+                        return { ...cell(value, kind, format), estimated: true, title: estimateTitle(estimate, date) };
+                    }
+                    return value === null && date && !date.has_data && !sku.not_sold ? { ...cell(value, kind, format), title: noEstimateTitle(date) } : cell(value, kind, format);
+                }),
+                summaryText: sku.not_sold ? "—" : summary(actuals, kind, format),
+            };
+        });
+        const sold = rows.filter((row) => !row.sku.not_sold);
         const columnCount = item.skus[0]?.quantities.length ?? 0;
         const totals = Array.from({ length: columnCount }, (_, index) => {
-            const values = skus.map((sku) => valuesOf(sku)[index] ?? null).filter((value): value is number => value !== null);
+            const values = sold.map((row) => row.values[index] ?? null).filter((value): value is number => value !== null);
+            return values.length === 0 ? null : values.reduce((total, value) => total + value, 0);
+        });
+        const actualTotals = Array.from({ length: columnCount }, (_, index) => {
+            const values = sold.map((row) => actualsOf(row.sku)[index] ?? null).filter((value): value is number => value !== null);
             return values.length === 0 ? null : values.reduce((total, value) => total + value, 0);
         });
         return {
             item,
-            rows: item.skus.map((sku) => ({
-                sku,
-                values: valuesOf(sku),
-                cells: valuesOf(sku).map((value) => cell(value, kind, format)),
-                summaryText: sku.not_sold ? "—" : summary(valuesOf(sku), kind, format),
-            })),
+            rows,
             totalValues: totals,
-            totals: totals.map((value) => cell(value, kind, format)),
-            summaryText: summary(totals, kind, format),
+            totals: totals.map((value, index) =>
+                sold.some((row) => row.estimated[index]) ? { ...cell(value, kind, format), estimated: true, title: "推定在庫を含む合計です" } : cell(value, kind, format),
+            ),
+            summaryText: summary(actualTotals, kind, format),
         };
     });
 }
@@ -124,9 +186,14 @@ const SPARK_PADDING = 5;
 
 /**
  * グラフの線と点。データの無い列で線を切る（0として結ばない）。前後にデータの無い1点も見えるよう、点も打つ。
- * 在庫実績で在庫0の点は、在庫推移の在庫不足と同じく赤く示す（isEmpty）。
+ * 在庫実績で在庫0の点は、在庫推移の在庫不足と同じく赤く示す（isEmpty）。推定在庫（estimated）へつなぐ線は estimatedSegments に分け、
+ * 点線で描く（K-087）。
  */
-export function actualSparkline(values: (number | null)[], kind: "sales" | "stock"): { segments: string[]; points: { x: number; y: number; isEmpty: boolean }[] } | null {
+export function actualSparkline(
+    values: (number | null)[],
+    kind: "sales" | "stock",
+    estimated: boolean[] = [],
+): { segments: string[]; estimatedSegments: string[]; points: { x: number; y: number; isEmpty: boolean; isEstimated: boolean }[] } | null {
     const known = values.filter((value): value is number => value !== null);
     if (known.length === 0) {
         return null;
@@ -134,23 +201,37 @@ export function actualSparkline(values: (number | null)[], kind: "sales" | "stoc
     const max = Math.max(1, ...known);
     const x = (index: number): number => SPARK_PADDING + (index * (SPARK_WIDTH - SPARK_PADDING * 2)) / Math.max(1, values.length - 1);
     const y = (value: number): number => SPARK_PADDING + ((max - value) * (SPARK_HEIGHT - SPARK_PADDING * 2)) / max;
+    const at = (index: number, value: number): string => `${x(index).toFixed(1)} ${y(value).toFixed(1)}`;
     const segments: string[] = [];
+    const estimatedSegments: string[] = [];
     let current: string[] = [];
+    const flush = (): void => {
+        if (current.length > 1) {
+            segments.push(current.join(" "));
+        }
+        current = [];
+    };
     values.forEach((value, index) => {
         if (value === null) {
-            if (current.length > 1) {
-                segments.push(current.join(" "));
-            }
-            current = [];
+            flush();
             return;
         }
-        current.push(`${current.length === 0 ? "M" : "L"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`);
+        const previous = index > 0 ? (values[index - 1] ?? null) : null;
+        const isEstimated = estimated[index] ?? false;
+        if (previous !== null && (isEstimated || (estimated[index - 1] ?? false))) {
+            estimatedSegments.push(`M ${at(index - 1, previous)} L ${at(index, value)}`);
+        }
+        if (isEstimated) {
+            flush();
+            return;
+        }
+        current.push(`${current.length === 0 ? "M" : "L"} ${at(index, value)}`);
     });
-    if (current.length > 1) {
-        segments.push(current.join(" "));
-    }
-    const points = values.flatMap((value, index) => (value === null ? [] : [{ x: Number(x(index).toFixed(1)), y: Number(y(value).toFixed(1)), isEmpty: kind === "stock" && Math.round(value) <= 0 }]));
-    return { segments, points };
+    flush();
+    const points = values.flatMap((value, index) =>
+        value === null ? [] : [{ x: Number(x(index).toFixed(1)), y: Number(y(value).toFixed(1)), isEmpty: kind === "stock" && Math.round(value) <= 0, isEstimated: estimated[index] ?? false }],
+    );
+    return { segments, estimatedSegments, points };
 }
 
 /**

@@ -10,7 +10,8 @@ import type { StockActualsResponse, TrendScope } from "@/types/api";
 /**
  * 在庫実績（バックログ B-124）。対象品番のSKUについて、日ごとの在庫数（直近31日）を表・グラフで見る。
  * 全体（6区分の合計）・Amazon・BOSSの切り替え、見せ方と色は在庫推移の画面（K-047・K-074）とそろえる。
- * 在庫を取得していない日は0とせず「—」で示し（原則2）、在庫0は在庫不足と同じ赤い札で示す。選んだ在庫・見せ方は URL に持たせる。
+ * 在庫を取得していない日は0とせず、販売実績から推定した在庫を実際の在庫と見分けて示す。推定できない日は「—」で示す（原則2・K-087）。
+ * 在庫0は在庫不足と同じ赤い札で示す。選んだ在庫・見せ方は URL に持たせる。
  */
 
 type ActualView = "table" | "graph";
@@ -72,7 +73,7 @@ watch(scope, () => {
 });
 
 const columns = computed<ActualColumn[]>(() => (result.value ? stockColumns(result.value.meta) : []));
-const itemRows = computed<ActualItemRows[]>(() => buildActualRows(result.value?.data ?? [], "stock"));
+const itemRows = computed<ActualItemRows[]>(() => buildActualRows(result.value?.data ?? [], "stock", "quantity", result.value?.meta.dates ?? []));
 
 const visibleItems = computed<ActualItemRows[]>(() => {
     const word = keyword.value.trim().toLowerCase();
@@ -105,7 +106,11 @@ const rangeNote = computed(() => {
             <div class="flex flex-col gap-1.5">
                 <p class="text-xs text-stone-500">在庫試算 / 在庫実績</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫実績</h1>
-                <p class="max-w-3xl text-[13px] text-stone-600" data-testid="description">ZeroStockViewから取得した、日ごとの在庫数です（直近31日）。{{ warehouseNote }}です。</p>
+                <p class="max-w-3xl text-[13px] text-stone-600" data-testid="description">
+                    ZeroStockViewから取得した、日ごとの在庫数です（直近31日）。{{
+                        warehouseNote
+                    }}です。在庫を取得していない日は、直前に在庫を取得した日の在庫から販売数を引いた推定値を出します。推定値は入荷や在庫の移動（FBAへの納品など）を含まないため、実際の在庫より少なく出ることがあります。
+                </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
                 <!-- 地（stone-100）の上に置くため、白い面と枠で浮かせる（在庫推移の切り替えとそろえる） -->
@@ -180,7 +185,12 @@ const rangeNote = computed(() => {
 
             <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600" data-testid="legend">
                 <span class="tabular-nums" data-testid="range-note">{{ rangeNote }}</span>
-                <span class="inline-flex items-center gap-1.5"><span class="text-stone-300">—</span>在庫を取得していない日</span>
+                <span v-if="view === 'table'" class="inline-flex items-center gap-1.5" data-testid="legend-estimated"><span class="text-stone-400 italic">12</span>推定（直前の在庫 − 販売数）</span>
+                <span v-else class="inline-flex items-center gap-1.5" data-testid="legend-estimated"
+                    ><svg class="h-2 w-4.5" viewBox="0 0 18 8" aria-hidden="true"><path d="M1 4h16" class="stroke-stone-400" stroke-width="1.4" stroke-dasharray="3 2" /></svg>推定（直前の在庫 −
+                    販売数）</span
+                >
+                <span class="inline-flex items-center gap-1.5"><span class="text-stone-300">—</span>在庫を取得しておらず推定もできない日</span>
                 <span class="inline-flex items-center gap-1.5"><span class="h-3 w-4.5 rounded-sm bg-red-100 ring-1 ring-red-200 ring-inset" />在庫0</span>
                 <span class="text-stone-400">最新は最後に在庫を取得した日の在庫数です</span>
             </div>
