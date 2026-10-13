@@ -5,6 +5,7 @@ namespace App\Services\Actuals;
 use App\Enums\Channel;
 use App\Enums\Mall;
 use App\Models\SalesLine;
+use App\Models\Sku;
 use Carbon\CarbonImmutable;
 
 /**
@@ -63,6 +64,71 @@ class StoreSalesReader
         return [
             'periods' => array_map(fn (array $period): array => ['start' => $period['start'], 'coverage' => $period['coverage']], $periods),
             'stores' => $stores,
+        ];
+    }
+
+    /**
+     * 期間（月か日）の売上上位の品番とSKU（K-091）。$mall を指定するとその店舗だけ、null なら全店舗。$order（amount か quantity）の多い順に
+     * $limit 件ずつ返す。CrossWalkerに未登録のSKU（品番の無いSKU）は、SKUの順位には入れ、品番の順位には入れずに unregistered にまとめる。
+     * total は期間の全体の販売数と金額で、割合の分母にする。今月・今日は今日まで。
+     *
+     * @param  list<int>|null  $skuIds  対象品番のSKUだけにするときのSKU。全商品なら null
+     * @return array{start: CarbonImmutable, end: CarbonImmutable, total: array{quantity: float, amount: float}, items: list<array{item_no: string, brand: string, category: string, sku_count: int, quantity: float, amount: float}>, skus: list<array{sku_id: int, sku_code: string, item_no: string|null, quantity: float, amount: float}>, unregistered: array{sku_count: int, quantity: float, amount: float}}
+     */
+    public function ranking(CarbonImmutable $today, SalesUnit $unit, CarbonImmutable $period, ?Mall $mall, ?array $skuIds, string $order, int $limit = 10): array
+    {
+        $today = $today->startOfDay();
+        $start = $unit === SalesUnit::Month ? $period->startOfMonth()->startOfDay() : $period->startOfDay();
+        $end = $unit === SalesUnit::Month ? $start->endOfMonth()->startOfDay()->min($today) : $start;
+
+        $sold = [];
+        if ($skuIds !== []) {
+            foreach ($skuIds === null ? [null] : array_chunk($skuIds, 500) as $chunk) {
+                $rows = SalesLine::query()
+                    ->selectRaw('sku_id, sum(quantity) as quantity, sum(amount) as amount')
+                    ->when($chunk !== null, fn ($query) => $query->whereIn('sku_id', $chunk))
+                    ->when($mall !== null, fn ($query) => $query->where('mall', $mall->value))
+                    ->where('sales_date', '>=', $start->toDateString())
+                    ->where('sales_date', '<', $end->addDay()->toDateString())
+                    ->groupBy('sku_id')
+                    ->toBase()
+                    ->get();
+                foreach ($rows as $row) {
+                    $sold[(int) $row->sku_id] = ['quantity' => (float) $row->quantity, 'amount' => (float) $row->amount];
+                }
+            }
+        }
+
+        $skus = Sku::query()->with('item')->whereIn('id', array_keys($sold))->get()->keyBy('id');
+        $key = $order === 'quantity' ? 'quantity' : 'amount';
+        $byOrder = fn (array $a, array $b): int => [$b[$key], $b[$key === 'amount' ? 'quantity' : 'amount']] <=> [$a[$key], $a[$key === 'amount' ? 'quantity' : 'amount']];
+
+        $skuRows = [];
+        $itemRows = [];
+        $unregistered = ['sku_count' => 0, 'quantity' => 0.0, 'amount' => 0.0];
+        foreach ($sold as $skuId => $values) {
+            $sku = $skus->get($skuId);
+            $item = $sku?->item;
+            $skuRows[] = ['sku_id' => $skuId, 'sku_code' => (string) $sku?->sku_code, 'item_no' => $item?->item_no, ...$values];
+            if ($item === null) {
+                $unregistered = ['sku_count' => $unregistered['sku_count'] + 1, 'quantity' => $unregistered['quantity'] + $values['quantity'], 'amount' => $unregistered['amount'] + $values['amount']];
+
+                continue;
+            }
+            $current = $itemRows[$item->item_no] ?? ['item_no' => $item->item_no, 'brand' => $item->brand, 'category' => $item->category, 'sku_count' => 0, 'quantity' => 0.0, 'amount' => 0.0];
+            $itemRows[$item->item_no] = [...$current, 'sku_count' => $current['sku_count'] + 1, 'quantity' => $current['quantity'] + $values['quantity'], 'amount' => $current['amount'] + $values['amount']];
+        }
+        usort($skuRows, $byOrder);
+        $itemRows = array_values($itemRows);
+        usort($itemRows, $byOrder);
+
+        return [
+            'start' => $start,
+            'end' => $end,
+            'total' => ['quantity' => array_sum(array_column($sold, 'quantity')), 'amount' => array_sum(array_column($sold, 'amount'))],
+            'items' => array_slice($itemRows, 0, $limit),
+            'skus' => array_slice($skuRows, 0, $limit),
+            'unregistered' => $unregistered,
         ];
     }
 

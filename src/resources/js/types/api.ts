@@ -637,6 +637,27 @@ export interface StoreSalesResponse {
     meta: Pick<SalesActualsResponse["meta"], "calculated_at" | "selection" | "unit" | "from" | "to" | "periods" | "channels"> & { products: StoreSalesProducts };
 }
 
+/** 店舗売上の月・日の欄の、売上上位の品番とSKU（各10件、K-091）。CrossWalkerに未登録のSKUは品番の順位に入れず unregistered にまとめる。 */
+export interface StoreRankingResponse {
+    data: {
+        items: { item_no: string; brand: string; category: string; sku_count: number; quantity: number; amount: number }[];
+        skus: { sku_id: number; sku_code: string; item_no: string | null; quantity: number; amount: number }[];
+        unregistered: { sku_count: number; quantity: number; amount: number };
+    };
+    meta: {
+        unit: SalesUnit;
+        period: string;
+        /** 集めた期間（今月・今日は今日まで） */
+        from: string;
+        to: string;
+        mall: StoreSales["mall"] | null;
+        mall_label: string;
+        products: StoreSalesProducts;
+        order: "amount" | "quantity";
+        total: { quantity: number; amount: number };
+    };
+}
+
 /** 日ごとの在庫数（直近31日）。在庫を取得していない日は、販売実績から推定した在庫を SKU の estimates に持つ（K-087）。 */
 export interface StockActualsResponse {
     data: ActualItem[];

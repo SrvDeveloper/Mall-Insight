@@ -11,7 +11,8 @@ import type { SalesUnit } from "@/types/api";
  * 店舗売上（B-126）の表。品番別売上の表（K-047・K-074）とそろえ、月・日を列に並べ、2列目の期間計と3列目の構成比は薄い灰色を敷いて区切る。
  * 1行目は店舗の合計。販売実績を取り込んでいない店舗を除いた合計には「※」を付ける。データの無い列は見出しを薄くし「—」で示す。
  * 月・日の欄にマウスを乗せる（またはフォーカスする）と、グラフと同じツールチップ（合計と店舗ごとの値・構成比・前月比・前年比、K-082）を
- * 欄の下（下に入らなければ上）に出し、マウスを乗せた店舗を目立たせる。ドラッグで横に動かしている間は出さない。
+ * 欄の下（下に入らなければ上）に出し、マウスを乗せた店舗を目立たせる。背景はグラフの折れ線のツールチップと同じく墨色を不透明度85%で透かす（K-085）。
+ * ドラッグで横に動かしている間は出さない。販売実績のある欄を押す（Enter キー）と、その店舗（合計の行なら全店舗）の売上上位を開く（K-091）。
  */
 
 const props = defineProps<{
@@ -26,6 +27,7 @@ const props = defineProps<{
     formatValue: (value: number) => string;
     unit: SalesUnit;
 }>();
+const emit = defineEmits<{ pick: [index: number, key: string | null] }>();
 
 const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
 const tooltipElement = useTemplateRef<HTMLDivElement>("tooltipElement");
@@ -46,6 +48,15 @@ function show(event: Event, index: number, key: string | null): void {
 
 function hide(): void {
     hovered.value = null;
+}
+
+/** 販売実績のある欄を押したら、売上上位を開く（ドラッグで横に動かしたときは開かない）。 */
+function pick(index: number, key: string | null, hasData: boolean): void {
+    if (!hasData || isDragging.value) {
+        return;
+    }
+    hide();
+    emit("pick", index, key);
 }
 
 const tooltip = computed(() => (hovered.value ? buildSalesTooltip(props.series, props.columns[hovered.value.index]!, hovered.value.index, { kind: "bar", unit: props.unit, withShare: true }) : null));
@@ -119,12 +130,14 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
                         v-for="(cell, index) in total.cells"
                         :key="index"
                         class="px-2 text-right font-semibold tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
-                        :class="hovered?.index === index && hovered.key === null ? 'bg-stone-200/70' : ''"
+                        :class="[hovered?.index === index && hovered.key === null ? 'bg-stone-200/70' : '', cell.tone === 'none' ? '' : 'cursor-pointer']"
                         tabindex="0"
                         @mouseenter="show($event, index, null)"
                         @mouseleave="hide"
                         @focus="show($event, index, null)"
                         @blur="hide"
+                        @click="pick(index, null, cell.tone !== 'none')"
+                        @keydown.enter="pick(index, null, cell.tone !== 'none')"
                     >
                         <span class="inline-flex min-w-8 justify-end px-2 py-0.5" :class="cell.tone === 'none' ? 'text-stone-300' : 'text-stone-900'" data-testid="store-cell"
                             >{{ cell.text }}<sup v-if="cell.excludes" class="ml-0.5 text-[10px] font-normal text-stone-400" data-testid="store-cell-excludes">※</sup></span
@@ -144,12 +157,14 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
                         v-for="(cell, index) in row.cells"
                         :key="index"
                         class="px-2 text-right tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
-                        :class="hovered?.index === index && hovered.key === row.key ? 'bg-stone-200/70' : ''"
+                        :class="[hovered?.index === index && hovered.key === row.key ? 'bg-stone-200/70' : '', cell.tone === 'none' ? '' : 'cursor-pointer']"
                         tabindex="0"
                         @mouseenter="show($event, index, row.key)"
                         @mouseleave="hide"
                         @focus="show($event, index, row.key)"
                         @blur="hide"
+                        @click="pick(index, row.key, cell.tone !== 'none')"
+                        @keydown.enter="pick(index, row.key, cell.tone !== 'none')"
                     >
                         <span class="inline-flex min-w-8 justify-end px-2 py-0.5" :class="cell.tone === 'none' ? 'text-stone-300' : 'text-stone-700'" data-testid="store-cell">{{ cell.text }}</span>
                     </td>
@@ -161,11 +176,14 @@ const SUMMARY_EDGE = "shadow-[inset_-1px_0_0_var(--color-stone-300)]";
             v-if="tooltip && hovered"
             ref="tooltipElement"
             role="tooltip"
-            class="pointer-events-none fixed z-40 w-80 max-w-[calc(100vw-1rem)] rounded-lg bg-stone-900 px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
+            class="pointer-events-none fixed z-40 w-80 max-w-[calc(100vw-1rem)] rounded-lg bg-stone-900/85 px-3 py-2 text-xs text-stone-100 shadow-xl ring-1 ring-black/20"
             :style="{ left: `${tooltipPosition.left}px`, top: `${tooltipPosition.top}px` }"
             data-testid="table-tooltip"
         >
             <SalesTooltipContent :tooltip="tooltip" :format-value="formatValue" :unit="unit" :highlight-key="hovered.key" />
+            <p v-if="tooltip.total !== null" class="mt-1 border-t border-white/10 pt-1 text-[10px] text-stone-400" data-testid="tooltip-pick-hint">
+                押すと{{ hovered.key === null ? "全店舗" : "この店舗" }}の売上上位の品番・SKUを見られます
+            </p>
         </div>
     </div>
 </template>

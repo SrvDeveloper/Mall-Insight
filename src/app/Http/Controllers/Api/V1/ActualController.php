@@ -118,16 +118,7 @@ class ActualController extends Controller
         $isTarget = $request->input('products') === 'target';
         $now = CarbonImmutable::now();
         [$from, $to] = $this->period($request, $reader, $unit, $now);
-        $skuIds = null;
-        if ($isTarget) {
-            $skuIds = [];
-            foreach ($reader->items() as $item) {
-                foreach ($item->skus as $sku) {
-                    $skuIds[] = $sku->id;
-                }
-            }
-        }
-        $sales = $stores->sales($now, $unit, $from, $to, $skuIds);
+        $sales = $stores->sales($now, $unit, $from, $to, $isTarget ? $this->targetSkuIds($reader) : null);
         $ranges = $reader->salesRanges();
         $format = fn (CarbonImmutable $date): string => $unit === SalesUnit::Month ? $date->format('Y-m') : $date->toDateString();
 
@@ -158,6 +149,66 @@ class ActualController extends Controller
                 ], Channel::cases()),
             ],
         ]);
+    }
+
+    /**
+     * 店舗売上の月・日の欄の、売上上位の品番とSKU（各10件、K-091）。period は月ごとなら YYYY-MM、日ごとなら YYYY-MM-DD（今月・今日まで）。
+     * mall を指定するとその店舗だけ、無ければ全店舗。products は店舗売上と同じ。order（amount（初期値）か quantity）の多い順。
+     * CrossWalkerに未登録のSKUは、品番の順位に入れず unregistered にまとめる。
+     */
+    public function storeRanking(Request $request, ActualsReader $reader, StoreSalesReader $stores): JsonResponse
+    {
+        $request->validate([
+            'unit' => ['nullable', Rule::enum(SalesUnit::class)],
+            'mall' => ['nullable', Rule::enum(Mall::class)],
+            'products' => ['nullable', Rule::in(['all', 'target'])],
+            'order' => ['nullable', Rule::in(['amount', 'quantity'])],
+        ]);
+        $unit = $request->enum('unit', SalesUnit::class) ?? SalesUnit::Month;
+        $isMonth = $unit === SalesUnit::Month;
+        $format = $isMonth ? 'Y-m' : 'Y-m-d';
+        $request->validate(['period' => ['required', "date_format:{$format}"]], [], ['period' => '期間']);
+        $now = CarbonImmutable::now();
+        $period = CarbonImmutable::createFromFormat("!{$format}", $request->string('period')->toString());
+        if ($period->gt($isMonth ? $now->startOfMonth()->startOfDay() : $now->startOfDay())) {
+            throw ValidationException::withMessages(['period' => $isMonth ? '期間は今月までにしてください。' : '期間は今日までにしてください。']);
+        }
+        $mall = $request->enum('mall', Mall::class);
+        $isTarget = $request->input('products') === 'target';
+        $order = $request->input('order') === 'quantity' ? 'quantity' : 'amount';
+        $ranking = $stores->ranking($now, $unit, $period, $mall, $isTarget ? $this->targetSkuIds($reader) : null, $order);
+
+        return response()->json([
+            'data' => ['items' => $ranking['items'], 'skus' => $ranking['skus'], 'unregistered' => $ranking['unregistered']],
+            'meta' => [
+                'unit' => $unit->value,
+                'period' => $period->format($format),
+                'from' => $ranking['start']->toDateString(),
+                'to' => $ranking['end']->toDateString(),
+                'mall' => $mall?->value,
+                'mall_label' => $mall?->label() ?? '全店舗',
+                'products' => $isTarget ? 'target' : 'all',
+                'order' => $order,
+                'total' => $ranking['total'],
+            ],
+        ]);
+    }
+
+    /**
+     * 対象品番（最新の選定）のSKU。
+     *
+     * @return list<int>
+     */
+    private function targetSkuIds(ActualsReader $reader): array
+    {
+        $skuIds = [];
+        foreach ($reader->items() as $item) {
+            foreach ($item->skus as $sku) {
+                $skuIds[] = $sku->id;
+            }
+        }
+
+        return $skuIds;
     }
 
     /**

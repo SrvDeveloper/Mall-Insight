@@ -2,10 +2,38 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import StoreSalesView from "@/views/StoreSalesView.vue";
-import { fetchStoreSales } from "@/api/actuals";
+import { fetchStoreRanking, fetchStoreSales } from "@/api/actuals";
+import type { StoreRankingResponse } from "@/types/api";
 import { storeSalesResponse } from "@/views/storeSales.fixture";
 
-vi.mock("@/api/actuals", () => ({ fetchStoreSales: vi.fn() }));
+vi.mock("@/api/actuals", () => ({ fetchStoreSales: vi.fn(), fetchStoreRanking: vi.fn() }));
+
+function rankingResponse(order: "amount" | "quantity" = "amount"): StoreRankingResponse {
+    return {
+        data: {
+            items: [
+                { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", sku_count: 2, quantity: 3, amount: 15000 },
+                { item_no: "si-13", brand: "FEELLIFE", category: "調光老眼鏡", sku_count: 1, quantity: 1, amount: 4000 },
+            ],
+            skus: [
+                { sku_id: 1, sku_code: "fl-01-1-10", item_no: "fl-01", quantity: 2, amount: 10000 },
+                { sku_id: 9, sku_code: "unknown-1", item_no: null, quantity: 1, amount: 6000 },
+            ],
+            unregistered: { sku_count: 1, quantity: 1, amount: 6000 },
+        },
+        meta: {
+            unit: "month",
+            period: "2026-10",
+            from: "2026-10-01",
+            to: "2026-10-07",
+            mall: "rakuten",
+            mall_label: "楽天市場",
+            products: "all",
+            order,
+            total: { quantity: 5, amount: 25000 },
+        },
+    };
+}
 
 async function mountView(path = "/store-sales") {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:any(.*)", component: StoreSalesView }] });
@@ -18,6 +46,9 @@ async function mountView(path = "/store-sales") {
 describe("StoreSalesView", () => {
     beforeEach(() => {
         vi.mocked(fetchStoreSales).mockReset().mockResolvedValue(storeSalesResponse());
+        vi.mocked(fetchStoreRanking)
+            .mockReset()
+            .mockImplementation(async (_unit, _period, _mall, _products, order) => rankingResponse(order));
     });
 
     it("shows the sales of each store in thousand yen for all products by default", async () => {
@@ -45,6 +76,9 @@ describe("StoreSalesView", () => {
         await rows[0]!.findAll("td[tabindex]")[2]!.trigger("mouseenter");
         const tooltip = wrapper.find('[data-testid="table-tooltip"]');
         expect(tooltip.exists()).toBe(true);
+        // 背景は透かす（K-085）
+        expect(tooltip.classes()).toContain("bg-stone-900/85");
+        expect(tooltip.find('[data-testid="tooltip-pick-hint"]').text()).toContain("この店舗の売上上位");
         expect(tooltip.text()).toContain("26/10");
         // 金額は千円単位ではなく円で出す
         expect(tooltip.find('[data-testid="tooltip-total"]').text()).toBe("53,000円");
@@ -61,6 +95,42 @@ describe("StoreSalesView", () => {
         await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[0]!.trigger("focus");
         expect(wrapper.find('[data-testid="tooltip-missing"]').text()).toBe("Amazonは販売実績を取り込んでいないため、合計に含めていません");
         expect(wrapper.find('[data-testid="table-tooltip"] [data-highlighted="true"]').exists()).toBe(false);
+    });
+
+    it("opens the top items and SKUs of the store and month when a cell is clicked", async () => {
+        const { wrapper } = await mountView();
+
+        // 販売実績の無い欄は押しても開かない
+        await wrapper.findAll('[data-testid="store-row"]')[3]!.findAll("td[tabindex]")[0]!.trigger("click");
+        expect(wrapper.find('[data-testid="ranking-dialog"]').exists()).toBe(false);
+
+        await wrapper.findAll('[data-testid="store-row"]')[0]!.findAll("td[tabindex]")[2]!.trigger("click");
+        await flushPromises();
+        expect(fetchStoreRanking).toHaveBeenCalledWith("month", "2026-10", "rakuten", "all", "amount");
+        const dialog = wrapper.find('[data-testid="ranking-dialog"]');
+        expect(dialog.find("h2").text()).toBe("楽天市場・2026年10月（今日まで）の売上上位");
+        expect(dialog.find('[data-testid="ranking-summary"]').text()).toBe("2026/10/01〜2026/10/07・全商品・合計 25,000円（5個）");
+        const items = dialog.findAll('[data-testid="ranking-item"]');
+        expect(items[0]!.text()).toContain("fl-01");
+        expect(items[0]!.text()).toContain("15,000円");
+        expect(items[0]!.text()).toContain("60.0%・3個");
+        const skus = dialog.findAll('[data-testid="ranking-sku"]');
+        expect(skus[1]!.text()).toContain("unknown-1未登録");
+        expect(dialog.find('[data-testid="ranking-unregistered"]').text()).toContain("CrossWalkerに未登録のSKU（1 SKU）：6,000円・24.0%");
+
+        await dialog.find('[data-testid="ranking-order-quantity"]').trigger("click");
+        await flushPromises();
+        expect(fetchStoreRanking).toHaveBeenLastCalledWith("month", "2026-10", "rakuten", "all", "quantity");
+        expect(wrapper.find('[data-testid="ranking-item"]').text()).toContain("3個");
+
+        await wrapper.find('[aria-label="閉じる"]').trigger("click");
+        expect(wrapper.find('[data-testid="ranking-dialog"]').exists()).toBe(false);
+
+        // 合計の行は全店舗
+        await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[1]!.trigger("keydown", { key: "Enter" });
+        await flushPromises();
+        expect(fetchStoreRanking).toHaveBeenLastCalledWith("month", "2026-09", null, "all", "amount");
+        expect(wrapper.find('[data-testid="ranking-dialog"] h2').text()).toBe("全店舗・2026年9月の売上上位");
     });
 
     it("switches to the target items, quantities and the graph, keeping them in the URL", async () => {
