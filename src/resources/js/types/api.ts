@@ -317,7 +317,7 @@ export interface ForecastTimelineSku {
     /** 売っているチャネルだけ（子ASINの無いSKUは Amazon を持たない） */
     channels: Partial<Record<"boss" | "amazon", ForecastTimelineChannel>>;
     /** 品番を指定したときだけ：予測の根拠（平均日販の期間・月別の内訳） */
-    detail?: SkuForecast;
+    detail?: Omit<SkuForecast, "unit_prices">;
 }
 
 export interface ForecastTimelineItem {

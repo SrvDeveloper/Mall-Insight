@@ -9,7 +9,13 @@ import { timeline } from "@/views/forecastTimeline.fixture";
 vi.mock("@/api/demandForecasts", () => ({ fetchForecastTimeline: vi.fn() }));
 
 async function mountView(path = "/forecasts") {
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:any(.*)", component: DemandForecastView }] });
+    const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+            { path: "/forecasts", name: "forecasts", component: DemandForecastView },
+            { path: "/forecasts/:itemNo", name: "sku-forecasts", component: { template: "<div />" } },
+        ],
+    });
     await router.push(path);
     const wrapper = mount(DemandForecastView, { global: { plugins: [router] }, attachTo: document.body });
     await flushPromises();
@@ -26,7 +32,7 @@ describe("DemandForecastView", () => {
     it("lists the items by forecast and shows the selected item with its variance from the actual sales", async () => {
         const { wrapper } = await mountView();
 
-        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", offset: 0, period: null });
+        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", offset: 0, period: null, itemNo: null });
         expect(wrapper.find("h1").text()).toBe("需要予測");
         const ranks = wrapper.findAll('[data-testid^="rank-"][aria-pressed]');
         expect(ranks.map((rank) => rank.find(".font-mono").text())).toEqual(["fl-01", "si-13"]);
@@ -38,7 +44,7 @@ describe("DemandForecastView", () => {
         expect(wrapper.find('[data-testid="chart-item-no"]').text()).toBe("fl-01");
         expect(wrapper.find('[data-testid="stat-forecast"]').text()).toBe("2,160個");
         expect(wrapper.find('[data-testid="stat-wape"]').text()).toBe("3.3%");
-        expect(wrapper.find('[data-testid="stat-bias"]').text()).toBe("+3%");
+        expect(wrapper.find('[data-testid="stat-bias"]').text()).toBe("+3.3%");
         expect(wrapper.find('[data-testid="stat-base"]').text()).toContain("6.0");
         expect(wrapper.findAll('[data-testid="replay-tick"]')).toHaveLength(12);
         expect(wrapper.find('[data-testid="today-line"]').exists()).toBe(true);
@@ -60,7 +66,7 @@ describe("DemandForecastView", () => {
         await wrapper.find('[data-testid="scope-amazon"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query.scope).toBe("amazon");
-        expect(wrapper.find('[data-testid="stat-bias"]').text()).toBe("−10%");
+        expect(wrapper.find('[data-testid="stat-bias"]').text()).toBe("−10.0%");
 
         await wrapper.find('[data-testid="measure-amount"]').trigger("click");
         await flushPromises();
@@ -69,7 +75,7 @@ describe("DemandForecastView", () => {
         await wrapper.find('[data-testid="offset-3"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query.offset).toBe("3");
-        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "month", offset: 3, period: null });
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "month", offset: 3, period: null, itemNo: null });
 
         await wrapper.find('[data-testid="scope-total"]').trigger("click");
         await flushPromises();
@@ -82,24 +88,29 @@ describe("DemandForecastView", () => {
 
     it("shows the days with the period picker and leaves stockout days out of the variance", async () => {
         const daily = timeline("day");
+        // 10/11 は BOSS も Amazon も欠品していて、比べられない
         daily.data[1]!.skus[0]!.channels.boss!.stockout = [false, true, false, null, null, null, null];
+        daily.data[1]!.skus[0]!.channels.amazon!.stockout = [false, true, false, null, null, null, null];
         vi.mocked(fetchForecastTimeline).mockImplementation(async (query) => (query.unit === "day" ? daily : timeline()));
         const { wrapper, router } = await mountView();
 
         await wrapper.find('[data-testid="unit-day"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query.unit).toBe("day");
-        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: null });
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: null, itemNo: null });
         expect(wrapper.find('[data-testid="period-picker"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="filter-large"]').text()).toContain("50%以上");
         expect(wrapper.findAll('[data-testid="event-band"]')).toHaveLength(1);
-        expect(wrapper.findAll('[data-testid="chart-shade"]').length).toBeGreaterThan(0);
+        // 欠品した日は地を黄色に、土日は灰色にする
+        expect(wrapper.findAll('[data-testid="chart-band"]')[1]!.attributes("style")).toContain("background: rgb(254, 243, 199)");
+        expect(wrapper.findAll('[data-testid="chart-band"]')[0]!.attributes("style")).toContain("background: rgb(250, 250, 249)");
         expect(wrapper.findAll('[data-testid="figure-variance"]')[1]!.text()).toBe("欠品");
 
+        await wrapper.find('[data-testid="period-button"]').trigger("click");
         await wrapper.find('[data-testid="period-d14"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query).toMatchObject({ unit: "day", from: "2026-09-29", to: "2026-10-27" });
-        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: { from: "2026-09-29", to: "2026-10-27" } });
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: { from: "2026-09-29", to: "2026-10-27" }, itemNo: null });
         wrapper.unmount();
     });
 
@@ -120,6 +131,7 @@ describe("DemandForecastView", () => {
         expect(rows[1]!.find('[data-testid="table-wape"]').classes()).toContain("text-amber-700");
 
         await wrapper.find('[data-testid="past-12"]').trigger("click");
+        await flushPromises();
         expect(wrapper.findAll('[data-testid="table-item-row"]')[0]!.findAll('[data-testid="table-cell"]')).toHaveLength(24);
 
         expect(wrapper.findAll('[data-testid="table-sku-row"]')).toHaveLength(0);
@@ -138,8 +150,9 @@ describe("DemandForecastView", () => {
             return timeline(query.unit);
         });
         const { wrapper } = await mountView("/forecasts?unit=day");
+        await wrapper.find('[data-testid="period-button"]').trigger("click");
+        // 日付の欄は値を変えると change が起き、選んだ期間で読み込み直す
         await wrapper.find('[data-testid="period-to"]').setValue("2027-03-01");
-        await wrapper.find('[data-testid="period-to"]').trigger("change");
         await flushPromises();
         expect(wrapper.find('[data-testid="period-error"]').text()).toBe("日ごとの予測は、今日から90日先までです。");
         wrapper.unmount();

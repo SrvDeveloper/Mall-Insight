@@ -31,8 +31,10 @@ export interface TimelineFigures {
     forecast: (number | null)[];
     /** 差異（比べられなければ null） */
     variance: (number | null)[];
-    /** 欠品したSKU・チャネルがあるか（日ごとは欠品した日、月ごとは欠品した日がある月） */
+    /** 欠品で比べられない月・日か（欠品したSKU・チャネルがあり、ほかに比べられるSKU・チャネルが無い） */
     stockout: boolean[];
+    /** 欠品したSKU・チャネルの数（日ごとは欠品した日、月ごとは欠品した日がある月） */
+    stockoutCount: number[];
     /** 過去の期間の外れ率と偏り（比べられなければ null） */
     wape: number | null;
     bias: number | null;
@@ -64,6 +66,7 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
         forecast: empty(),
         variance: empty(),
         stockout: Array.from({ length }, () => false),
+        stockoutCount: Array.from({ length }, () => 0),
         wape: null,
         bias: null,
         forecastTotal: 0,
@@ -90,7 +93,7 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
                 const actual = measure === "amount" ? data.actual_amount[index] : data.actual[index];
                 const stockout = data.stockout[index];
                 if (stockout === true || (typeof stockout === "number" && stockout > 0)) {
-                    figures.stockout[index] = true;
+                    figures.stockoutCount[index]! += 1;
                 }
                 if (actual !== null && actual !== undefined) {
                     add(series.actual, index, actual);
@@ -123,6 +126,7 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
     let actualTotal = 0;
     let replayedTotal = 0;
     columns.forEach((column, index) => {
+        figures.stockout[index] = figures.stockoutCount[index]! > 0 && !compared[index];
         if (column.kind === "past") {
             figures.pastActualTotal += figures.actual[index] ?? 0;
             if (compared[index]) {

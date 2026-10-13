@@ -3,6 +3,7 @@ import { onUnauthorized } from "@/api/client";
 import { afterLoginLocation } from "@/router/afterLogin";
 import AppLayout from "@/layouts/AppLayout.vue";
 import DemandForecastView from "@/views/DemandForecastView.vue";
+import SkuForecastView from "@/views/SkuForecastView.vue";
 import ForecastAccuracyView from "@/views/ForecastAccuracyView.vue";
 import SalesEventDetailView from "@/views/SalesEventDetailView.vue";
 import SalesEventPeriodView from "@/views/SalesEventPeriodView.vue";
@@ -63,7 +64,14 @@ const routes: RouteRecordRaw[] = [
                 ],
             },
             { path: "store-sales", name: "store-sales", component: StoreSalesView, meta: { title: "店舗売上" } },
-            { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
+            // SKU別の需要予測は需要予測の下に置き、左メニューの「需要予測」を選んだままにする
+            {
+                path: "forecasts",
+                children: [
+                    { path: "", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
+                    { path: ":itemNo", name: "sku-forecasts", component: SkuForecastView, meta: { title: "SKU別の需要予測" } },
+                ],
+            },
             // イベントの画面と期間の画面はイベントの一覧の下に置き、左メニューの「イベント」を選んだままにする
             {
                 path: "sales-events",
