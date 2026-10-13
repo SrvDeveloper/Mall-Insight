@@ -2,435 +2,126 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import DemandForecastView from "@/views/DemandForecastView.vue";
-import { fetchDemandForecasts } from "@/api/demandForecasts";
-import type { AverageWindow, ChannelForecast, DemandForecastResponse, MonthlyDemand, SkuForecast } from "@/types/api";
+import { fetchForecastTimeline } from "@/api/demandForecasts";
+import { ApiError } from "@/api/client";
+import { timeline } from "@/views/forecastTimeline.fixture";
 
-vi.mock("@/api/demandForecasts", () => ({ fetchDemandForecasts: vi.fn() }));
-
-const months = Array.from({ length: 12 }, (_, index) => {
-    const date = new Date(2026, 9 + index, 1);
-    return { month: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`, days: index === 0 ? 31 : 30 };
-});
-
-function monthly(baseAverage: number): MonthlyDemand[] {
-    return months.map((month) => ({ ...month, quantity: baseAverage * month.days, event_quantity: 0, seasonal_factor: null, events: [] }));
-}
-
-const windows: AverageWindow[] = [
-    {
-        length: 30,
-        offset: 0,
-        label: "直近30日",
-        from: "2026-09-07",
-        to: "2026-10-06",
-        sales_days: 30,
-        stockout_days: 0,
-        event_days: 0,
-        seasonal_factor: null,
-        sales_quantity: 60,
-        average: 2,
-        base_weight: 0.5,
-        weight: 0.5,
-        is_excluded: false,
-    },
-    {
-        length: 60,
-        offset: 30,
-        label: "31〜90日前",
-        from: "2026-07-09",
-        to: "2026-09-06",
-        sales_days: 57,
-        stockout_days: 3,
-        event_days: 0,
-        seasonal_factor: null,
-        sales_quantity: 90,
-        average: 1.5,
-        base_weight: 0.3,
-        weight: 0.3,
-        is_excluded: false,
-    },
-    {
-        length: 90,
-        offset: 90,
-        label: "91〜180日前",
-        from: "2026-04-10",
-        to: "2026-07-08",
-        sales_days: 90,
-        stockout_days: 0,
-        event_days: 0,
-        seasonal_factor: null,
-        sales_quantity: 135,
-        average: 1.5,
-        base_weight: 0.2,
-        weight: 0.2,
-        is_excluded: false,
-    },
-];
-
-function channel(channelName: "boss" | "amazon", baseAverage: number | null, reason: string | null = null): ChannelForecast {
-    return {
-        channel: channelName,
-        channel_label: channelName === "boss" ? "BOSS" : "Amazon",
-        base_average: baseAverage,
-        unpredictable_reason: reason ? "no_sales" : null,
-        unpredictable_reason_label: reason,
-        windows,
-        monthly: baseAverage === null ? null : monthly(baseAverage),
-    };
-}
-
-function sku(sku_id: number, sku_code: string, channels: ChannelForecast[], unit_prices: SkuForecast["unit_prices"] = { total: 2000, boss: 2000, amazon: null }): SkuForecast {
-    const predictable = channels.filter((candidate) => candidate.base_average !== null);
-    const baseAverage = predictable.length ? predictable.reduce((total, candidate) => total + candidate.base_average!, 0) : null;
-    const unpredictable = channels.filter((candidate) => candidate.base_average === null);
-    return {
-        sku_id,
-        sku_code,
-        status: "active",
-        status_label: "有効",
-        base_average: baseAverage,
-        monthly: baseAverage === null ? null : monthly(baseAverage),
-        is_partial: predictable.length > 0 && unpredictable.length > 0,
-        unpredictable_reason_label: unpredictable.length ? unpredictable.map((candidate) => `${candidate.channel_label}：${candidate.unpredictable_reason_label}`).join("／") : null,
-        channels,
-        unit_prices,
-    };
-}
-
-const NO_SALES = "直近180日に販売実績がありません";
-
-function response(overrides: Partial<DemandForecastResponse["meta"]> = {}, data: DemandForecastResponse["data"] | null = null): DemandForecastResponse {
-    return {
-        data: data ?? [
-            {
-                item_no: "fl-01",
-                brand: "FEELLIFE",
-                category: "老眼鏡",
-                skus: [sku(1, "fl-01-1-10", [channel("boss", 1.75)]), sku(2, "fl-01-1-15", [channel("boss", 0.5)]), sku(3, "fl-01-1-20", [channel("boss", null, NO_SALES)])],
-            },
-        ],
-        meta: {
-            calculated_at: "2026-10-07T10:00:00+09:00",
-            channels: [
-                { channel: "boss", label: "BOSS", sales_data_from: "2025-10-07", sales_data_to: "2026-10-06" },
-                { channel: "amazon", label: "Amazon", sales_data_from: null, sales_data_to: null },
-            ],
-            forecast_from: "2026-10-07",
-            selection: { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1 },
-            window_weights: [
-                { length: 30, weight: 0.5 },
-                { length: 60, weight: 0.3 },
-                { length: 90, weight: 0.2 },
-            ],
-            min_sales_days: 14,
-            events: [],
-            seasonal_item_nos: [],
-            ...overrides,
-        },
-    };
-}
-
-const bothChannels: DemandForecastResponse["meta"]["channels"] = [
-    { channel: "boss", label: "BOSS", sales_data_from: "2025-10-07", sales_data_to: "2026-10-06" },
-    { channel: "amazon", label: "Amazon", sales_data_from: "2025-10-07", sales_data_to: "2026-10-06" },
-];
+vi.mock("@/api/demandForecasts", () => ({ fetchForecastTimeline: vi.fn() }));
 
 async function mountView(path = "/forecasts") {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:any(.*)", component: DemandForecastView }] });
     await router.push(path);
-    const wrapper = mount(DemandForecastView, { global: { plugins: [router] } });
+    const wrapper = mount(DemandForecastView, { global: { plugins: [router] }, attachTo: document.body });
     await flushPromises();
-    return Object.assign(wrapper, { router });
-}
-
-function viewButton(wrapper: Awaited<ReturnType<typeof mountView>>, label: string) {
-    return wrapper.findAll('[aria-label="表示するチャネル"] button').find((button) => button.text() === label)!;
+    return { wrapper, router };
 }
 
 describe("DemandForecastView", () => {
     beforeEach(() => {
-        vi.mocked(fetchDemandForecasts).mockReset();
+        vi.mocked(fetchForecastTimeline)
+            .mockReset()
+            .mockImplementation(async (query) => timeline(query.unit));
     });
 
-    it("shows the calculation time, the sales data range of each channel and the target items", async () => {
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response());
+    it("lists the items by forecast and shows the selected item with its variance from the actual sales", async () => {
+        const { wrapper } = await mountView();
 
-        const wrapper = await mountView();
+        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", offset: 0, period: null });
+        expect(wrapper.find("h1").text()).toBe("需要予測");
+        const ranks = wrapper.findAll('[data-testid^="rank-"][aria-pressed]');
+        expect(ranks.map((rank) => rank.find(".font-mono").text())).toEqual(["fl-01", "si-13"]);
+        expect(wrapper.find('[data-testid="rank-wape-fl-01"]').text()).toBe("差異 3%");
+        // 差異が30%以上の品番は強調する
+        expect(wrapper.find('[data-testid="rank-wape-si-13"]').classes()).toContain("text-amber-700");
+        expect(wrapper.find('[data-testid="rank-unpredictable"]').text()).toBe("予測不能 1 SKU");
 
-        expect(wrapper.find('[data-testid="calculated-at"]').text()).toBe("計算日時 2026/10/07 10:00");
-        const selection = wrapper.find('[data-testid="selection"]').text();
-        expect(selection).toContain("1品番・3 SKU");
-        expect(selection).toContain("2026/10/07 09:00 に確定");
-        expect(wrapper.find('[data-testid="sales-range-boss"]').text()).toContain("2026年10月6日まで");
-        expect(wrapper.find('[data-testid="sales-range-boss"]').text()).toContain("2025/10/07 〜 2026/10/06");
-        expect(wrapper.find('[data-testid="sales-range-amazon"]').text()).toContain("まだ取り込まれていません");
-        expect(wrapper.find('[data-testid="stale-sales"]').exists()).toBe(false);
-        expect(viewButton(wrapper, "Amazon").attributes("disabled")).toBeDefined();
+        expect(wrapper.find('[data-testid="chart-item-no"]').text()).toBe("fl-01");
+        expect(wrapper.find('[data-testid="stat-forecast"]').text()).toBe("2,160個");
+        expect(wrapper.find('[data-testid="stat-wape"]').text()).toBe("3.3%");
+        expect(wrapper.find('[data-testid="stat-bias"]').text()).toBe("+3%");
+        expect(wrapper.find('[data-testid="stat-base"]').text()).toContain("6.0");
+        expect(wrapper.findAll('[data-testid="replay-tick"]')).toHaveLength(12);
+        expect(wrapper.find('[data-testid="today-line"]').exists()).toBe(true);
+        expect(wrapper.findAll('[data-testid="figure-actual"]')[0]!.text()).toBe("150");
+        expect(wrapper.findAll('[data-testid="figure-forecast"]')[0]!.text()).toBe("155");
+        expect(wrapper.findAll('[data-testid="figure-variance"]')[0]!.text()).toBe("+3%");
+        expect(wrapper.findAll('[data-testid="figure-forecast"]')[12]!.text()).toBe("180");
+
+        await wrapper.find('[data-testid="rank-si-13"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-testid="chart-item-no"]').text()).toBe("si-13");
+        expect(wrapper.findAll('[data-testid="figure-variance"]')[0]!.classes()).toContain("font-bold");
+        wrapper.unmount();
     });
 
-    it("shows monthly forecasts per SKU with item totals that leave out unpredictable SKUs", async () => {
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response());
+    it("switches the mall, the measure, the forecast to compare and the filter in the URL", async () => {
+        const { wrapper, router } = await mountView();
 
-        const wrapper = await mountView();
-
-        const headers = wrapper
-            .findAll("thead tr")[1]!
-            .findAll("th")
-            .map((th) => th.text());
-        // 今月も1か月分の需要（K-052）
-        expect(headers[2]).toBe("26/10 今月");
-        expect(headers[4]).toBe("26/12");
-        expect(headers.at(-1)).toBe("12か月計");
-        const skuRows = wrapper.findAll('[data-testid="sku-row"]');
-        const cells = skuRows[0]!.findAll("td").map((td) => td.text());
-        expect(cells[1]).toBe("1.75");
-        expect(cells[2]).toBe("54");
-        expect(cells[3]).toBe("53");
-        const itemCells = wrapper
-            .find('[data-testid="item-row"]')
-            .findAll("td")
-            .map((td) => td.text());
-        expect(itemCells[0]).toBe("予測不能を除く");
-        expect(itemCells[1]).toBe("70");
-        expect(skuRows[2]!.text()).toContain("予測不能");
-        expect(skuRows[2]!.find('[data-testid="unpredictable-reason"]').text()).toBe(`BOSS：${NO_SALES}`);
-        expect(wrapper.find('[data-testid="item-unpredictable"]').text()).toBe("予測不能 1/3");
-        expect(wrapper.find('[data-testid="filter-unpredictable"]').text()).toBe("予測不能 1");
-    });
-
-    it("switches to amounts with the unit prices and leaves SKUs without a price out of the item totals (B-123)", async () => {
-        const unpricedSku = sku(2, "fl-01-1-15", [channel("boss", 0.5)], { total: null, boss: null, amazon: null });
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(
-            response({}, [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1.75)]), unpricedSku] }]),
-        );
-        const wrapper = await mountView();
+        await wrapper.find('[data-testid="scope-amazon"]').trigger("click");
+        await flushPromises();
+        expect(router.currentRoute.value.query.scope).toBe("amazon");
+        expect(wrapper.find('[data-testid="stat-bias"]').text()).toBe("−10%");
 
         await wrapper.find('[data-testid="measure-amount"]').trigger("click");
         await flushPromises();
+        expect(wrapper.find('[data-testid="stat-forecast"]').text()).toBe("720千円");
 
-        expect(wrapper.router.currentRoute.value.query).toEqual({ measure: "amount" });
-        expect(wrapper.find('[data-testid="amount-note"]').text()).toContain("金額は税込の売値の概算（千円）");
-        expect(wrapper.findAll("thead tr")[1]!.findAll("th").at(-1)!.text()).toBe("12か月計（千円）");
-        const skuRows = wrapper.findAll('[data-testid="sku-row"]');
-        // 10月は 1.75×31＝54.25個 × 2,000円 ＝ 108,500円
-        expect(skuRows[0]!.findAll("td")[2]!.text()).toBe("109");
-        expect(skuRows[1]!.find('[data-testid="unpriced"]').text()).toContain("単価なし");
-        const itemCells = wrapper.find('[data-testid="item-row"]').findAll("td");
-        expect(itemCells[0]!.text()).toBe("単価なしを除く");
-        expect(itemCells[1]!.text()).toBe("109");
-
-        await wrapper.find('[data-testid="measure-quantity"]').trigger("click");
+        await wrapper.find('[data-testid="offset-3"]').trigger("click");
         await flushPromises();
-        expect(wrapper.findAll('[data-testid="sku-row"]')[0]!.findAll("td")[2]!.text()).toBe("54");
-    });
+        expect(router.currentRoute.value.query.offset).toBe("3");
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "month", offset: 3, period: null });
 
-    it("switches between the total and each channel and marks partly unpredictable SKUs", async () => {
-        const data = [
-            {
-                item_no: "fl-01",
-                brand: "FEELLIFE",
-                category: "老眼鏡",
-                skus: [sku(1, "fl-01-1-10", [channel("boss", 1), channel("amazon", 2)]), sku(2, "fl-01-1-15", [channel("boss", 0.5), channel("amazon", null, NO_SALES)])],
-            },
-        ];
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ channels: bothChannels }, data));
-        const wrapper = await mountView();
-
-        const baseAverages = () => wrapper.findAll('[data-testid="base-average"]').map((cell) => cell.text());
-        expect(baseAverages()).toEqual(["3.00", "0.50"]);
-        expect(wrapper.findAll('[data-testid="sku-row"]')[1]!.find('[data-testid="partial"]').exists()).toBe(true);
-        expect(wrapper.find('[data-testid="filter-partial"]').text()).toBe("一部予測不能 1");
-
-        await viewButton(wrapper, "Amazon").trigger("click");
-
-        expect(baseAverages()).toEqual(["2.00", "予測不能"]);
-        expect(wrapper.findAll('[data-testid="sku-row"]')[1]!.find('[data-testid="unpredictable-reason"]').text()).toBe(NO_SALES);
-        expect(wrapper.find('[data-testid="partial"]').exists()).toBe(false);
-
-        await viewButton(wrapper, "BOSS").trigger("click");
-
-        expect(baseAverages()).toEqual(["1.00", "0.50"]);
-    });
-
-    it("draws only the rows around the visible area and swaps them while scrolling", async () => {
-        const many = [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: Array.from({ length: 300 }, (_, index) => sku(index + 1, `fl-01-${index + 1}`, [channel("boss", 1)])) }];
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({}, many));
-        const wrapper = await mountView();
-
-        const rendered = () => wrapper.findAll('[data-testid="sku-row"]').map((row) => row.find("td").text());
-        expect(rendered().length).toBeLessThan(80);
-        expect(rendered()[0]).toBe("fl-01-1");
-
-        const box = wrapper.find('[data-testid="forecast-scroll"]');
-        (box.element as HTMLElement).scrollTop = 40 * 200;
-        await box.trigger("scroll");
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await wrapper.find('[data-testid="scope-total"]').trigger("click");
         await flushPromises();
-
-        expect(rendered()).toContain("fl-01-200");
-        expect(rendered()).not.toContain("fl-01-1");
-        expect(rendered().length).toBeLessThan(80);
-    });
-
-    it("shows a SKU that is not sold on a channel as not sold instead of unpredictable", async () => {
-        const data = [
-            { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1), channel("amazon", 2)]), sku(2, "fl-01-1-15", [channel("boss", 0.5)])] },
-        ];
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ channels: bothChannels }, data));
-        const wrapper = await mountView();
-
-        await viewButton(wrapper, "Amazon").trigger("click");
-
-        const row = wrapper.findAll('[data-testid="sku-row"]')[1]!;
-        expect(row.find('[data-testid="base-average"]').text()).toBe("—");
-        expect(row.find('[data-testid="unpredictable-reason"]').text()).toBe("Amazonでは販売していません");
-        expect(wrapper.find('[data-testid="filter-unpredictable"]').text()).toBe("予測不能 0");
-        expect(wrapper.find('[data-testid="item-unpredictable"]').exists()).toBe(false);
-        expect(wrapper.find('[data-testid="item-row"]').text()).not.toContain("予測不能を除く");
-    });
-
-    it("shows each channel's windows and stockout days in a compact tooltip when hovering over the base average cell", async () => {
-        const data = [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [sku(1, "fl-01-1-10", [channel("boss", 1), channel("amazon", 2)])] }];
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ channels: bothChannels }, data));
-        const wrapper = await mountView();
-        vi.useFakeTimers();
-
-        try {
-            const average = wrapper.find('[data-testid="base-average-td"]');
-            await average.trigger("mouseenter");
-            expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
-            await vi.advanceTimersByTimeAsync(200);
-
-            const tooltip = wrapper.find('[role="tooltip"]');
-            expect(tooltip.classes()).toContain("w-72");
-            expect(tooltip.text()).toContain("fl-01-1-10");
-            expect(tooltip.text()).toContain("基準平均日販 3.00");
-            expect(tooltip.find('[data-testid="tooltip-boss"]').text()).toContain("BOSS 1.00");
-            expect(tooltip.find('[data-testid="tooltip-amazon"]').text()).toContain("Amazon 2.00");
-            const row = tooltip.find('[data-testid="tooltip-boss"]').findAll('[data-testid="tooltip-window"]')[1]!;
-            expect(row.text()).toContain("31〜90日前");
-            expect(row.text()).toContain("7/9〜9/6");
-            expect(row.text()).toContain("欠品3日");
-            expect(average.attributes("aria-describedby")).toBe("average-tooltip");
-
-            await average.trigger("mouseleave");
-            expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
-
-            await viewButton(wrapper, "Amazon").trigger("click");
-            await wrapper.find('[data-testid="base-average-td"]').trigger("mouseenter");
-            await vi.advanceTimersByTimeAsync(200);
-            expect(wrapper.find('[data-testid="tooltip-boss"]').exists()).toBe(false);
-            expect(wrapper.find('[data-testid="tooltip-amazon"]').exists()).toBe(true);
-        } finally {
-            vi.useRealTimers();
-        }
-    });
-
-    it("shows the reason in the tooltip for an unpredictable SKU when focused", async () => {
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response());
-        const wrapper = await mountView();
-
-        expect(wrapper.findAll('[data-testid="base-average"]')[2]!.text()).toBe("予測不能");
-        await wrapper.findAll('[data-testid="base-average-td"]')[2]!.trigger("focus");
+        await wrapper.find('[data-testid="filter-large"]').trigger("click");
         await flushPromises();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        await flushPromises();
-
-        expect(wrapper.find('[role="tooltip"]').text()).toContain(NO_SALES);
+        expect(wrapper.find('[data-testid="filter-large"]').text()).toContain("1");
+        expect(wrapper.findAll('[data-testid^="rank-"][aria-pressed]').map((rank) => rank.find(".font-mono").text())).toEqual(["si-13"]);
+        wrapper.unmount();
     });
 
-    it("filters to unpredictable SKUs and by keyword", async () => {
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response());
-        const wrapper = await mountView();
+    it("shows the days with the period picker and leaves stockout days out of the variance", async () => {
+        const daily = timeline("day");
+        daily.data[1]!.skus[0]!.channels.boss!.stockout = [false, true, false, null, null, null, null];
+        vi.mocked(fetchForecastTimeline).mockImplementation(async (query) => (query.unit === "day" ? daily : timeline()));
+        const { wrapper, router } = await mountView();
 
-        await wrapper.find('[data-testid="filter-unpredictable"]').trigger("click");
+        await wrapper.find('[data-testid="unit-day"]').trigger("click");
+        await flushPromises();
+        expect(router.currentRoute.value.query.unit).toBe("day");
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: null });
+        expect(wrapper.find('[data-testid="period-picker"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="filter-large"]').text()).toContain("50%以上");
+        expect(wrapper.findAll('[data-testid="event-band"]')).toHaveLength(1);
+        expect(wrapper.findAll('[data-testid="chart-shade"]').length).toBeGreaterThan(0);
+        expect(wrapper.findAll('[data-testid="figure-variance"]')[1]!.text()).toBe("欠品");
 
-        expect(wrapper.findAll('[data-testid="sku-row"]').map((row) => row.text())).toEqual([expect.stringContaining("fl-01-1-20")]);
-
-        await wrapper.find('[data-testid="filter-all"]').trigger("click");
-        await wrapper.find('input[type="search"]').setValue("1-15");
-
-        expect(wrapper.findAll('[data-testid="sku-row"]').map((row) => row.find("td").text())).toEqual(["fl-01-1-15"]);
+        await wrapper.find('[data-testid="period-d14"]').trigger("click");
+        await flushPromises();
+        expect(router.currentRoute.value.query).toMatchObject({ unit: "day", from: "2026-09-29", to: "2026-10-27" });
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: { from: "2026-09-29", to: "2026-10-27" } });
+        wrapper.unmount();
     });
 
-    it("warns when a channel's latest sales data is a week old", async () => {
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(
-            response({
-                channels: [
-                    { channel: "boss", label: "BOSS", sales_data_from: "2025-10-07", sales_data_to: "2026-09-30" },
-                    { channel: "amazon", label: "Amazon", sales_data_from: null, sales_data_to: null },
-                ],
-            }),
-        );
-
-        const wrapper = await mountView();
-
-        expect(wrapper.find('[data-testid="sales-range-boss"] [data-testid="stale-sales"]').text()).toContain("最新日から7日たっています。");
-    });
-
-    it("asks to confirm target items first", async () => {
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ selection: null }, []));
-
-        const wrapper = await mountView();
-
-        expect(wrapper.text()).toContain("対象品番がまだ確定されていません。");
-        expect(wrapper.find('a[href="/target-items"]').exists()).toBe(true);
-    });
-
-    it("marks the months increased by upcoming events and shows the event days left out of the averages (B-129)", async () => {
-        const withEvent = channel("boss", 2);
-        withEvent.windows = windows.map((window, index) => (index === 0 ? { ...window, sales_days: 26, event_days: 4 } : window));
-        withEvent.monthly = withEvent.monthly!.map((month) =>
-            month.month === "2026-12"
-                ? {
-                      ...month,
-                      quantity: month.quantity + 40,
-                      event_quantity: 40,
-                      events: [{ period_id: 5, event_id: 1, name: "楽天スーパーセール", channel: "boss", days: 4, multiplier: 6, is_candidate: true, quantity: 40 }],
-                  }
-                : month,
-        );
-        const target = sku(1, "fl-01-1-10", [withEvent]);
-        target.monthly = withEvent.monthly;
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(
-            response({ events: [{ id: 5, event_id: 1, name: "楽天スーパーセール", starts_on: "2026-12-04", ends_on: "2026-12-07", channels: ["boss"], status: "upcoming" }] }, [
-                { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [target] },
-            ]),
-        );
-
-        const wrapper = await mountView();
-
-        expect(wrapper.find('[data-testid="events"]').text()).toContain("これから 1件");
-        expect(wrapper.findAll('[data-testid="month-event"]').map((badge) => badge.text())).toEqual(["楽天スーパーセール"]);
-        const cells = wrapper.find('[data-testid="sku-row"]').findAll("[data-event]");
-        expect(cells).toHaveLength(1);
-        expect(cells[0]!.text()).toBe("100");
-        expect(cells[0]!.attributes("title")).toBe("楽天スーパーセール（BOSS）×6.00・4日で +40個");
-
-        await wrapper.find('[data-testid="base-average-td"]').trigger("focus");
+    it("shows why a period was not accepted and asks to confirm the target items first", async () => {
+        vi.mocked(fetchForecastTimeline).mockImplementation(async (query) => {
+            if (query.period) {
+                throw new ApiError("入力内容を確認してください。", 422, { to: ["日ごとの予測は、今日から90日先までです。"] });
+            }
+            return timeline(query.unit);
+        });
+        const { wrapper } = await mountView("/forecasts?unit=day");
+        await wrapper.find('[data-testid="period-to"]').setValue("2027-03-01");
+        await wrapper.find('[data-testid="period-to"]').trigger("change");
         await flushPromises();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        await flushPromises();
-        expect(wrapper.find('[data-testid="tooltip-event-days"]').text()).toBe("・イベント4日を除く");
-    });
+        expect(wrapper.find('[data-testid="period-error"]').text()).toBe("日ごとの予測は、今日から90日先までです。");
+        wrapper.unmount();
 
-    it("marks items with registered seasonal factors and shows the factor of each month (B-106)", async () => {
-        const seasonal = channel("boss", 2);
-        seasonal.windows = windows.map((window) => ({ ...window, seasonal_factor: 1.25 }));
-        seasonal.monthly = seasonal.monthly!.map((month) => ({ ...month, seasonal_factor: month.month === "2026-12" ? 2 : 1 }));
-        const target = sku(1, "fl-01-1-10", [seasonal]);
-        target.monthly = seasonal.monthly;
-        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ seasonal_item_nos: ["fl-01"] }, [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [target] }]));
-
-        const wrapper = await mountView();
-
-        expect(wrapper.find('[data-testid="item-seasonal"]').text()).toBe("季節係数");
-        const cells = wrapper.find('[data-testid="sku-row"]').findAll("td");
-        expect(cells.find((cell) => cell.attributes("title") === "季節係数 ×2.00")).toBeDefined();
-        await wrapper.find('[data-testid="base-average-td"]').trigger("focus");
-        await flushPromises();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        await flushPromises();
-        expect(wrapper.find('[data-testid="tooltip-seasonal"]').text()).toBe("・季節係数1.25で割り戻し");
+        const empty = timeline();
+        empty.meta.selection = null;
+        vi.mocked(fetchForecastTimeline).mockResolvedValue(empty);
+        const second = await mountView();
+        expect(second.wrapper.find('[data-testid="no-selection"]').exists()).toBe(true);
+        second.wrapper.unmount();
     });
 });

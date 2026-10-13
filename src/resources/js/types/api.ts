@@ -281,6 +281,64 @@ export interface DemandForecastResponse {
     };
 }
 
+/** 需要予測の画面（B-131、K-123）の月・日。past は過去、current は今月（今日）、future はこれから。 */
+export interface ForecastTimelineColumn {
+    /** 月ごとは YYYY-MM、日ごとは YYYY-MM-DD */
+    key: string;
+    kind: "past" | "current" | "future";
+    days: number;
+}
+
+/** SKU・チャネルの、月・日ごとの値（columns の順）。販売実績を取り込んでいない・予測できない月・日は null。 */
+export interface ForecastTimelineChannel {
+    /** 今日時点の基準平均日販（予測できなければ null） */
+    base_average: number | null;
+    /** 販売実績（今月は前日まで） */
+    actual: (number | null)[];
+    /** 販売実績の金額（税込） */
+    actual_amount: (number | null)[];
+    /** 欠品（月ごとは欠品した日数、日ごとは欠品したか）。在庫の記録が無ければ null */
+    stockout: (number | boolean | null)[];
+    /** 過去の月・日の、予測し直した数 */
+    replayed: (number | null)[];
+    /** 今月（今日）から先の需要予測 */
+    forecast: (number | null)[];
+}
+
+export interface ForecastTimelineSku {
+    sku_id: number;
+    sku_code: string;
+    color_no: string | null;
+    size: string | null;
+    base_average: number | null;
+    is_partial: boolean;
+    unpredictable_reason_label: string | null;
+    unit_prices: { total: number | null; boss: number | null; amazon: number | null };
+    /** 売っているチャネルだけ（子ASINの無いSKUは Amazon を持たない） */
+    channels: Partial<Record<"boss" | "amazon", ForecastTimelineChannel>>;
+    /** 品番を指定したときだけ：予測の根拠（平均日販の期間・月別の内訳） */
+    detail?: SkuForecast;
+}
+
+export interface ForecastTimelineItem {
+    item_no: string;
+    brand: string;
+    category: string;
+    skus: ForecastTimelineSku[];
+}
+
+export interface ForecastTimelineResponse {
+    data: ForecastTimelineItem[];
+    meta: DemandForecastResponse["meta"] & {
+        unit: SalesUnit;
+        /** 予測し直す起点（何か月前の1日か） */
+        offset: number;
+        offsets: number[];
+        max_future_days: number;
+        columns: ForecastTimelineColumn[];
+    };
+}
+
 /** 入荷予定のSKUへの割り振り。 */
 export interface InboundPlanAllocation {
     sku_id: number;

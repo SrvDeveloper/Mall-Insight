@@ -1,375 +1,174 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, useTemplateRef } from "vue";
+import { computed, onMounted, ref, shallowRef, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
-import { fetchDemandForecasts } from "@/api/demandForecasts";
-import ForecastTooltip from "@/components/demandForecast/ForecastTooltip.vue";
-import { shortMonthLabel, yearSpans } from "@/components/inventoryTrend/trendRows";
-import { formatThousandYen } from "@/components/salesTarget/format";
-import { useAnchoredTooltip } from "@/composables/useAnchoredTooltip";
-import { useHorizontalDragScroll } from "@/composables/useHorizontalDragScroll";
-import { useVirtualRows } from "@/composables/useVirtualRows";
-import type { DemandForecastResponse, ItemForecast, MonthlyDemand, SkuForecast } from "@/types/api";
+import { ApiError } from "@/api/client";
+import { fetchForecastTimeline } from "@/api/demandForecasts";
+import SalesScopeControls from "@/components/actuals/SalesScopeControls.vue";
+import ForecastItemChart from "@/components/forecast/ForecastItemChart.vue";
+import { VARIANCE_THRESHOLDS, columnEvents, timelineItems, timelineLabels, type ForecastMeasure, type ForecastScope } from "@/components/forecast/timelineRows";
+import { formatDateTime } from "@/components/salesTarget/format";
+import type { ForecastTimelineResponse, SalesUnit } from "@/types/api";
 
 /**
- * 需要予測（バックログ B-006、決定記録 K-035）。対象品番のSKUについて、重ならずに遡る3つの期間（直近30日・31〜90日前・91〜180日前、K-036）の平均日販を重みでまとめた
- * 基準平均日販から、12か月分の月別の需要を表示する。予測は保存せず、開くたびに最新の販売実績から計算する。
- * 基準平均日販の欄にマウスを乗せる（またはフォーカスする）と、使った期間・販売数・販売日数・欠品日数・平均日販・重み（計算の根拠）を
- * ツールチップで確認できる。販売数と販売日数は欠品日を除いた数（K-037）。
- * 予測はチャネル（BOSS・Amazon）ごとに出して合計する（K-038）。表示を「合計」「BOSS」「Amazon」で切り替えられる。
+ * 需要予測（バックログ B-006・B-131、決定記録 K-035・K-123）。品番別売上と同じ構成で、対象品番の過去の販売実績と、これからの需要予測を並べる。
+ * 過去の月・日には、その時点に戻って今の計算方法で予測し直した数を重ね、販売実績との差異を確かめられる（予測精度 B-130 と同じ計算）。
  *
- * 表は約4,000マス（100品番なら約1万5千マス）になるため、次のようにして切り替えとスクロールを軽くする。
- * - 表示ごとの数字（整形済みの文字列）をデータを読み込んだときに一度だけ作り、切り替えでは差し替えるだけにする。
- * - 見えている行（と前後の少し）だけを描き、スクロールに合わせて入れ替える（行の高さは固定）。
- * - 列の幅を固定して、ブラウザが全マスから幅を計算し直さなくて済むようにする。
- *
- * 数量と金額（税込の売値の概算、千円、B-123）を切り替える。金額はSKUの単価（チャネルはその単価、合計はチャネルの単価を基準平均日販で
- * 加重平均した単価で、合計の金額はチャネルの金額の合計になる、K-073）を掛けて出す。単価を出せないSKUは金額の合計に入れない。
- * 選んだ方は URL に持たせる。
- *
- * 見た目は在庫予測の画面（K-047）とそろえる（計算の根拠の帯、切り替えのタブ、絞り込みの札、表の罫線と品番の行）。
- *
- * イベント（B-129、K-112）の日は平均日販から除き（内訳に日数を出す）、これからのイベントの日は倍率で需要を増やす。
- * 増やした月は、月の見出しにイベントの名前を出し、欄に印を付けてマウスを乗せると増やした数を出す。
- * 季節係数を登録した品番（B-106、K-113）は、品番の行に印を付け、月の欄にマウスを乗せると係数を出す。平均日販は季節の影響を除いた値になる。
+ * - 月ごと（過去12か月・今月・これからの11か月）と日ごと（初期値は過去30日・今日・これからの30日）を切り替える。
+ * - 全体・Amazon・BOSS、数量と金額（B-123）、予測し直す起点（その月の初め・3か月前・6か月前）、絞り込みを選べる。選んだものは URL に持たせる。
+ * - 差異は、月ごとは30%以上、日ごとは50%以上を強調する。日ごとは欠品した日を差異に数えない。
+ * - 予測は保存せず、開くたびに最新の販売実績から計算する（K-035）。予測し直した数は、使ったデータが変わらない間はキャッシュから使う。
  */
 
-type ForecastView = "total" | "boss" | "amazon";
-/** 数量で見るか、金額（税込の売値の概算、千円、B-123）で見るか。 */
-type Measure = "quantity" | "amount";
-type ForecastFilter = "all" | "unpredictable" | "partial";
+type ForecastFilter = "all" | "large" | "unpredictable";
+type Period = { from: string; to: string } | null;
 
-const FILTERS: { value: ForecastFilter; label: string }[] = [
-    { value: "all", label: "すべて" },
-    { value: "unpredictable", label: "予測不能" },
-    { value: "partial", label: "一部予測不能" },
-];
+const route = useRoute();
+const router = useRouter();
 
-/** 表の行の高さ（在庫予測の表とそろえる）。 */
-const ROW_HEIGHT = 40;
+const scope = computed<ForecastScope>(() => (route.query.scope === "amazon" || route.query.scope === "boss" ? route.query.scope : "total"));
+const unit = computed<SalesUnit>(() => (route.query.unit === "day" ? "day" : "month"));
+const measure = computed<ForecastMeasure>(() => (route.query.measure === "amount" ? "amount" : "quantity"));
+const offset = computed<number>(() => (route.query.offset === "3" ? 3 : route.query.offset === "6" ? 6 : 0));
+const filter = computed<ForecastFilter>(() => (route.query.filter === "large" || route.query.filter === "unpredictable" ? route.query.filter : "all"));
+const period = computed<Period>(() => (unit.value === "day" && typeof route.query.from === "string" && typeof route.query.to === "string" ? { from: route.query.from, to: route.query.to } : null));
+const selectedItemNo = computed(() => (typeof route.query.item === "string" ? route.query.item : null));
 
-/** 表示中のチャネル（または合計）での、SKUの予測。 */
-interface SkuFigures {
-    baseAverage: number | null;
-    monthly: MonthlyDemand[] | null;
-    reason: string | null;
-    isPartial: boolean;
-    /** そのチャネルでは売っていない（子ASINの無いSKUの Amazon、K-042）。予測不能とは区別する */
-    notSold: boolean;
+function updateQuery(changes: Record<string, string | undefined>): void {
+    void router.replace({ query: { ...route.query, ...changes } });
 }
 
-/** 表示用に整形済みのSKUの行。 */
-interface SkuRow {
-    sku: SkuForecast;
-    figures: SkuFigures;
-    baseText: string;
-    monthTexts: string[];
-    yearText: string;
-    /** 予測不能（売っていないチャネルを除く） */
-    isUnpredictable: boolean;
-    /** 金額で見ているが単価を出せない（予測できたSKUだけ） */
-    unpriced: boolean;
-    /** 月ごとの、イベントで増やした数の説明（増やしていない月は null） */
-    monthEventTitles: (string | null)[];
-    /** 月ごとの欄の説明（季節係数とイベント。どちらも無い月は null） */
-    monthTitles: (string | null)[];
+function selectUnit(next: SalesUnit): void {
+    // 期間は月ごとと日ごとで形が違うため、切り替えたら初期値に戻す
+    updateQuery({ unit: next === "month" ? undefined : next, from: undefined, to: undefined });
 }
 
-interface ItemRows {
-    item: ItemForecast;
-    rows: SkuRow[];
-    monthTotalTexts: string[];
-    yearTotalText: string;
-    /** 予測不能のSKUの数（品番の合計に入らない） */
-    unpredictableCount: number;
-    /** 金額で見ているとき、単価を出せず品番の合計に入らないSKUの数 */
-    unpricedCount: number;
-}
-
-interface ViewTable {
-    items: ItemRows[];
-    months: MonthlyDemand[];
-    /** 月ごとの、需要を増やしたイベントの名前 */
-    monthEventNames: string[][];
-    unpredictableCount: number;
-    partialCount: number;
-}
-
-/** 販売実績の最新日からこの日数以上たっていたら、取り込みを促す。 */
-const STALE_SALES_DAYS = 7;
-
-// 大きなデータのため、中身を深く監視しない（読み込むたびに丸ごと差し替える）
-const result = shallowRef<DemandForecastResponse | null>(null);
+const result = shallowRef<ForecastTimelineResponse | null>(null);
 const isLoading = ref(false);
 const hasError = ref(false);
-const filter = ref<ForecastFilter>("all");
-const keyword = ref("");
-const view = ref<ForecastView>("total");
-
-const tooltipElement = useTemplateRef<HTMLElement>("tooltipElement");
-const { tooltip, show: showTooltip, hide: hideTooltip } = useAnchoredTooltip<SkuForecast>(tooltipElement);
-
-const dateTimeFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-const formatDateTime = (value: string): string => dateTimeFormat.format(new Date(value));
-const formatDate = (value: string): string => value.replaceAll("-", "/");
-const formatAverage = (value: number): string => value.toFixed(2);
-const quantityFormat = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
-const formatQuantity = (value: number): string => quantityFormat.format(Math.round(value));
+const periodError = ref<string | null>(null);
+const requestKey = computed(() => JSON.stringify([unit.value, offset.value, period.value]));
 
 async function load(): Promise<void> {
+    const key = requestKey.value;
     isLoading.value = true;
     hasError.value = false;
+    periodError.value = null;
     try {
-        result.value = await fetchDemandForecasts();
-    } catch {
-        hasError.value = true;
+        const response = await fetchForecastTimeline({ unit: unit.value, offset: offset.value, period: period.value });
+        if (key === requestKey.value) {
+            result.value = response;
+        }
+    } catch (error) {
+        if (error instanceof ApiError && error.isValidationError && (error.errors.from || error.errors.to)) {
+            periodError.value = error.errors.to?.[0] ?? error.errors.from?.[0] ?? null;
+        } else if (key === requestKey.value) {
+            hasError.value = true;
+        }
     } finally {
-        isLoading.value = false;
+        if (key === requestKey.value) {
+            isLoading.value = false;
+        }
     }
 }
 
 onMounted(load);
-
-const viewOptions = computed(() => [
-    { value: "total" as ForecastView, label: "合計", disabled: false },
-    ...(result.value?.meta.channels ?? []).map((channel) => ({ value: channel.channel as ForecastView, label: channel.label, disabled: channel.sales_data_to === null })),
-]);
-
-function figuresOf(sku: SkuForecast, forView: ForecastView = view.value): SkuFigures {
-    if (forView === "total") {
-        return { baseAverage: sku.base_average, monthly: sku.monthly, reason: sku.unpredictable_reason_label, isPartial: sku.is_partial, notSold: false };
+watch(requestKey, (current, previous) => {
+    // 月ごと・日ごとを切り替えたときは前の結果を消す（列の形が違うため）
+    if ((JSON.parse(previous) as unknown[])[0] !== (JSON.parse(current) as unknown[])[0]) {
+        result.value = null;
     }
-    const channel = sku.channels.find((candidate) => candidate.channel === forView);
-    if (!channel) {
-        const label = result.value?.meta.channels.find((candidate) => candidate.channel === forView)?.label ?? "";
-        return { baseAverage: null, monthly: null, reason: `${label}では販売していません`, isPartial: false, notSold: true };
-    }
-    return { baseAverage: channel.base_average, monthly: channel.monthly, reason: channel.unpredictable_reason_label, isPartial: false, notSold: false };
-}
+    void load();
+});
 
-/** 1か月のうち、イベントで増やした数の説明（「楽天スーパーセール ×4.67・4日で +37個」）。 */
-function eventTitle(month: MonthlyDemand): string | null {
-    if (month.events.length === 0) {
-        return null;
-    }
-    return month.events
-        .map(
-            (event) =>
-                `${event.name}（${event.channel === "boss" ? "BOSS" : "Amazon"}）×${event.multiplier.toFixed(2)}・${event.days}日で ${event.quantity < 0 ? "−" : "+"}${formatQuantity(Math.abs(event.quantity))}個${event.is_candidate ? "" : "（担当者が入れた倍率）"}`,
-        )
-        .join("\n");
-}
-
-function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
-    let months: MonthlyDemand[] = [];
-    const monthEventNames: Set<string>[] = [];
-    let unpredictableCount = 0;
-    let partialCount = 0;
-    const items = (result.value?.data ?? []).map((item): ItemRows => {
-        const monthTotals: number[] = [];
-        let yearTotal = 0;
-        const rows = item.skus.map((sku): SkuRow => {
-            const figures = figuresOf(sku, forView);
-            const price = sku.unit_prices[forView];
-            const unpriced = forMeasure === "amount" && figures.monthly !== null && price === null;
-            const format = forMeasure === "amount" ? formatThousandYen : formatQuantity;
-            let skuYear = 0;
-            const monthEventTitles = (figures.monthly ?? []).map((month, index) => {
-                for (const event of month.events) {
-                    (monthEventNames[index] ??= new Set()).add(event.name);
-                }
-                return eventTitle(month);
-            });
-            const monthTitles = (figures.monthly ?? []).map((month, index) => {
-                const lines = [month.seasonal_factor === null ? null : `季節係数 ×${month.seasonal_factor.toFixed(2)}`, monthEventTitles[index] ?? null].filter(Boolean);
-                return lines.length > 0 ? lines.join("\n") : null;
-            });
-            const monthTexts = unpriced
-                ? []
-                : (figures.monthly ?? []).map((month, index) => {
-                      const value = forMeasure === "amount" ? month.quantity * price! : month.quantity;
-                      skuYear += value;
-                      monthTotals[index] = (monthTotals[index] ?? 0) + value;
-                      return format(value);
-                  });
-            yearTotal += skuYear;
-            if (figures.monthly && months.length === 0) {
-                months = figures.monthly;
-            }
-            const isUnpredictable = !figures.monthly && !figures.notSold;
-            unpredictableCount += isUnpredictable ? 1 : 0;
-            partialCount += figures.isPartial ? 1 : 0;
-            return {
-                sku,
-                figures,
-                baseText: figures.baseAverage !== null ? formatAverage(figures.baseAverage) : figures.notSold ? "—" : "予測不能",
-                monthTexts,
-                yearText: format(skuYear),
-                isUnpredictable,
-                unpriced,
-                monthEventTitles,
-                monthTitles,
-            };
-        });
-        return {
-            item,
-            rows,
-            monthTotalTexts: monthTotals.map(forMeasure === "amount" ? formatThousandYen : formatQuantity),
-            yearTotalText: (forMeasure === "amount" ? formatThousandYen : formatQuantity)(yearTotal),
-            unpredictableCount: rows.filter((row) => row.isUnpredictable).length,
-            unpricedCount: rows.filter((row) => row.unpriced).length,
-        };
-    });
-    return { items, months, monthEventNames: months.map((_, index) => [...(monthEventNames[index] ?? [])]), unpredictableCount, partialCount };
-}
-
-const route = useRoute();
-const router = useRouter();
-const measure = computed<Measure>(() => (route.query.measure === "amount" ? "amount" : "quantity"));
-
-function selectMeasure(value: Measure): void {
-    void router.replace({ query: { ...route.query, measure: value === "quantity" ? undefined : value } });
-}
-
-/** 合計・チャネルごとの表。データを読み込んだとき（と数量・金額を切り替えたとき）に作り、チャネルの切り替えでは作り直さない。 */
-const tables = computed<Record<ForecastView, ViewTable>>(() => ({
-    total: buildTable("total", measure.value),
-    boss: buildTable("boss", measure.value),
-    amazon: buildTable("amazon", measure.value),
+const threshold = computed(() => VARIANCE_THRESHOLDS[unit.value]);
+const keyword = ref("");
+const allItems = computed(() => (result.value ? timelineItems(result.value, scope.value, measure.value) : []));
+const counts = computed(() => ({
+    all: allItems.value.length,
+    large: allItems.value.filter((item) => item.figures.wape !== null && item.figures.wape >= threshold.value).length,
+    unpredictable: allItems.value.filter((item) => item.unpredictableCount > 0).length,
 }));
-const table = computed(() => tables.value[view.value]);
-
-/** 予測の12か月（どのSKUも同じ）。予測できたSKUが無いときは空。 */
-const months = computed(() => (tables.value.total.months.length > 0 ? tables.value.total.months : table.value.months));
-
-const skuCount = computed(() => table.value.items.reduce((count, item) => count + item.rows.length, 0));
-const unpredictableCount = computed(() => table.value.unpredictableCount);
-const partialCount = computed(() => table.value.partialCount);
-
-const counts = computed<Record<ForecastFilter, number>>(() => ({ all: skuCount.value, unpredictable: unpredictableCount.value, partial: partialCount.value }));
-
-function matchesFilter(row: SkuRow): boolean {
-    switch (filter.value) {
-        case "unpredictable":
-            return row.isUnpredictable;
-        case "partial":
-            return row.figures.isPartial;
-        default:
-            return true;
-    }
-}
-
-const visibleItems = computed<ItemRows[]>(() => {
+const visibleItems = computed(() => {
     const word = keyword.value.trim().toLowerCase();
-    if (filter.value === "all" && word === "") {
-        return table.value.items;
-    }
-    return table.value.items
-        .map((group) => {
-            const itemMatches = word === "" || group.item.item_no.toLowerCase().includes(word);
-            return { ...group, rows: group.rows.filter((row) => matchesFilter(row) && (itemMatches || row.sku.sku_code.toLowerCase().includes(word))) };
-        })
-        .filter((group) => group.rows.length > 0);
+    return allItems.value
+        .filter((item) => filter.value === "all" || (filter.value === "large" ? item.figures.wape !== null && item.figures.wape >= threshold.value : item.unpredictableCount > 0))
+        .filter((item) => word === "" || item.itemNo.toLowerCase().includes(word) || item.brand.toLowerCase().includes(word))
+        .sort((a, b) => b.figures.forecastTotal - a.figures.forecastTotal);
 });
-const years = computed(() => yearSpans(months.value));
-const monthEventNames = computed(() => table.value.monthEventNames);
-/** 季節係数を登録した品番（B-106）。 */
-const seasonalItems = computed(() => new Set(result.value?.meta.seasonal_item_nos ?? []));
+const labels = computed(() => (result.value ? timelineLabels(result.value.meta.columns, result.value.meta.unit) : []));
+const events = computed(() => (result.value ? columnEvents(result.value, scope.value) : []));
 
-type FlatRow = { kind: "item"; key: string; group: ItemRows } | { kind: "sku"; key: string; row: SkuRow };
+const FILTERS = computed<{ value: ForecastFilter; label: string }[]>(() => [
+    { value: "all", label: "すべて" },
+    { value: "large", label: `差異が大きい（${threshold.value * 100}%以上）` },
+    { value: "unpredictable", label: "予測不能あり" },
+]);
+const OFFSETS = [
+    { value: 0, label: "その月の初め" },
+    { value: 3, label: "3か月前" },
+    { value: 6, label: "6か月前" },
+];
 
-/** 品番の行とSKUの行を1列に並べたもの。 */
-const flatRows = computed<FlatRow[]>(() =>
-    visibleItems.value.flatMap((group): FlatRow[] => [
-        { kind: "item", key: `item-${group.item.item_no}`, group },
-        ...group.rows.map((row): FlatRow => ({ kind: "sku", key: `sku-${row.sku.sku_id}`, row })),
-    ]),
+// 日ごとの期間（過去は販売実績のある日まで、これからは90日先まで、K-123）
+const today = computed(() => result.value?.meta.forecast_from ?? new Date().toISOString().slice(0, 10));
+const maxTo = computed(() => addDays(today.value, (result.value?.meta.max_future_days ?? 90) - 1));
+const salesFrom = computed(() => {
+    const dates = (result.value?.meta.channels ?? []).map((channel) => channel.sales_data_from).filter((date): date is string => date !== null);
+    return dates.length === 0 ? undefined : dates.sort()[0];
+});
+function addDays(date: string, count: number): string {
+    const value = new Date(`${date}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + count);
+    return value.toISOString().slice(0, 10);
+}
+const columns = computed(() => result.value?.meta.columns ?? []);
+const currentPeriod = computed(() => ({ from: columns.value[0]?.key ?? "", to: columns.value.at(-1)?.key ?? "" }));
+const presets = computed(() =>
+    [
+        { key: "d14", label: "前後2週間", from: -14, to: 14 },
+        { key: "d30", label: "前後30日", from: -30, to: 30 },
+        { key: "p90", label: "過去90日・30日先", from: -90, to: 30 },
+        { key: "f90", label: "過去30日・90日先", from: -30, to: 89 },
+    ].map((preset) => ({ ...preset, from: addDays(today.value, preset.from), to: addDays(today.value, preset.to) })),
 );
-
-const scrollBox = useTemplateRef<HTMLDivElement>("scrollBox");
-const { isDragging, onPointerDown, onPointerMove, onPointerEnd, onPointerLeave } = useHorizontalDragScroll(scrollBox, hideTooltip);
-const { onScroll, renderedRows, topSpacerHeight, bottomSpacerHeight } = useVirtualRows(flatRows, scrollBox, hideTooltip, ROW_HEIGHT);
-
-/** チャネルの販売実績の最新日から、予測の開始日（今日）までの日数。 */
-function salesDataAgeDays(salesDataTo: string): number {
-    return Math.round((Date.parse(result.value?.meta.forecast_from ?? salesDataTo) - Date.parse(salesDataTo)) / 86_400_000);
+function selectPeriod(from: string, to: string): void {
+    if (from !== "" && to !== "") {
+        updateQuery({ from, to });
+    }
 }
 
-/** ツールチップに出すチャネル。合計の表示ではすべてのチャネル、チャネルの表示ではそのチャネルだけ。 */
-const tooltipChannels = computed(() => (tooltip.content?.channels ?? []).filter((channel) => view.value === "total" || channel.channel === view.value));
-
-const longDate = (value: string): string => `${value.slice(0, 4)}年${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日`;
-
-/** 計算の根拠の帯（チャネルごとの販売実績・対象品番）。在庫予測の画面の帯とそろえる。 */
-const facts = computed(() => {
-    const meta = result.value?.meta;
-    if (!meta) {
-        return [];
-    }
-    const channelFacts = meta.channels.map((channel) => {
-        const imported = channel.sales_data_from !== null && channel.sales_data_to !== null;
-        const ageDays = imported ? salesDataAgeDays(channel.sales_data_to!) : 0;
-        return {
-            key: `sales-range-${channel.channel}`,
-            label: `販売実績（${channel.label}）`,
-            value: imported ? `${longDate(channel.sales_data_to!)}まで` : "未取込",
-            note: imported ? `${formatDate(channel.sales_data_from!)} 〜 ${formatDate(channel.sales_data_to!)}` : "まだ取り込まれていません（このチャネルの需要は予測に入りません）",
-            stale: imported && ageDays >= STALE_SALES_DAYS ? `最新日から${ageDays}日たっています。新しい販売実績を取り込んでください` : null,
-            warn: !imported,
-        };
-    });
-    const upcoming = meta.events.filter((event) => event.status !== "ended");
-    return [
-        ...channelFacts,
-        {
-            key: "events",
-            label: "イベント",
-            value: `これから ${upcoming.length}件`,
-            note:
-                meta.events.length === 0
-                    ? "登録するとイベントの日を平均日販から除き、倍率で需要を増やします"
-                    : `登録した${meta.events.length}件の日を平均日販から除き、これからのイベントの日は倍率で増やしています`,
-            stale: null,
-            warn: false,
-        },
-        {
-            key: "selection",
-            label: "対象品番",
-            value: meta.selection ? `${meta.selection.item_count}品番・${tables.value.total.items.reduce((count, item) => count + item.rows.length, 0)} SKU` : "未確定",
-            note: meta.selection ? `${formatDateTime(meta.selection.confirmed_at)} に確定` : "対象品番の画面で確定してください",
-            stale: null,
-            warn: !meta.selection,
-        },
-    ];
+const monthRangeText = computed(() => {
+    const first = columns.value[0]?.key;
+    const last = columns.value.at(-1)?.key;
+    return first && last ? `${first.replace("-", "/")} 〜 ${last.replace("-", "/")}（過去12か月・これからの12か月）` : "";
 });
+const salesToText = computed(() => {
+    const dates = (result.value?.meta.channels ?? []).map((channel) => channel.sales_data_to).filter((date): date is string => date !== null);
+    return dates.length === 0 ? "販売実績はまだありません" : `販売実績 ${dates.sort().at(-1)!.replaceAll("-", "/")} まで`;
+});
+
+const segmentClass = (isSelected: boolean): string => (isSelected ? "bg-white font-semibold text-stone-900 shadow-sm" : "text-stone-600 hover:text-stone-900");
+const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-stone-900 font-semibold text-white" : "text-stone-600 hover:text-stone-900");
 </script>
 
 <template>
     <div class="flex flex-col gap-5">
         <header class="flex flex-wrap items-end justify-between gap-4">
-            <div class="flex flex-col gap-1.5">
+            <div class="flex max-w-3xl flex-col gap-1.5">
                 <p class="text-xs text-stone-500">在庫試算 / 需要予測</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">需要予測</h1>
-                <p class="text-[13px] text-stone-600">
-                    対象品番のSKUについて、平均日販から12か月分の需要を予測します。<RouterLink to="/sales-events" class="font-medium text-stone-900 underline">イベント</RouterLink
-                    >の日は平均日販から除き、これからのイベントの日は倍率で増やします。<RouterLink to="/seasonal-factors" class="font-medium text-stone-900 underline">季節係数</RouterLink
-                    >を登録した品番は、月ごとに係数で増減させます。画面を開くたびに最新の販売実績で計算します。
+                <p class="text-[13px] text-stone-600" data-testid="description">
+                    対象品番の、過去の販売実績とこれからの需要予測です。過去の{{
+                        unit === "day" ? "日" : "月"
+                    }}には、その時点に戻って今の計算方法で予測し直した数を重ね、実績との差異を確かめられます。<RouterLink to="/sales-events" class="font-medium text-stone-900 underline"
+                        >イベント</RouterLink
+                    >の日は倍率で増やし、<RouterLink to="/seasonal-factors" class="font-medium text-stone-900 underline">季節係数</RouterLink>を登録した品番は月ごとに増減させます。<template
+                        v-if="unit === 'day'"
+                        >曜日による売れ方の違いは予測に入れていないため、日ごとの差異は月ごとより大きく出ます。</template
+                    >
                 </p>
             </div>
-            <div class="flex items-center gap-3">
-                <span v-if="result" class="text-xs text-stone-500 tabular-nums" data-testid="calculated-at">計算日時 {{ formatDateTime(result.meta.calculated_at) }}</span>
-                <button
-                    type="button"
-                    class="inline-flex h-10 items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 text-[13px] font-medium text-stone-900 hover:bg-stone-50 disabled:cursor-wait disabled:opacity-60"
-                    :disabled="isLoading"
-                    @click="load"
-                >
-                    <svg class="size-4" :class="isLoading ? 'animate-spin' : ''" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-                        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
-                        <path d="M13.5 2.5v3h-3" />
-                    </svg>
-                    {{ isLoading ? "計算中…" : "再計算" }}
-                </button>
-            </div>
+            <SalesScopeControls :scope="scope" :is-loading="isLoading" @select="updateQuery({ scope: $event === 'total' ? undefined : $event })" @reload="load" />
         </header>
 
         <div v-if="hasError" class="flex flex-col items-center gap-3 rounded-xl border border-stone-200 bg-white px-6 py-16 text-center">
@@ -379,275 +178,174 @@ const facts = computed(() => {
 
         <div v-else-if="!result" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500">計算中…</div>
 
-        <template v-else>
-            <section class="grid grid-cols-1 rounded-xl border border-stone-200 bg-white sm:grid-cols-2 xl:grid-cols-4" aria-label="計算の根拠" data-testid="forecast-basis">
-                <div
-                    v-for="(fact, index) in facts"
-                    :key="fact.key"
-                    class="flex flex-col gap-1 px-5 py-4"
-                    :class="index > 0 ? 'border-stone-200 max-sm:border-t sm:max-xl:even:border-l sm:max-xl:[&:nth-child(n+3)]:border-t xl:border-l' : ''"
-                    :data-testid="fact.key"
-                >
-                    <span class="text-[11px] tracking-wide text-stone-500">{{ fact.label }}</span>
-                    <span class="text-base font-semibold text-stone-900 tabular-nums">{{ fact.value }}</span>
-                    <span class="text-xs tabular-nums" :class="fact.warn ? 'font-medium text-amber-700' : 'text-stone-400'">{{ fact.note }}</span>
-                    <span v-if="fact.stale" class="text-xs font-medium text-amber-700" data-testid="stale-sales">{{ fact.stale }}</span>
-                </div>
-            </section>
+        <div v-else-if="!result.meta.selection" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-900" data-testid="no-selection">
+            対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに需要予測が表示されます。
+        </div>
 
-            <div v-if="!result.meta.selection" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-900">
-                対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに需要予測が表示されます。
-            </div>
-
-            <section v-else class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
-                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
-                    <div class="flex flex-wrap items-center gap-3">
-                        <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="group" aria-label="表示するチャネル">
-                            <button
-                                v-for="option in viewOptions"
-                                :key="option.value"
-                                type="button"
-                                class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px] disabled:cursor-not-allowed disabled:opacity-40"
-                                :class="view === option.value ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
-                                :aria-pressed="view === option.value"
-                                :disabled="option.disabled"
-                                :title="option.disabled ? '販売実績がまだ取り込まれていません' : undefined"
-                                @click="view = option.value"
-                            >
-                                {{ option.label }}
-                            </button>
-                        </div>
-                        <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="group" aria-label="数量と金額">
-                            <button
-                                v-for="option in [
-                                    { value: 'quantity' as Measure, label: '数量' },
-                                    { value: 'amount' as Measure, label: '金額' },
-                                ]"
-                                :key="option.value"
-                                type="button"
-                                class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
-                                :class="measure === option.value ? 'bg-white font-semibold text-stone-900 shadow-sm' : 'text-stone-600 hover:text-stone-900'"
-                                :aria-pressed="measure === option.value"
-                                :data-testid="`measure-${option.value}`"
-                                @click="selectMeasure(option.value)"
-                            >
-                                {{ option.label }}
-                            </button>
-                        </div>
-                        <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="絞り込み" data-testid="forecast-filters">
-                            <button
-                                v-for="option in FILTERS"
-                                :key="option.value"
-                                type="button"
-                                class="h-8 rounded-full border bg-white px-3 text-[13px]"
-                                :class="filter === option.value ? 'border-stone-900 font-semibold text-stone-900' : 'border-stone-200 text-stone-600 hover:border-stone-300'"
-                                :aria-pressed="filter === option.value"
-                                :data-testid="`filter-${option.value}`"
-                                @click="filter = option.value"
-                            >
-                                {{ option.label }}
-                                <span class="tabular-nums" :class="option.value !== 'all' && counts[option.value] > 0 ? 'font-semibold text-amber-700' : 'text-stone-500'">{{
-                                    counts[option.value]
-                                }}</span>
-                            </button>
-                        </div>
+        <section v-else class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="tablist" aria-label="月ごとと日ごと">
+                        <button
+                            v-for="option in [
+                                { value: 'month' as const, label: '月ごと' },
+                                { value: 'day' as const, label: '日ごと' },
+                            ]"
+                            :key="option.value"
+                            type="button"
+                            role="tab"
+                            class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
+                            :class="darkSegmentClass(unit === option.value)"
+                            :aria-selected="unit === option.value"
+                            :data-testid="`unit-${option.value}`"
+                            @click="selectUnit(option.value)"
+                        >
+                            {{ option.label }}
+                        </button>
                     </div>
-                    <label class="flex h-9 w-full items-center gap-2 rounded-lg border border-stone-200 px-3 text-stone-400 focus-within:border-stone-900 lg:w-60">
-                        <svg class="size-[15px] shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-                            <circle cx="7" cy="7" r="4.5" />
-                            <path d="m10.5 10.5 3 3" />
-                        </svg>
-                        <span class="sr-only">品番・SKUで絞り込み</span>
-                        <input v-model="keyword" type="search" placeholder="品番・SKUで絞り込み" class="w-full bg-transparent text-[13px] text-stone-900 outline-none placeholder:text-stone-400" />
-                    </label>
+                    <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="group" aria-label="数量と金額">
+                        <button
+                            v-for="option in [
+                                { value: 'quantity' as const, label: '数量' },
+                                { value: 'amount' as const, label: '金額' },
+                            ]"
+                            :key="option.value"
+                            type="button"
+                            class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
+                            :class="segmentClass(measure === option.value)"
+                            :aria-pressed="measure === option.value"
+                            :data-testid="`measure-${option.value}`"
+                            @click="updateQuery({ measure: option.value === 'quantity' ? undefined : option.value })"
+                        >
+                            {{ option.label }}
+                        </button>
+                    </div>
+                    <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="絞り込み">
+                        <button
+                            v-for="option in FILTERS"
+                            :key="option.value"
+                            type="button"
+                            class="h-8 rounded-full border bg-white px-3 text-[13px]"
+                            :class="filter === option.value ? 'border-stone-900 font-semibold text-stone-900' : 'border-stone-200 text-stone-600 hover:border-stone-300'"
+                            :aria-pressed="filter === option.value"
+                            :data-testid="`filter-${option.value}`"
+                            @click="updateQuery({ filter: option.value === 'all' ? undefined : option.value })"
+                        >
+                            {{ option.label }}
+                            <span class="tabular-nums" :class="option.value !== 'all' && counts[option.value] > 0 ? 'font-semibold text-amber-700' : 'text-stone-500'">{{ counts[option.value] }}</span>
+                        </button>
+                    </div>
                 </div>
-
-                <!-- 表の見方（在庫予測の画面の凡例とそろえる） -->
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600" data-testid="legend">
-                    <span class="inline-flex items-center gap-1.5"
-                        ><span class="rounded-full bg-amber-100 px-2 py-px text-[11px] font-semibold text-amber-800">予測不能</span>販売実績や日数が足りない（理由を表示）</span
-                    >
-                    <span class="inline-flex items-center gap-1.5"><span class="text-[11px] font-medium text-amber-700">一部</span>一部のチャネルだけ予測できなかった</span>
-                    <span class="inline-flex items-center gap-1.5"><span class="text-stone-400">—</span>そのチャネルでは販売していない</span>
-                    <span class="inline-flex items-center gap-1.5"
-                        ><span class="rounded-full bg-sky-100 px-1.5 text-[10px] font-medium text-sky-800">イベント</span>イベントの日を倍率で増やした月（欄にマウスを乗せると増やした数）</span
-                    >
-                    <span class="text-stone-400">基準平均日販にマウスを乗せると内訳が出ます</span>
-                    <span v-if="measure === 'amount'" class="text-stone-500" data-testid="amount-note">金額は税込の売値の概算（千円）。単価は単価の画面の単価、無ければ直近12か月の平均単価です</span>
-                </div>
-
-                <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500">
-                    {{ filter === "all" && keyword.trim() === "" ? "対象品番にSKUがありません。" : "条件に一致するSKUはありません。" }}
-                </div>
-
-                <!-- 表は画面の高さに収まる枠の中でスクロールさせ、列見出しが上に残るようにする。横はドラッグでも動かせる（在庫予測の表とそろえる） -->
-                <div
-                    v-else
-                    ref="scrollBox"
-                    class="max-h-[calc(100dvh-5rem)] overflow-auto select-none"
-                    :class="[isLoading ? 'opacity-60' : '', isDragging ? 'cursor-grabbing' : '']"
-                    data-testid="forecast-scroll"
-                    @scroll="onScroll"
-                    @pointerdown="onPointerDown"
-                    @pointermove="onPointerMove"
-                    @pointerup="onPointerEnd"
-                    @pointercancel="onPointerEnd"
-                    @lostpointercapture="onPointerEnd"
-                    @pointerleave="onPointerLeave"
-                >
-                    <table class="w-full min-w-[80rem] table-fixed border-separate border-spacing-0 text-left text-[13px]">
-                        <colgroup>
-                            <col class="w-62" />
-                            <col class="w-26" />
-                            <col v-for="month in months" :key="month.month" class="w-19" />
-                            <col class="w-24" />
-                        </colgroup>
-                        <thead class="[&_th]:sticky [&_th]:z-20 [&_th]:bg-white">
-                            <tr class="text-[11px] font-semibold tracking-wider text-stone-400 [&_th]:top-0">
-                                <th class="left-0 z-30!" colspan="2"></th>
-                                <th
-                                    v-for="(year, index) in years"
-                                    :key="year.year"
-                                    :colspan="year.span"
-                                    class="px-3 pt-2 pb-0.5 text-left"
-                                    :class="index > 0 ? 'shadow-[inset_1px_0_0_var(--color-stone-200)]' : ''"
-                                >
-                                    {{ year.year }}
-                                </th>
-                                <th class="shadow-[inset_1px_0_0_var(--color-stone-200)]"></th>
-                            </tr>
-                            <tr class="text-xs font-medium text-stone-500 [&_th]:top-[27px] [&_th]:border-b [&_th]:border-stone-300">
-                                <th scope="col" class="left-0 z-30! px-4 pt-1 pb-2">品番・SKU</th>
-                                <th scope="col" class="px-3 pt-1 pb-2 text-right whitespace-nowrap">基準平均日販</th>
-                                <th v-for="(month, index) in months" :key="month.month" scope="col" class="px-1 pt-1 pb-2 text-center">
-                                    <span class="inline-flex min-w-14 flex-col items-center px-1.5 py-1 leading-tight tabular-nums">
-                                        {{ shortMonthLabel(month.month) }}
-                                        <span
-                                            v-if="monthEventNames[index]?.length"
-                                            class="max-w-16 truncate rounded-full bg-sky-100 px-1.5 text-[10px] font-medium text-sky-800"
-                                            :title="`イベントで需要を増やしています：${monthEventNames[index]!.join('・')}`"
-                                            data-testid="month-event"
-                                            >{{ monthEventNames[index]!.length > 1 ? `イベント${monthEventNames[index]!.length}件` : monthEventNames[index]![0] }}</span
-                                        >
-                                        <span v-else class="text-[10px] font-normal text-stone-400">{{ index === 0 ? "今月" : "&nbsp;" }}</span>
-                                    </span>
-                                </th>
-                                <th scope="col" class="px-3 pt-1 pb-2 text-right whitespace-nowrap shadow-[inset_1px_0_0_var(--color-stone-200)]">
-                                    {{ measure === "amount" ? "12か月計（千円）" : "12か月計" }}
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- 見えていない行の分の高さ。スクロールバーの長さと位置を、全行を描いたときと同じにする -->
-                            <tr v-if="topSpacerHeight > 0" aria-hidden="true" :style="{ height: `${topSpacerHeight}px` }">
-                                <td :colspan="months.length + 3" class="p-0" />
-                            </tr>
-                            <template v-for="entry in renderedRows" :key="entry.key">
-                                <tr v-if="entry.kind === 'item'" class="h-[40px] bg-stone-50 [&>*]:border-t [&>*]:border-stone-200" data-testid="item-row">
-                                    <th scope="rowgroup" class="sticky left-0 z-10 bg-stone-50 px-4 text-left font-normal">
-                                        <div class="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
-                                            <span class="shrink-0 font-mono text-sm font-medium text-stone-900">{{ entry.group.item.item_no }}</span>
-                                            <span class="min-w-0 truncate rounded-full border border-stone-200 bg-white px-2 py-px text-[11px] text-stone-600"
-                                                >{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span
-                                            >
-                                            <span
-                                                v-if="seasonalItems.has(entry.group.item.item_no)"
-                                                class="shrink-0 rounded-full bg-stone-200 px-2 py-px text-[11px] font-medium text-stone-700"
-                                                title="季節係数を登録しています。月ごとの欄にマウスを乗せると係数が出ます"
-                                                data-testid="item-seasonal"
-                                                >季節係数</span
-                                            >
-                                            <span
-                                                v-if="entry.group.unpredictableCount > 0"
-                                                class="shrink-0 rounded-full bg-amber-100 px-2 py-px text-[11px] font-semibold text-amber-800"
-                                                data-testid="item-unpredictable"
-                                            >
-                                                予測不能 {{ entry.group.unpredictableCount }}/{{ entry.group.rows.length }}
-                                            </span>
-                                        </div>
-                                    </th>
-                                    <td class="truncate px-3 text-right text-[11px] text-stone-500">
-                                        <span v-if="entry.group.unpredictableCount > 0 || entry.group.unpricedCount > 0" data-testid="item-excluded"
-                                            >{{ [entry.group.unpredictableCount > 0 ? "予測不能" : "", entry.group.unpricedCount > 0 ? "単価なし" : ""].filter(Boolean).join("・") }}を除く</span
-                                        >
-                                    </td>
-                                    <td v-for="(month, index) in months" :key="month.month" class="px-3 text-right font-semibold text-stone-900 tabular-nums">
-                                        {{ entry.group.monthTotalTexts[index] ?? "0" }}
-                                    </td>
-                                    <td class="px-3 text-right font-semibold text-stone-900 tabular-nums shadow-[inset_1px_0_0_var(--color-stone-200)]">{{ entry.group.yearTotalText }}</td>
-                                </tr>
-                                <tr v-else class="group h-[40px] hover:bg-stone-50 [&>*]:border-t [&>*]:border-stone-100" data-testid="sku-row">
-                                    <!-- 横スクロールで下の列が透けないよう、固定した列には不透明な背景を付け、行のハイライトに合わせて色を変える -->
-                                    <td class="sticky left-0 z-10 truncate bg-white py-0 pr-4 pl-7 font-mono text-[12.5px] text-stone-700 group-hover:bg-stone-50" :title="entry.row.sku.sku_code">
-                                        {{ entry.row.sku.sku_code }}
-                                    </td>
-                                    <!-- ツールチップは数字だけでなく欄全体にマウスを乗せたときに出す（在庫予測の表とそろえる） -->
-                                    <td
-                                        tabindex="0"
-                                        class="cursor-help px-3 text-right whitespace-nowrap hover:bg-stone-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"
-                                        :aria-describedby="tooltip.content?.sku_id === entry.row.sku.sku_id ? 'average-tooltip' : undefined"
-                                        data-testid="base-average-td"
-                                        @mouseenter="showTooltip($event, entry.row.sku)"
-                                        @mouseleave="hideTooltip"
-                                        @focus="showTooltip($event, entry.row.sku, 0)"
-                                        @blur="hideTooltip"
-                                    >
-                                        <span
-                                            class="tabular-nums"
-                                            :class="
-                                                entry.row.figures.baseAverage !== null
-                                                    ? 'text-stone-700'
-                                                    : entry.row.figures.notSold
-                                                      ? 'text-stone-300'
-                                                      : 'rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800'
-                                            "
-                                            data-testid="base-average"
-                                        >
-                                            {{ entry.row.baseText }}
-                                        </span>
-                                        <span v-if="entry.row.figures.isPartial" class="ml-1 text-[10px] font-medium text-amber-700" data-testid="partial">一部</span>
-                                    </td>
-                                    <template v-if="entry.row.figures.monthly && !entry.row.unpriced">
-                                        <td
-                                            v-for="(text, index) in entry.row.monthTexts"
-                                            :key="index"
-                                            class="px-3 text-right tabular-nums"
-                                            :class="entry.row.monthEventTitles[index] ? 'bg-sky-50/70 text-stone-900' : 'text-stone-700'"
-                                            :title="entry.row.monthTitles[index] ?? undefined"
-                                            :data-event="entry.row.monthEventTitles[index] ? true : undefined"
-                                        >
-                                            {{ text }}
-                                        </td>
-                                        <td class="px-3 text-right text-stone-700 tabular-nums shadow-[inset_1px_0_0_var(--color-stone-200)]">{{ entry.row.yearText }}</td>
-                                    </template>
-                                    <td v-else-if="entry.row.unpriced" :colspan="months.length + 1" class="truncate px-3" data-testid="unpriced">
-                                        <span class="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs text-amber-800">単価なし：登録した単価も販売実績も無いため、金額を出せません</span>
-                                    </td>
-                                    <td v-else :colspan="months.length + 1" class="truncate px-3" :title="entry.row.figures.reason ?? undefined" data-testid="unpredictable-reason">
-                                        <span class="rounded-full px-2.5 py-0.5 text-xs" :class="entry.row.figures.notSold ? 'bg-stone-100 text-stone-500' : 'bg-amber-50 text-amber-800'">{{
-                                            entry.row.figures.reason
-                                        }}</span>
-                                    </td>
-                                </tr>
-                            </template>
-                            <tr v-if="bottomSpacerHeight > 0" aria-hidden="true" :style="{ height: `${bottomSpacerHeight}px` }">
-                                <td :colspan="months.length + 3" class="p-0" />
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <div
-                v-if="tooltip.content"
-                id="average-tooltip"
-                ref="tooltipElement"
-                role="tooltip"
-                class="pointer-events-none fixed z-50 w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg bg-stone-900 text-left text-stone-100 shadow-xl ring-1 ring-black/20"
-                :style="{ left: `${tooltip.left}px`, top: `${tooltip.top}px` }"
-            >
-                <ForecastTooltip :sku="tooltip.content" :channels="tooltipChannels" :base-average="figuresOf(tooltip.content).baseAverage" :min-sales-days="result.meta.min_sales_days" />
+                <label class="flex h-9 w-full items-center gap-2 rounded-lg border border-stone-200 px-3 text-stone-400 focus-within:border-stone-900 lg:w-60">
+                    <svg class="size-3.75 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                        <circle cx="7" cy="7" r="4.5" />
+                        <path d="m10.5 10.5 3 3" />
+                    </svg>
+                    <span class="sr-only">品番・ブランドで絞り込み</span>
+                    <input v-model="keyword" type="search" placeholder="品番・ブランドで絞り込み" class="w-full bg-transparent text-[13px] text-stone-900 outline-none placeholder:text-stone-400" />
+                </label>
             </div>
-        </template>
+
+            <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600">
+                <div v-if="unit === 'day'" class="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="period-picker">
+                    <span class="font-medium text-stone-600">期間</span>
+                    <div class="inline-flex flex-wrap gap-1" role="group" aria-label="よく使う期間">
+                        <button
+                            v-for="preset in presets"
+                            :key="preset.key"
+                            type="button"
+                            class="h-8 rounded-full border bg-white px-3 text-[13px]"
+                            :class="
+                                currentPeriod.from === preset.from && currentPeriod.to === preset.to
+                                    ? 'border-stone-900 font-semibold text-stone-900'
+                                    : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                            "
+                            :aria-pressed="currentPeriod.from === preset.from && currentPeriod.to === preset.to"
+                            :data-testid="`period-${preset.key}`"
+                            @click="selectPeriod(preset.from, preset.to)"
+                        >
+                            {{ preset.label }}
+                        </button>
+                    </div>
+                    <div class="inline-flex items-center gap-1.5 text-[13px]">
+                        <label class="sr-only" for="forecast-from">開始</label>
+                        <input
+                            id="forecast-from"
+                            type="date"
+                            :value="currentPeriod.from"
+                            :min="salesFrom"
+                            :max="maxTo"
+                            class="h-8 rounded-lg border border-stone-200 bg-white px-2 text-[13px] tabular-nums focus:border-stone-900 focus:outline-none"
+                            data-testid="period-from"
+                            @change="selectPeriod(($event.target as HTMLInputElement).value, currentPeriod.to)"
+                        />
+                        <span class="text-stone-400">〜</span>
+                        <label class="sr-only" for="forecast-to">終了</label>
+                        <input
+                            id="forecast-to"
+                            type="date"
+                            :value="currentPeriod.to"
+                            :min="salesFrom"
+                            :max="maxTo"
+                            class="h-8 rounded-lg border border-stone-200 bg-white px-2 text-[13px] tabular-nums focus:border-stone-900 focus:outline-none"
+                            data-testid="period-to"
+                            @change="selectPeriod(currentPeriod.from, ($event.target as HTMLInputElement).value)"
+                        />
+                    </div>
+                    <span v-if="periodError" class="text-xs text-red-700" role="alert" data-testid="period-error">{{ periodError }}</span>
+                </div>
+                <span v-else class="tabular-nums" data-testid="month-range">期間 {{ monthRangeText }}</span>
+
+                <div class="inline-flex items-center gap-2">
+                    <span class="font-medium">差異を測る予測</span>
+                    <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="group" aria-label="差異を測る予測">
+                        <button
+                            v-for="option in OFFSETS"
+                            :key="option.value"
+                            type="button"
+                            class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
+                            :class="segmentClass(offset === option.value)"
+                            :aria-pressed="offset === option.value"
+                            :data-testid="`offset-${option.value}`"
+                            @click="updateQuery({ offset: option.value === 0 ? undefined : String(option.value) })"
+                        >
+                            {{ option.label }}
+                        </button>
+                    </div>
+                </div>
+                <span class="text-stone-500 tabular-nums" data-testid="calculated-at">計算 {{ formatDateTime(result.meta.calculated_at) }}・{{ salesToText }}</span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600" data-testid="legend">
+                <span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-[#2a78d6]" />BOSS の実績</span>
+                <span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-[#eb6834]" />Amazon の実績</span>
+                <span class="inline-flex items-center gap-1.5"
+                    ><span class="size-2.5 rounded-sm border border-[#2a78d6] bg-[repeating-linear-gradient(135deg,rgba(42,120,214,.65)_0_3px,rgba(42,120,214,.22)_3px_6px)]" />需要予測（斜線）</span
+                >
+                <span class="inline-flex items-center gap-1.5"><span class="h-0.75 w-3.5 rounded-full bg-stone-900" />予測し直した数（過去）</span>
+                <template v-if="unit === 'day'">
+                    <span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-amber-100 ring-1 ring-amber-300" />欠品した日（差異に数えない）</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-stone-100" />土日</span>
+                </template>
+                <span class="text-stone-400">差異＝（予測し直した数 − 実績）÷ 実績。差異が{{ threshold * 100 }}%以上の{{ unit === "day" ? "日" : "月" }}を強調します</span>
+            </div>
+
+            <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500" data-testid="empty">
+                {{ allItems.length === 0 ? "対象品番がありません。" : "条件に一致する品番はありません。" }}
+            </div>
+            <ForecastItemChart
+                v-else
+                :class="isLoading ? 'opacity-60' : ''"
+                :items="visibleItems"
+                :columns="result.meta.columns"
+                :labels="labels"
+                :events="events"
+                :unit="result.meta.unit"
+                :measure="measure"
+                :threshold="threshold"
+                :selected-item-no="selectedItemNo"
+                @select="updateQuery({ item: $event })"
+            />
+        </section>
     </div>
 </template>

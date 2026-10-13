@@ -35,7 +35,7 @@ class ForecastTimeline
 
     /**
      * @param  list<string>|null  $itemNos  null なら対象品番
-     * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, replayed: list<float|null>, forecast: list<float|null>}>>}
+     * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{base_average: float|null, actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, replayed: list<float|null>, forecast: list<float|null>}>>}
      */
     public function build(CarbonImmutable $now, SalesUnit $unit, int $offset, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, ?array $itemNos = null): array
     {
@@ -96,7 +96,7 @@ class ForecastTimeline
                         continue;
                     }
                     $channelForecast = collect($skuForecast->channels)->first(fn (ChannelForecast $candidate): bool => $candidate->channel === $channel);
-                    $row = ['actual' => [], 'actual_amount' => [], 'stockout' => [], 'replayed' => [], 'forecast' => []];
+                    $row = ['base_average' => $channelForecast?->baseAverage === null ? null : round($channelForecast->baseAverage, 4), 'actual' => [], 'actual_amount' => [], 'stockout' => [], 'replayed' => [], 'forecast' => []];
                     $futureIndex = 0;
                     $skuSold = $sold[$sku->id][$channel->value] ?? [];
                     $skuStockouts = $stockouts[$sku->id] ?? [];
