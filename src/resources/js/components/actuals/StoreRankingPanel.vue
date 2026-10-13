@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from "vue";
 import { fetchStoreRanking } from "@/api/actuals";
+import RankingDonut from "@/components/actuals/RankingDonut.vue";
 import StockoutIcon from "@/components/actuals/StockoutIcon.vue";
+import { donutSegments } from "@/components/actuals/rankingDonut";
 import { STORE_COLORS, type ActualMeasure } from "@/components/actuals/actualRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
 import { formatYen } from "@/components/salesTarget/format";
@@ -13,7 +15,8 @@ import type { RankingStockout, SalesUnit, StoreRankingResponse, StoreSales, Stor
  * CrossWalkerに未登録のSKUは、品番の順位には入れずに件数と合計を添える。別の欄を押すと読み込み直し、読み込むまでは
  * 前の一覧を薄くして残す（表の高さが変わらないように）。開いたときは一覧が見えるところまで画面を動かす。×で閉じる。
  * 各行に、前月（日ごとは前日）の順位からの変動と、店舗のチャネル（全店舗なら BOSS と Amazon）の欠品日数を出す。品番の欠品日数は、
- * 欠品したSKUの欠品日数の合計（K-095）。
+ * 欠品したSKUの欠品日数の合計（K-095）。一覧の上に、上位の品番・その他の品番・未登録のSKUの割合の円グラフを出し、円グラフに出した品番は
+ * 一覧にも同じ色の印を付ける（K-097）。
  */
 
 const props = defineProps<{
@@ -84,6 +87,19 @@ const formatShare = (value: number): string => `${(value * 100).toFixed(1)}%`;
 const color = computed(() => (props.target?.mall ? STORE_COLORS[props.target.mall] : "#57534e"));
 /** 売れ方が分かるよう、金額順なら販売数、販売数順なら金額を小さく添える。 */
 const subOf = (row: { quantity: number; amount: number }): string => (order.value === "amount" ? `${formatQuantity(row.quantity)}個` : formatYen(row.amount));
+
+/** 円グラフの区分（並び順で見ている金額か販売数の割合）。 */
+const segments = computed(() =>
+    result.value
+        ? donutSegments(
+              result.value.data.items.map((row) => ({ key: row.item_no, label: row.item_no, value: valueOf(row) })),
+              valueOf(result.value.data.unregistered),
+              totalValue.value,
+          )
+        : [],
+);
+/** 円グラフに出した品番の色。 */
+const segmentColor = (itemNo: string): string | null => segments.value.find((segment) => !segment.isGroup && segment.key === itemNo)?.color ?? null;
 
 const previousLabel = computed(() => (props.unit === "day" ? "前日" : "前月"));
 
@@ -176,6 +192,9 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
         <div v-else-if="result.meta.total.quantity === 0" class="px-6 py-12 text-center text-sm text-stone-500" data-testid="ranking-empty">この期間の販売実績はありません。</div>
         <div v-else class="transition-opacity" :class="isLoading ? 'opacity-50' : ''" :aria-busy="isLoading">
             <section class="flex min-w-0 flex-col" aria-labelledby="ranking-items">
+                <div class="border-b border-stone-100 px-5 py-4">
+                    <RankingDonut :segments="segments" :total="totalValue" :format="format" :total-label="order === 'amount' ? '合計金額' : '合計販売数'" />
+                </div>
                 <h3 id="ranking-items" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">品番 上位{{ result.data.items.length }}</h3>
                 <!-- 広い画面では 1～10位を左、11～20位を右に並べる -->
                 <ol
@@ -192,6 +211,13 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
                         </span>
                         <span class="flex min-w-0 flex-1 flex-col gap-1">
                             <span class="flex min-w-0 items-center gap-1.5">
+                                <span
+                                    v-if="segmentColor(row.item_no)"
+                                    class="size-2.5 shrink-0 rounded-sm"
+                                    :style="{ backgroundColor: segmentColor(row.item_no)! }"
+                                    aria-hidden="true"
+                                    data-testid="ranking-item-swatch"
+                                />
                                 <span class="shrink-0 font-mono text-sm font-medium text-stone-900">{{ row.item_no }}</span>
                                 <span class="min-w-0 truncate rounded-full border border-stone-200 px-2 py-px text-[11px] text-stone-600">{{ row.brand }}・{{ row.category }}</span>
                                 <span class="shrink-0 text-[11px] text-stone-400 tabular-nums">{{ row.sku_count }} SKU</span>

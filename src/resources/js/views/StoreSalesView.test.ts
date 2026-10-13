@@ -174,6 +174,13 @@ describe("StoreSalesView", () => {
         expect(badge.attributes("title")).toBe("欠品 4日。欠品したSKU 1件の欠品日数の合計。在庫の記録で確認できたのは7日のうち5日");
         expect(items[1]!.find('[data-testid="stockout-badge"]').text()).toBe("0日");
         expect(dialog.findAll('[data-testid="ranking-sku"]')).toHaveLength(0);
+        // 円グラフ（K-097）。上位の品番と未登録のSKUの割合を出し、円グラフに出した品番は一覧にも同じ色の印を付ける
+        expect(dialog.findAll('[data-testid="donut-segment"]')).toHaveLength(3);
+        expect(dialog.find('[data-testid="donut-legend"]').text()).toBe("fl-0160.0%si-1316.0%未登録のSKU24.0%");
+        expect(dialog.find('[data-testid="donut-center"]').text()).toBe("合計金額25,000円");
+        await dialog.findAll('[data-testid="donut-segment"]')[0]!.trigger("mouseenter");
+        expect(dialog.find('[data-testid="donut-center"]').text()).toBe("fl-0160.0%15,000円");
+        expect(items[0]!.find('[data-testid="ranking-item-swatch"]').attributes("style")).toContain("background-color");
         expect(dialog.find('[data-testid="ranking-notes"]').text()).toContain("順位の変動は前月（2026/09/01〜2026/09/30）の順位との比較です");
         expect(dialog.find('[data-testid="ranking-unregistered"]').text()).toContain("CrossWalkerに未登録のSKU（1 SKU）：6,000円・24.0%");
 
