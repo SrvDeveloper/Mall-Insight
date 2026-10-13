@@ -456,7 +456,7 @@ class ActualControllerTest extends TestCase
         $this->getJson('/api/v1/actuals/stores?unit=day&from=2026-01-01&to=2026-10-07')->assertUnprocessable()->assertJsonValidationErrors('from');
     }
 
-    public function test_ranks_the_items_and_skus_of_a_store_in_a_period(): void
+    public function test_ranks_the_items_of_a_store_in_a_period(): void
     {
         $first = $this->sku('fl-01-1-10');
         $second = $this->sku('fl-01-1-15', 1);
@@ -488,9 +488,8 @@ class ActualControllerTest extends TestCase
             ->assertJsonPath('meta.from', '2026-09-01')
             ->assertJsonPath('meta.to', '2026-09-30')
             ->assertJsonPath('meta.total', ['quantity' => 11, 'amount' => 24000])
-            // 金額の多い順。未登録のSKUは、SKUの順位には入り、品番の順位には入らない
-            ->assertJsonPath('data.skus.*.sku_code', ['unknown-1', 'fl-01-1-10', 'si-13-1-0', 'fl-01-1-15'])
-            ->assertJsonPath('data.skus.0.item_no', null)
+            // 金額の多い順。未登録のSKUは品番の順位に入れず、まとめて返す。SKUの順位は返さない（K-096）
+            ->assertJsonMissingPath('data.skus')
             ->assertJsonPath('data.items.*.item_no', ['fl-01', 'si-13'])
             ->assertJsonPath('data.items.0.item_no', 'fl-01')
             ->assertJsonPath('data.items.0.brand', $this->item->brand)
@@ -500,34 +499,36 @@ class ActualControllerTest extends TestCase
             ->assertJsonPath('data.unregistered', ['sku_count' => 1, 'quantity' => 3, 'amount' => 9000])
             // 前月の順位と比べる。前月に売れていなければ null
             ->assertJsonPath('meta.previous', ['from' => '2026-08-01', 'to' => '2026-08-31', 'available' => true])
-            ->assertJsonPath('data.skus.*.rank', [1, 2, 3, 4])
-            ->assertJsonPath('data.skus.*.previous_rank', [null, null, null, 1])
+            ->assertJsonPath('data.items.*.rank', [1, 2])
             ->assertJsonPath('data.items.*.previous_rank', [1, null])
             // 欠品日数は店舗のチャネル（楽天市場は BOSS）で数える。品番は欠品したSKUの日数の合計
             ->assertJsonPath('meta.stockout_channels', [['channel' => 'boss', 'label' => 'BOSS']])
-            ->assertJsonPath('data.skus.1.stockouts', ['boss' => ['days' => 4, 'known_days' => 30, 'period_days' => 30]])
-            ->assertJsonPath('data.skus.3.stockouts', ['boss' => ['days' => null, 'known_days' => 0, 'period_days' => 30]])
             ->assertJsonPath('data.items.0.stockouts', ['boss' => ['days' => 4, 'skus' => 1, 'known_days' => 30, 'period_days' => 30]])
             ->assertJsonPath('data.items.1.stockouts.boss.days', null);
 
         // 全店舗は BOSS と Amazon の両方で数える。Amazon の8月の販売実績を取り込んでいないため、順位は比べない
         $this->getJson('/api/v1/actuals/stores/ranking?period=2026-09')
             ->assertJsonPath('meta.previous.available', false)
-            ->assertJsonPath('data.skus.0.sku_code', 'fl-01-1-10')
-            ->assertJsonPath('data.skus.0.previous_rank', null)
-            ->assertJsonPath('data.skus.0.stockouts.boss.days', 4)
-            ->assertJsonPath('data.skus.0.stockouts.amazon', ['days' => 26, 'known_days' => 30, 'period_days' => 30]);
+            ->assertJsonPath('data.items.0.item_no', 'fl-01')
+            ->assertJsonPath('data.items.0.previous_rank', null)
+            ->assertJsonPath('data.items.0.stockouts.boss.days', 4)
+            ->assertJsonPath('data.items.0.stockouts.amazon', ['days' => 26, 'skus' => 1, 'known_days' => 30, 'period_days' => 30]);
 
         // 販売数の順、全店舗、対象品番だけ
         $this->getJson('/api/v1/actuals/stores/ranking?period=2026-09&order=quantity&products=target')
             ->assertJsonPath('meta.mall_label', '全店舗')
-            ->assertJsonPath('data.skus.*.sku_code', ['fl-01-1-10', 'fl-01-1-15'])
-            ->assertJsonPath('data.skus.0.quantity', 11)
-            ->assertJsonPath('data.skus.1.quantity', 1)
+            ->assertJsonPath('data.items.*.item_no', ['fl-01'])
+            ->assertJsonPath('data.items.0.quantity', 12)
             ->assertJsonPath('data.unregistered.sku_count', 0);
 
+        // 上位20品番まで
+        foreach (range(1, 21) as $number) {
+            $sellAt(Sku::factory()->create(['item_id' => Item::factory()->create(['item_no' => "x-{$number}"])->id]), '2026-09-20', 1, 100 * $number);
+        }
+        $this->getJson('/api/v1/actuals/stores/ranking?period=2026-09&mall=rakuten')->assertJsonCount(20, 'data.items');
+
         // 日ごと。今月・今日より先は受け付けない
-        $this->getJson('/api/v1/actuals/stores/ranking?unit=day&period=2026-10-01')->assertJsonPath('data.skus.*.sku_code', ['fl-01-1-10']);
+        $this->getJson('/api/v1/actuals/stores/ranking?unit=day&period=2026-10-01')->assertJsonPath('data.items.*.item_no', ['fl-01']);
         $this->getJson('/api/v1/actuals/stores/ranking?unit=day&period=2026-10-08')->assertUnprocessable()->assertJsonValidationErrors('period');
         $this->getJson('/api/v1/actuals/stores/ranking?period=2026-11')->assertUnprocessable()->assertJsonValidationErrors('period');
         $this->getJson('/api/v1/actuals/stores/ranking')->assertUnprocessable()->assertJsonValidationErrors('period');

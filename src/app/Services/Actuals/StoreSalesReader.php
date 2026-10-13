@@ -72,19 +72,19 @@ class StoreSalesReader
     }
 
     /**
-     * 期間（月か日）の売上上位の品番とSKU（K-091・K-095）。$mall を指定するとその店舗だけ、null なら全店舗。$order（amount か quantity）の多い順に
-     * $limit 件ずつ返す。CrossWalkerに未登録のSKU（品番の無いSKU）は、SKUの順位には入れ、品番の順位には入れずに unregistered にまとめる。
+     * 期間（月か日）の売上上位の品番（K-091・K-095・K-096）。$mall を指定するとその店舗だけ、null なら全店舗。$order（amount か quantity）の多い順に
+     * $limit 件返す。CrossWalkerに未登録のSKU（品番の無いSKU）は、品番の順位には入れずに unregistered にまとめる。
      * total は期間の全体の販売数と金額で、割合の分母にする。今月・今日は今日まで。
      *
      * - 順位の変動：同じ店舗・並び順で、前の期間（月ごとは前月の1か月、日ごとは前日）の順位（previous_rank）を添える。前の期間に売れていなければ null。
      *   前の期間の販売実績を対象のチャネルのどれかで取り込んでいなければ比べず、previous.available を false にする。
-     * - 欠品日数：店舗のチャネル（全店舗なら BOSS と Amazon の両方）ごとに、期間の欠品日数と判定できた日数を添える（K-037・K-038・K-084）。
-     *   品番は、そのチャネルで売っている有効なSKUと、期間に売れたSKUの欠品日数の合計と、欠品したSKUの数。在庫の記録の無いSKUは数えない。
+     * - 欠品日数：店舗のチャネル（全店舗なら BOSS と Amazon の両方）ごとに、そのチャネルで売っている有効なSKUと期間に売れたSKUの、
+     *   期間の欠品日数の合計と欠品したSKUの数、判定できた日数を添える（K-037・K-038・K-084）。在庫の記録の無いSKUは数えない。
      *
      * @param  list<int>|null  $skuIds  対象品番のSKUだけにするときのSKU。全商品なら null
-     * @return array{start: CarbonImmutable, end: CarbonImmutable, total: array{quantity: float, amount: float}, previous: array{start: CarbonImmutable, end: CarbonImmutable, available: bool}, channels: list<Channel>, items: list<array<string, mixed>>, skus: list<array<string, mixed>>, unregistered: array{sku_count: int, quantity: float, amount: float}}
+     * @return array{start: CarbonImmutable, end: CarbonImmutable, total: array{quantity: float, amount: float}, previous: array{start: CarbonImmutable, end: CarbonImmutable, available: bool}, channels: list<Channel>, items: list<array<string, mixed>>, unregistered: array{sku_count: int, quantity: float, amount: float}}
      */
-    public function ranking(CarbonImmutable $today, SalesUnit $unit, CarbonImmutable $period, ?Mall $mall, ?array $skuIds, string $order, int $limit = 10): array
+    public function ranking(CarbonImmutable $today, SalesUnit $unit, CarbonImmutable $period, ?Mall $mall, ?array $skuIds, string $order, int $limit = 20): array
     {
         $today = $today->startOfDay();
         $isMonth = $unit === SalesUnit::Month;
@@ -102,13 +102,11 @@ class StoreSalesReader
 
         $current = $this->rank($sold, $skus, $order);
         $previous = $this->rank($previousSold, $skus, $order);
-        $previousSkuRanks = array_flip(array_column($previous['skus'], 'sku_id'));
         $previousItemRanks = array_flip(array_column($previous['items'], 'item_no'));
 
-        $topSkus = array_slice($current['skus'], 0, $limit);
         $topItems = array_slice($current['items'], 0, $limit);
 
-        // 欠品日数を数えるSKU：上位のSKUと、上位の品番の有効なSKU・期間に売れたSKU
+        // 欠品日数を数えるSKU：上位の品番の有効なSKUと、期間に売れたSKU
         $itemSkus = [];
         if ($topItems !== []) {
             $items = Item::query()->with('skus')->whereIn('item_no', array_column($topItems, 'item_no'))->get()->keyBy('item_no');
@@ -120,7 +118,7 @@ class StoreSalesReader
                 }
             }
         }
-        $countSkus = collect($itemSkus)->flatten(1)->concat(array_map(fn (array $row) => $skus->get($row['sku_id']), $topSkus))->filter()->unique('id');
+        $countSkus = collect($itemSkus)->flatten(1);
         $stockouts = [];
         foreach ($channels as $channel) {
             $targets = $countSkus->filter(fn (Sku $sku): bool => DemandForecaster::sellsOn($sku, $channel));
@@ -163,14 +161,6 @@ class StoreSalesReader
 
                 return [...$row, 'rank' => $index + 1, 'previous_rank' => $previousAvailable && isset($previousItemRanks[$row['item_no']]) ? $previousItemRanks[$row['item_no']] + 1 : null, 'stockouts' => $byChannel];
             }, $topItems, array_keys($topItems)),
-            'skus' => array_map(function (array $row, int $index) use ($previousSkuRanks, $previousAvailable, $stockouts, $channels, $periodDays): array {
-                $byChannel = [];
-                foreach ($channels as $channel) {
-                    $byChannel[$channel->value] = $stockouts[$row['sku_id']][$channel->value] ?? ['days' => null, 'known_days' => 0, 'period_days' => $periodDays];
-                }
-
-                return [...$row, 'rank' => $index + 1, 'previous_rank' => $previousAvailable && isset($previousSkuRanks[$row['sku_id']]) ? $previousSkuRanks[$row['sku_id']] + 1 : null, 'stockouts' => $byChannel];
-            }, $topSkus, array_keys($topSkus)),
             'unregistered' => $current['unregistered'],
         ];
     }
@@ -206,11 +196,11 @@ class StoreSalesReader
     }
 
     /**
-     * 販売数と金額から、品番とSKUの順位（$order の多い順、同じならもう一方の多い順）を作る。未登録のSKUは品番の順位に入れない。
+     * 販売数と金額から、品番の順位（$order の多い順、同じならもう一方の多い順）を作る。未登録のSKUは品番の順位に入れない。
      *
      * @param  array<int, array{quantity: float, amount: float}>  $sold
      * @param  Collection<int, Sku>  $skus
-     * @return array{total: array{quantity: float, amount: float}, items: list<array{item_no: string, brand: string, category: string, sku_count: int, quantity: float, amount: float}>, skus: list<array{sku_id: int, sku_code: string, item_no: string|null, quantity: float, amount: float}>, unregistered: array{sku_count: int, quantity: float, amount: float}}
+     * @return array{total: array{quantity: float, amount: float}, items: list<array{item_no: string, brand: string, category: string, sku_count: int, quantity: float, amount: float}>, unregistered: array{sku_count: int, quantity: float, amount: float}}
      */
     private function rank(array $sold, Collection $skus, string $order): array
     {
@@ -218,13 +208,10 @@ class StoreSalesReader
         $other = $key === 'amount' ? 'quantity' : 'amount';
         $byOrder = fn (array $a, array $b): int => [$b[$key], $b[$other]] <=> [$a[$key], $a[$other]];
 
-        $skuRows = [];
         $itemRows = [];
         $unregistered = ['sku_count' => 0, 'quantity' => 0.0, 'amount' => 0.0];
         foreach ($sold as $skuId => $values) {
-            $sku = $skus->get($skuId);
-            $item = $sku?->item;
-            $skuRows[] = ['sku_id' => $skuId, 'sku_code' => (string) $sku?->sku_code, 'item_no' => $item?->item_no, ...$values];
+            $item = $skus->get($skuId)?->item;
             if ($item === null) {
                 $unregistered = ['sku_count' => $unregistered['sku_count'] + 1, 'quantity' => $unregistered['quantity'] + $values['quantity'], 'amount' => $unregistered['amount'] + $values['amount']];
 
@@ -233,14 +220,12 @@ class StoreSalesReader
             $current = $itemRows[$item->item_no] ?? ['item_no' => $item->item_no, 'brand' => $item->brand, 'category' => $item->category, 'sku_count' => 0, 'quantity' => 0.0, 'amount' => 0.0];
             $itemRows[$item->item_no] = [...$current, 'sku_count' => $current['sku_count'] + 1, 'quantity' => $current['quantity'] + $values['quantity'], 'amount' => $current['amount'] + $values['amount']];
         }
-        usort($skuRows, $byOrder);
         $itemRows = array_values($itemRows);
         usort($itemRows, $byOrder);
 
         return [
             'total' => ['quantity' => array_sum(array_column($sold, 'quantity')), 'amount' => array_sum(array_column($sold, 'amount'))],
             'items' => $itemRows,
-            'skus' => $skuRows,
             'unregistered' => $unregistered,
         ];
     }

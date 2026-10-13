@@ -9,7 +9,7 @@ import { storeSalesResponse } from "@/views/storeSales.fixture";
 vi.mock("@/api/actuals", () => ({ fetchStoreSales: vi.fn(), fetchStoreRanking: vi.fn() }));
 
 /**
- * 売上上位（K-091・K-095）。fl-01 は前月3位から1位、si-13 は前月に売れていない。fl-01-1-10 は BOSS で 4日欠品（10月7日までのうち7日を確認）。
+ * 売上上位（K-091・K-095・K-096）。fl-01 は前月3位から1位で、BOSS で 1 SKU が 4日欠品（10月7日までのうち5日を確認）。si-13 は前月に売れていない。
  * mall が null（全店舗）なら BOSS と Amazon の欠品日数を返す。
  */
 function rankingResponse(order: "amount" | "quantity" = "amount", mall: "rakuten" | null = "rakuten"): StoreRankingResponse {
@@ -27,7 +27,7 @@ function rankingResponse(order: "amount" | "quantity" = "amount", mall: "rakuten
                     amount: 15000,
                     rank: 1,
                     previous_rank: 3,
-                    stockouts: { boss: { ...stockout(4), skus: 1 }, ...(both ? { amazon: { ...stockout(0), skus: 0 } } : {}) },
+                    stockouts: { boss: { ...stockout(4, 5), skus: 1 }, ...(both ? { amazon: { ...stockout(0), skus: 0 } } : {}) },
                 },
                 {
                     item_no: "si-13",
@@ -40,10 +40,6 @@ function rankingResponse(order: "amount" | "quantity" = "amount", mall: "rakuten
                     previous_rank: null,
                     stockouts: { boss: { ...stockout(0), skus: 0 } },
                 },
-            ],
-            skus: [
-                { sku_id: 1, sku_code: "fl-01-1-10", item_no: "fl-01", quantity: 2, amount: 10000, rank: 1, previous_rank: 1, stockouts: { boss: stockout(4, 5) } },
-                { sku_id: 9, sku_code: "unknown-1", item_no: null, quantity: 1, amount: 6000, rank: 2, previous_rank: 1, stockouts: { boss: stockout(null) } },
             ],
             unregistered: { sku_count: 1, quantity: 1, amount: 6000 },
         },
@@ -147,7 +143,7 @@ describe("StoreSalesView", () => {
         expect(wrapper.find('[data-testid="table-tooltip"]').exists()).toBe(false);
     });
 
-    it("shows the top items and SKUs of the store and month under the table when a cell is clicked", async () => {
+    it("shows the top items of the store and month under the table when a cell is clicked", async () => {
         const { wrapper } = await mountView();
 
         // 販売実績の無い欄は押しても開かない
@@ -168,18 +164,17 @@ describe("StoreSalesView", () => {
         expect(items[0]!.text()).toContain("fl-01");
         expect(items[0]!.text()).toContain("15,000円");
         expect(items[0]!.text()).toContain("60.0%・3個");
-        // 前月の順位からの変動と、欠品日数（品番は欠品したSKUの日数の合計）
+        // 前月の順位からの変動と、欠品日数（品番は欠品したSKUの日数の合計）。札は欠品アイコンと日数だけにし、詳しくはマウスを乗せて見る
         expect(items.map((item) => item.find('[data-testid="rank-change"]').text())).toEqual(["▲2", "新"]);
         expect(items[0]!.find('[data-testid="rank-change"]').attributes("title")).toBe("前月は3位");
-        expect(items[0]!.find('[data-testid="stockout-badge"]').text()).toBe("欠品 4日・1 SKU");
-        expect(items[0]!.find('[data-testid="stockout-badge"]').classes()).toContain("bg-red-50");
-        expect(items[1]!.find('[data-testid="stockout-badge"]').text()).toBe("欠品 0日");
-        const skus = dialog.findAll('[data-testid="ranking-sku"]');
-        expect(skus.map((sku) => sku.find('[data-testid="rank-change"]').text())).toEqual(["→", "▼1"]);
-        expect(skus[0]!.find('[data-testid="stockout-badge"]').text()).toBe("欠品 4日（確認5/7日）");
-        expect(skus[1]!.find('[data-testid="stockout-badge"]').text()).toBe("欠品 —");
+        const badge = items[0]!.find('[data-testid="stockout-badge"]');
+        expect(badge.text()).toBe("4日");
+        expect(badge.find('svg[aria-label="欠品"]').exists()).toBe(true);
+        expect(badge.classes()).toContain("bg-red-50");
+        expect(badge.attributes("title")).toBe("欠品 4日。欠品したSKU 1件の欠品日数の合計。在庫の記録で確認できたのは7日のうち5日");
+        expect(items[1]!.find('[data-testid="stockout-badge"]').text()).toBe("0日");
+        expect(dialog.findAll('[data-testid="ranking-sku"]')).toHaveLength(0);
         expect(dialog.find('[data-testid="ranking-notes"]').text()).toContain("順位の変動は前月（2026/09/01〜2026/09/30）の順位との比較です");
-        expect(skus[1]!.text()).toContain("unknown-1未登録");
         expect(dialog.find('[data-testid="ranking-unregistered"]').text()).toContain("CrossWalkerに未登録のSKU（1 SKU）：6,000円・24.0%");
 
         await dialog.find('[data-testid="ranking-order-quantity"]').trigger("click");
@@ -202,7 +197,7 @@ describe("StoreSalesView", () => {
                 .find('[data-testid="ranking-item"]')
                 .findAll('[data-testid="stockout-badge"]')
                 .map((badge) => badge.text()),
-        ).toEqual(["欠品 BOSS 4日・1 SKU", "欠品 Amazon 0日"]);
+        ).toEqual(["BOSS 4日", "Amazon 0日"]);
 
         // 同じ欄をもう一度押すと閉じる。見せ方を変えても閉じる
         await wrapper.find('[data-testid="store-total-row"]').findAll("td[tabindex]")[1]!.trigger("click");

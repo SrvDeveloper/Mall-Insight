@@ -637,11 +637,10 @@ export interface StoreSalesResponse {
     meta: Pick<SalesActualsResponse["meta"], "calculated_at" | "selection" | "unit" | "from" | "to" | "periods" | "channels"> & { products: StoreSalesProducts };
 }
 
-/** 店舗売上の月・日の欄の、売上上位の品番とSKU（各10件、K-091）。CrossWalkerに未登録のSKUは品番の順位に入れず unregistered にまとめる。 */
+/** 店舗売上の月・日の欄の、売上上位の品番（20件、K-091・K-096）。CrossWalkerに未登録のSKUは品番の順位に入れず unregistered にまとめる。 */
 export interface StoreRankingResponse {
     data: {
         items: (StoreRankingRow & { item_no: string; brand: string; category: string; sku_count: number; stockouts: Partial<Record<"boss" | "amazon", RankingStockout & { skus: number }>> })[];
-        skus: (StoreRankingRow & { sku_id: number; sku_code: string; item_no: string | null })[];
         unregistered: { sku_count: number; quantity: number; amount: number };
     };
     meta: {

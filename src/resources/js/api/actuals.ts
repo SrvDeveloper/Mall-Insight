@@ -25,7 +25,7 @@ export async function fetchStoreSales(unit: SalesUnit = "month", products: Store
     return data;
 }
 
-/** 店舗売上の月・日の欄の、売上上位の品番とSKU（K-091）。mall が null なら全店舗。order は金額か販売数の多い順。 */
+/** 店舗売上の月・日の欄の、売上上位の品番（K-091・K-096）。mall が null なら全店舗。order は金額か販売数の多い順。 */
 export async function fetchStoreRanking(unit: SalesUnit, period: string, mall: StoreSales["mall"] | null, products: StoreSalesProducts, order: "amount" | "quantity"): Promise<StoreRankingResponse> {
     const { data } = await apiClient.get<StoreRankingResponse>("/actuals/stores/ranking", { params: { unit, period, mall: mall ?? undefined, products, order } });
     return data;

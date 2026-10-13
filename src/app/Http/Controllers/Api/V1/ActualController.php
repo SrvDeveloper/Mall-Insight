@@ -152,7 +152,7 @@ class ActualController extends Controller
     }
 
     /**
-     * 店舗売上の月・日の欄の、売上上位の品番とSKU（各10件、K-091）。period は月ごとなら YYYY-MM、日ごとなら YYYY-MM-DD（今月・今日まで）。
+     * 店舗売上の月・日の欄の、売上上位の品番（20件、K-091・K-096）。period は月ごとなら YYYY-MM、日ごとなら YYYY-MM-DD（今月・今日まで）。
      * mall を指定するとその店舗だけ、無ければ全店舗。products は店舗売上と同じ。order（amount（初期値）か quantity）の多い順。
      * CrossWalkerに未登録のSKUは、品番の順位に入れず unregistered にまとめる。各行に、前の期間の順位（previous_rank）とチャネルごとの欠品日数（stockouts）を添える（K-095）。
      */
@@ -179,7 +179,7 @@ class ActualController extends Controller
         $ranking = $stores->ranking($now, $unit, $period, $mall, $isTarget ? $this->targetSkuIds($reader) : null, $order);
 
         return response()->json([
-            'data' => ['items' => $ranking['items'], 'skus' => $ranking['skus'], 'unregistered' => $ranking['unregistered']],
+            'data' => ['items' => $ranking['items'], 'unregistered' => $ranking['unregistered']],
             'meta' => [
                 'unit' => $unit->value,
                 'period' => $period->format($format),

@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from "vue";
 import { fetchStoreRanking } from "@/api/actuals";
+import StockoutIcon from "@/components/actuals/StockoutIcon.vue";
 import { STORE_COLORS, type ActualMeasure } from "@/components/actuals/actualRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
 import { formatYen } from "@/components/salesTarget/format";
 import type { RankingStockout, SalesUnit, StoreRankingResponse, StoreSales, StoreSalesProducts } from "@/types/api";
 
 /**
- * 店舗売上の月・日の欄を押したときに、表の下に出す売上上位の品番とSKU（各10件、K-091・K-092）。店舗の行の欄ならその店舗、合計の行なら全店舗。
+ * 店舗売上の月・日の欄を押したときに、表の下に出す売上上位の品番（20件、K-091・K-092・K-096）。店舗の行の欄ならその店舗、合計の行なら全店舗。
  * 金額と販売数のどちらの多い順かを切り替えられる（初めは店舗売上で見ている方）。各行に、その店舗・期間の全体に対する割合を棒と数字で出す。
- * CrossWalkerに未登録のSKUは、SKUの順位には入れ、品番の順位には入れずに件数と合計を添える。別の欄を押すと読み込み直し、読み込むまでは
+ * CrossWalkerに未登録のSKUは、品番の順位には入れずに件数と合計を添える。別の欄を押すと読み込み直し、読み込むまでは
  * 前の一覧を薄くして残す（表の高さが変わらないように）。開いたときは一覧が見えるところまで画面を動かす。×で閉じる。
  * 各行に、前月（日ごとは前日）の順位からの変動と、店舗のチャネル（全店舗なら BOSS と Amazon）の欠品日数を出す。品番の欠品日数は、
  * 欠品したSKUの欠品日数の合計（K-095）。
@@ -102,28 +103,19 @@ function rankChange(row: { rank: number; previous_rank: number | null }): { text
 const CHANGE_CLASSES = { up: "text-emerald-700", down: "text-amber-700", same: "text-stone-400", new: "rounded bg-sky-50 px-1 text-sky-700 ring-1 ring-sky-200" } as const;
 
 /**
- * 欠品日数の札。月ごとは「4日」（品番は欠品したSKUの数も）、日ごとはその日に欠品したか（品番は欠品したSKUの数）。在庫の記録の無いときは「—」、
- * 月の途中から記録があるときは確かめられた日数を添える（K-084）。
+ * 欠品日数の札（K-095・K-096）。欠品アイコンと「4日」だけを出し（全店舗なら BOSS・Amazon を添える）、欠品したSKUの数や、在庫の記録が月の途中から
+ * あるときに確かめられた日数は、マウスを乗せたときの説明に出す。品番の日数は、欠品したSKUの欠品日数の合計。在庫の記録の無いときは「—」。
  */
 function stockoutBadge(stockout: (RankingStockout & { skus?: number }) | undefined, label: string | null): { text: string; isOut: boolean; title: string } {
-    const prefix = label === null ? "欠品" : `欠品 ${label}`;
+    const prefix = label === null ? "" : `${label} `;
     if (!stockout || stockout.days === null) {
-        return { text: `${prefix} —`, isOut: false, title: "在庫の記録が無いため、欠品を判定できません" };
+        return { text: `${prefix}—`, isOut: false, title: `${prefix}欠品：在庫の記録が無いため、判定できません` };
     }
-    const isItem = stockout.skus !== undefined;
-    const partial = stockout.known_days < stockout.period_days ? `（確認${stockout.known_days}/${stockout.period_days}日）` : "";
-    const value =
-        props.unit === "day"
-            ? isItem
-                ? stockout.skus! > 0
-                    ? `${stockout.skus} SKU`
-                    : "なし"
-                : stockout.days > 0
-                  ? "あり"
-                  : "なし"
-            : `${stockout.days}日${isItem && stockout.skus! > 0 ? `・${stockout.skus} SKU` : ""}${partial}`;
-    const title = isItem ? "欠品したSKUの欠品日数の合計と、欠品したSKUの数" : "そのチャネルの在庫の区分の合計が0以下だった日数";
-    return { text: `${prefix} ${value}`, isOut: stockout.days > 0, title };
+    const details = [
+        stockout.skus !== undefined ? (stockout.skus > 0 ? `欠品したSKU ${stockout.skus}件の欠品日数の合計` : "欠品したSKUはありません") : null,
+        stockout.known_days < stockout.period_days ? `在庫の記録で確認できたのは${stockout.period_days}日のうち${stockout.known_days}日` : null,
+    ].filter((detail): detail is string => detail !== null);
+    return { text: `${prefix}${stockout.days}日`, isOut: stockout.days > 0, title: [`${prefix}欠品 ${stockout.days}日`, ...details].join("。") };
 }
 
 /** 行の欠品の札（店舗ならそのチャネル、全店舗なら BOSS と Amazon）。 */
@@ -182,10 +174,15 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
         </div>
         <div v-else-if="!result" class="px-6 py-12 text-center text-sm text-stone-500">読み込み中…</div>
         <div v-else-if="result.meta.total.quantity === 0" class="px-6 py-12 text-center text-sm text-stone-500" data-testid="ranking-empty">この期間の販売実績はありません。</div>
-        <div v-else class="grid gap-0 transition-opacity md:grid-cols-2" :class="isLoading ? 'opacity-50' : ''" :aria-busy="isLoading">
-            <section class="flex min-w-0 flex-col border-stone-200 max-md:border-b md:border-r" aria-labelledby="ranking-items">
+        <div v-else class="transition-opacity" :class="isLoading ? 'opacity-50' : ''" :aria-busy="isLoading">
+            <section class="flex min-w-0 flex-col" aria-labelledby="ranking-items">
                 <h3 id="ranking-items" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">品番 上位{{ result.data.items.length }}</h3>
-                <ol class="flex flex-col pb-2" data-testid="ranking-items">
+                <!-- 広い画面では 1～10位を左、11～20位を右に並べる -->
+                <ol
+                    class="flex flex-col pb-2 md:grid md:grid-flow-col md:grid-cols-2 md:gap-x-6"
+                    :style="{ gridTemplateRows: `repeat(${Math.min(10, result.data.items.length)}, auto)` }"
+                    data-testid="ranking-items"
+                >
                     <li v-for="row in result.data.items" :key="row.item_no" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-item">
                         <span class="flex w-7 shrink-0 flex-col items-end leading-tight tabular-nums">
                             <span class="text-[12px] text-stone-500">{{ row.rank }}</span>
@@ -204,11 +201,11 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
                                 <span
                                     v-for="badge in stockoutBadges(row)"
                                     :key="badge.key"
-                                    class="rounded px-1.5 py-px text-[10.5px] tabular-nums"
+                                    class="inline-flex items-center gap-1 rounded px-1.5 py-px text-[10.5px] tabular-nums"
                                     :class="badge.isOut ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-stone-50 text-stone-500'"
                                     :title="badge.title"
                                     data-testid="stockout-badge"
-                                    >{{ badge.text }}</span
+                                    ><StockoutIcon /><span>{{ badge.text }}</span></span
                                 >
                             </span>
                         </span>
@@ -224,41 +221,6 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
                         formatShare(share(result.data.unregistered))
                     }}。品番の順位には含めていません
                 </p>
-            </section>
-            <section class="flex min-w-0 flex-col" aria-labelledby="ranking-skus">
-                <h3 id="ranking-skus" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">SKU 上位{{ result.data.skus.length }}</h3>
-                <ol class="flex flex-col pb-2" data-testid="ranking-skus">
-                    <li v-for="row in result.data.skus" :key="row.sku_id" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-sku">
-                        <span class="flex w-7 shrink-0 flex-col items-end leading-tight tabular-nums">
-                            <span class="text-[12px] text-stone-500">{{ row.rank }}</span>
-                            <span v-if="rankChange(row)" class="text-[10px] font-medium" :class="CHANGE_CLASSES[rankChange(row)!.tone]" :title="rankChange(row)!.title" data-testid="rank-change">{{
-                                rankChange(row)!.text
-                            }}</span>
-                        </span>
-                        <span class="flex min-w-0 flex-1 flex-col gap-1">
-                            <span class="flex min-w-0 items-center gap-1.5">
-                                <span class="truncate font-mono text-sm text-stone-900" :title="row.sku_code">{{ row.sku_code }}</span>
-                                <span v-if="row.item_no === null" class="shrink-0 rounded-full bg-amber-50 px-1.5 py-px text-[10px] text-amber-800 ring-1 ring-amber-200">未登録</span>
-                            </span>
-                            <span class="h-1 w-full rounded-full bg-stone-100"><span class="block h-full rounded-full" :style="{ width: `${share(row) * 100}%`, backgroundColor: color }" /></span>
-                            <span class="flex flex-wrap gap-1">
-                                <span
-                                    v-for="badge in stockoutBadges(row)"
-                                    :key="badge.key"
-                                    class="rounded px-1.5 py-px text-[10.5px] tabular-nums"
-                                    :class="badge.isOut ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-stone-50 text-stone-500'"
-                                    :title="badge.title"
-                                    data-testid="stockout-badge"
-                                    >{{ badge.text }}</span
-                                >
-                            </span>
-                        </span>
-                        <span class="flex shrink-0 flex-col items-end tabular-nums">
-                            <span class="text-sm text-stone-900">{{ format(valueOf(row)) }}</span>
-                            <span class="text-[11px] text-stone-500">{{ formatShare(share(row)) }}・{{ subOf(row) }}</span>
-                        </span>
-                    </li>
-                </ol>
             </section>
         </div>
         <div class="flex flex-col gap-0.5 border-t border-stone-200 px-5 py-2.5 text-[11px] text-stone-500" data-testid="ranking-notes">
