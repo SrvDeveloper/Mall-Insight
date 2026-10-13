@@ -15,22 +15,23 @@ describe("accuracyFormat", () => {
     });
 
     it("picks the method with the smallest error rate, preferring the current method on a tie", () => {
-        expect(bestMethod({ event_adjusted: metrics(0.55), base_average: metrics(0.6), recent_30: metrics(0.5), last_year: metrics(0.7) })).toBe("recent_30");
-        expect(bestMethod({ event_adjusted: metrics(0.5), base_average: metrics(0.5), recent_30: metrics(0.5), last_year: metrics(null) })).toBe("event_adjusted");
+        expect(bestMethod({ seasonal: metrics(0.55), event_adjusted: metrics(0.55), base_average: metrics(0.6), recent_30: metrics(0.5), last_year: metrics(0.7) })).toBe("recent_30");
+        expect(bestMethod({ seasonal: metrics(0.5), event_adjusted: metrics(0.5), base_average: metrics(0.5), recent_30: metrics(0.5), last_year: metrics(null) })).toBe("seasonal");
         // イベントの補正より前に測った記録には、今の方式が無い
         expect(bestMethod({ base_average: metrics(0.5), recent_30: metrics(0.6), last_year: metrics(null) })).toBe("base_average");
-        expect(bestMethod({ event_adjusted: metrics(null), base_average: metrics(null), recent_30: metrics(null), last_year: metrics(null) })).toBeNull();
+        expect(bestMethod({ seasonal: metrics(null), event_adjusted: metrics(null), base_average: metrics(null), recent_30: metrics(null), last_year: metrics(null) })).toBeNull();
     });
 
     it("leaves out methods that the run did not measure", () => {
         const card = (method: BacktestMethod, evaluated: number) => ({ method, evaluated, skipped: 0 });
-        expect(measuredMethods([card("event_adjusted", 0), card("base_average", 3), card("recent_30", 3), card("last_year", 3)]).map((method) => method.value)).toEqual([
-            "base_average",
-            "recent_30",
-            "last_year",
-        ]);
-        expect(measuredMethods([card("event_adjusted", 3), card("base_average", 3), card("recent_30", 3), card("last_year", 3)])).toHaveLength(4);
-        expect(measuredMethods([card("event_adjusted", 0), card("base_average", 0), card("recent_30", 0), card("last_year", 0)])).toHaveLength(4);
+        const cards = (...evaluated: number[]) =>
+            (["seasonal", "event_adjusted", "base_average", "recent_30", "last_year"] as BacktestMethod[]).map((method, index) => card(method, evaluated[index]!));
+        // 季節係数・イベントの補正より前に測った記録
+        expect(measuredMethods(cards(0, 0, 3, 3, 3)).map((method) => method.value)).toEqual(["base_average", "recent_30", "last_year"]);
+        // 季節係数より前に測った記録は、イベントの補正だけが今の方式
+        expect(measuredMethods(cards(0, 3, 3, 3, 3))[0]!.value).toBe("event_adjusted");
+        expect(measuredMethods(cards(3, 3, 3, 3, 3))).toHaveLength(5);
+        expect(measuredMethods(cards(0, 0, 0, 0, 0))).toHaveLength(5);
     });
 
     it("names the months compared for each origin", () => {

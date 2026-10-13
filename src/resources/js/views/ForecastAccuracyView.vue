@@ -9,7 +9,7 @@ import type { BacktestHorizon, ForecastBacktest, ForecastBacktestSummaryResponse
 
 /**
  * 予測精度（バックログ B-130、決定記録 K-111）。左メニュー「在庫試算」の需要予測の下に置く。過去の月初に戻って、その前日までの販売実績だけで予測し直し、
- * その後の販売実績と比べた当たり具合（WAPE・偏り）を、今の方式（イベントの補正あり、B-129）、補正を入れる前の方式と、
+ * その後の販売実績と比べた当たり具合（WAPE・偏り）を、今の方式（イベント＋登録した季節係数、B-129・B-106）、イベントの補正だけ、補正を入れる前の方式と、
  * 比べるための単純な方式（直近30日の平均・前年同月の実績）で並べて見る。イベントの補正より前に測った記録では、測っていない今の方式を出さない。
  * 何か月先（1か月目・1～3か月目の合計・判定する月）とチャネル（全体・BOSS・Amazon）を切り替え、方式ごと・品番ごと・起点ごとに見られる。
  * 「測り直す」で今の販売実績で測り直し、結果は測った日時とともに残す（最新20件）。前に測った結果も選んで見られ、予測の方式を変えた前後で比べられる。
@@ -126,7 +126,7 @@ const originNote = computed(() => {
 });
 
 const methods = computed(() => measuredMethods(result.value?.data.methods ?? []));
-/** その記録の今の方式（イベントの補正より前に測った記録では、補正なしの基準平均日販）。 */
+/** その記録の今の方式（季節係数・イベントの補正より前に測った記録では、そのときの方式）。 */
 const currentMethod = computed(() => methods.value[0]?.value ?? "event_adjusted");
 const methodCards = computed(() => (result.value?.data.methods ?? []).filter((card) => methods.value.some((method) => method.value === card.method)));
 const items = computed(() => result.value?.data.items ?? []);
@@ -140,7 +140,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                 <p class="text-xs text-stone-500">在庫試算 / 予測精度</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">予測精度</h1>
                 <p class="max-w-3xl text-[13px] text-stone-600" data-testid="description">
-                    需要予測が過去にどれだけ当たったかを測ります。過去の月初に戻ってその前日までの販売実績だけで予測し直し、その後の販売実績と比べます。今の方式（イベントの補正あり）のほかに、補正を入れる前の方式と、目安として単純な方式（直近30日の平均・前年同月の実績）も測ります。
+                    需要予測が過去にどれだけ当たったかを測ります。過去の月初に戻ってその前日までの販売実績だけで予測し直し、その後の販売実績と比べます。今の方式（イベント＋季節係数）のほかに、イベントの補正だけ・補正を入れる前の方式と、目安として単純な方式（直近30日の平均・前年同月の実績）も測ります。
                 </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
@@ -256,6 +256,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                     <p>
                         すべての方式で予測でき、答え合わせの販売実績を取り込んでいるSKUだけを比べています。販売実績は欠品で売れなかった分を補正していません（在庫の記録が2026年9月16日からのため）。
                         イベントの補正は、登録したイベントの日を平均日販から除き、起点より後のイベントの日に、起点より前に終わった同じ名前のイベントから求めた倍率の候補を掛けています（担当者が入れた倍率は使いません）。
+                        季節係数は、担当者が今登録している係数をすべての起点で使っています（係数が当たるかを確かめるためで、起点の時点で登録していたかは問いません）。
                     </p>
                 </div>
             </section>

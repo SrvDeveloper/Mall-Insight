@@ -195,6 +195,8 @@ export interface AverageWindow {
     event_days: number;
     /** 欠品日とイベントの日を除いた販売数 */
     sales_quantity: number;
+    /** 季節係数を登録した品番（B-106）では、期間の季節係数の平均。平均日販はこれで割り戻した値。登録していなければ null */
+    seasonal_factor: number | null;
     average: number | null;
     base_weight: number;
     weight: number;
@@ -220,6 +222,8 @@ export interface MonthlyDemand {
     /** 基準平均日販×日数に、イベントで増やした数を足したもの */
     quantity: number;
     event_quantity: number;
+    /** 登録した季節係数（B-106）。登録していなければ null */
+    seasonal_factor: number | null;
     events: MonthlyEventDemand[];
 }
 
@@ -270,6 +274,8 @@ export interface DemandForecastResponse {
         min_sales_days: number;
         /** 登録したイベント（平均日販から日を除き、これからの日に倍率を掛けたもの） */
         events: { id: number; name: string; starts_on: string; ends_on: string; channels: ("boss" | "amazon")[]; status: SalesEventStatus }[];
+        /** 季節係数を登録した品番 */
+        seasonal_item_nos: string[];
     };
 }
 
@@ -708,8 +714,8 @@ export interface StockActualsResponse {
 /** 予測精度の測定（B-130）で測る何か月先。 */
 export type BacktestHorizon = "month_1" | "months_3" | "check_month";
 
-/** 予測精度の測定で比べる方式。event_adjusted が今の方式（イベントの補正あり）、base_average は補正を入れる前の基準平均日販。 */
-export type BacktestMethod = "event_adjusted" | "base_average" | "recent_30" | "last_year";
+/** 予測精度の測定で比べる方式。seasonal が今の方式（イベント＋季節係数）、event_adjusted はイベントの補正だけ、base_average は補正を入れる前の基準平均日販。 */
+export type BacktestMethod = "seasonal" | "event_adjusted" | "base_average" | "recent_30" | "last_year";
 
 /** 予測精度を測った記録。 */
 export interface ForecastBacktest {
@@ -851,4 +857,56 @@ export interface SalesEventPayload {
     ends_on: string;
     malls: string[];
     note: string | null;
+}
+
+/** 販売実績から求めた季節係数（B-106、K-113）。factors は1月～12月。 */
+export interface SeasonalIndexSummary {
+    source: "item" | "category" | "overall" | null;
+    source_label: string | null;
+    factors: number[] | null;
+    /** 月ごとの、比べた年数 */
+    years: number[];
+    /** 月平均の販売数 */
+    monthly_quantity: number;
+    /** 初期値に使える（12か月求められ、月平均の販売数が足りる） */
+    is_usable: boolean;
+}
+
+/** 登録した季節係数の記録。factors が null なら登録をやめた記録。 */
+export interface SeasonalFactorRecord {
+    id: number;
+    factors: number[] | null;
+    initial_factors: number[] | null;
+    initial_source: "item" | "category" | "overall" | null;
+    note: string | null;
+    changed_by: string | null;
+    changed_at: string | null;
+}
+
+export interface SeasonalFactorMeta {
+    min_factor: number;
+    max_factor: number;
+    min_monthly_quantity: number;
+}
+
+export interface SeasonalFactorListResponse {
+    data: { item_no: string; brand: string; category: string; current: SeasonalFactorRecord | null; initial: SeasonalIndexSummary | null }[];
+    meta: SeasonalFactorMeta;
+}
+
+export interface SeasonalFactorDetailResponse {
+    data: {
+        item_no: string;
+        brand: string;
+        category: string;
+        is_target: boolean;
+        current: SeasonalFactorRecord | null;
+        initial: SeasonalIndexSummary | null;
+        /** 品番・カテゴリー・対象品番の全体で求めた係数 */
+        levels: SeasonalIndexSummary[];
+        /** 年ごとの1月～12月の販売数（全チャネル）。取り込んでいない月は null */
+        sales: { year: number; months: (number | null)[] }[];
+        history: SeasonalFactorRecord[];
+    };
+    meta: SeasonalFactorMeta;
 }

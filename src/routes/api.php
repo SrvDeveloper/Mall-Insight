@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\SalesEventController;
 use App\Http\Controllers\Api\V1\SalesImportController;
 use App\Http\Controllers\Api\V1\SalesTargetCarryOverController;
 use App\Http\Controllers\Api\V1\SalesTargetController;
+use App\Http\Controllers\Api\V1\SeasonalFactorController;
 use App\Http\Controllers\Api\V1\UnregisteredSkuController;
 use App\Http\Controllers\Api\V1\ZeroStockViewSyncController;
 use Illuminate\Support\Facades\Route;
@@ -40,6 +41,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
         Route::apiResource('sales-events', SalesEventController::class)->parameters(['sales-events' => 'salesEvent']);
         Route::put('/sales-events/{salesEvent}/multipliers', [SalesEventController::class, 'updateMultipliers'])->name('sales-events.multipliers.update');
+        Route::get('/seasonal-factors', [SeasonalFactorController::class, 'index'])->name('seasonal-factors.index');
+        Route::get('/seasonal-factors/{itemNo}', [SeasonalFactorController::class, 'show'])->name('seasonal-factors.show');
+        Route::put('/seasonal-factors/{itemNo}', [SeasonalFactorController::class, 'update'])->name('seasonal-factors.update');
         Route::get('/forecast-backtests', [ForecastBacktestController::class, 'index'])->name('forecast-backtests.index');
         Route::get('/forecast-backtests/{forecastBacktest}', [ForecastBacktestController::class, 'show'])->name('forecast-backtests.show');
         Route::post('/forecast-backtests', [ForecastBacktestController::class, 'store'])->name('forecast-backtests.store');

@@ -66,6 +66,8 @@ class DemandForecastController extends Controller
                     'channels' => array_map(fn (Channel $channel): string => $channel->value, $event->channels()),
                     'status' => $event->status($forecast->forecastFrom)->value,
                 ])->values()->all(),
+                // 季節係数を登録した品番（B-106、K-113）
+                'seasonal_item_nos' => array_keys($forecast->seasonalFactors),
             ],
         ]);
     }

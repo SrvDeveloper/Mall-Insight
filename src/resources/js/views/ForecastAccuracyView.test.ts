@@ -36,7 +36,8 @@ function summary(backtest: ForecastBacktest, withEvents = true): ForecastBacktes
     return {
         data: {
             methods: [
-                { method: "event_adjusted", label: "今の方式（イベントの補正あり）", ...adjusted(m(0.623, -0.02)) },
+                { method: "seasonal", label: "今の方式（イベント＋季節係数）", ...adjusted(m(0.62, -0.01)) },
+                { method: "event_adjusted", label: "イベントの補正だけ", ...adjusted(m(0.623, -0.02)) },
                 { method: "base_average", label: "基準平均日販（補正なし）", ...m(0.631, 0.007) },
                 { method: "recent_30", label: "直近30日の平均", ...m(0.678, 0.004) },
                 { method: "last_year", label: "前年同月の実績", ...m(0.827, -0.278) },
@@ -46,16 +47,16 @@ function summary(backtest: ForecastBacktest, withEvents = true): ForecastBacktes
                     item_no: "fisi-05",
                     brand: "FEELLIFE",
                     category: "老眼鏡",
-                    methods: { event_adjusted: adjusted(m(0.57, 0.04, 3031)), base_average: m(0.581, 0.05, 3031), recent_30: m(0.696), last_year: m(0.799) },
+                    methods: { seasonal: adjusted(m(0.56, 0.04, 3031)), event_adjusted: adjusted(m(0.57, 0.04, 3031)), base_average: m(0.581, 0.05, 3031), recent_30: m(0.696), last_year: m(0.799) },
                 },
                 {
                     item_no: "si-13",
                     brand: "FEELLIFE",
                     category: "調光老眼鏡",
-                    methods: { event_adjusted: adjusted(m(0.69, 0.1, 500)), base_average: m(0.7, 0.1, 500), recent_30: m(0.75), last_year: m(0.5) },
+                    methods: { seasonal: adjusted(m(0.69, 0.1, 500)), event_adjusted: adjusted(m(0.69, 0.1, 500)), base_average: m(0.7, 0.1, 500), recent_30: m(0.75), last_year: m(0.5) },
                 },
             ],
-            origins: [{ origin: "2025-10-01", methods: { event_adjusted: adjusted(m(0.49)), base_average: m(0.5), recent_30: m(0.52), last_year: m(0.6) } }],
+            origins: [{ origin: "2025-10-01", methods: { seasonal: adjusted(m(0.48)), event_adjusted: adjusted(m(0.49)), base_average: m(0.5), recent_30: m(0.52), last_year: m(0.6) } }],
         },
         meta: { backtest, horizon: "month_1", channel: "total" },
     };
@@ -87,13 +88,14 @@ describe("ForecastAccuracyView", () => {
         expect(wrapper.find("h1").text()).toBe("予測精度");
         expect(fetchForecastBacktest).toHaveBeenCalledWith(2, "month_1", "total");
         expect(wrapper.find('[data-testid="origin-note"]').text()).toContain("起点 2025/10〜2026/9 の12か月");
+        expect(wrapper.find('[data-testid="method-seasonal"] [data-testid="method-wape"]').text()).toBe("62.0%");
         expect(wrapper.find('[data-testid="method-event_adjusted"] [data-testid="method-wape"]').text()).toBe("62.3%");
         expect(wrapper.find('[data-testid="method-base_average"] [data-testid="method-wape"]').text()).toBe("63.1%");
         expect(wrapper.find('[data-testid="method-last_year"] [data-testid="method-bias"]').text()).toBe("偏り −27.8%（少なめに予測）");
         const rows = wrapper.findAll('[data-testid="item-row"]');
         expect(rows[0]!.text()).toContain("fisi-05");
         // その品番でいちばん外れ率の小さい方式を太字にする
-        expect(rows[1]!.findAll('[data-testid="item-wape"]').map((cell) => cell.attributes("data-best") ?? "")).toEqual(["", "", "", "true"]);
+        expect(rows[1]!.findAll('[data-testid="item-wape"]').map((cell) => cell.attributes("data-best") ?? "")).toEqual(["", "", "", "", "true"]);
         expect(wrapper.find('[data-testid="origin-row"]').text()).toContain("2025/10");
         expect(wrapper.find('[data-testid="old-run"]').exists()).toBe(false);
     });
@@ -115,7 +117,8 @@ describe("ForecastAccuracyView", () => {
         expect(router.currentRoute.value.query.run).toBe("1");
         expect(fetchForecastBacktest).toHaveBeenLastCalledWith(1, "check_month", "amazon");
         expect(wrapper.find('[data-testid="old-run"]').exists()).toBe(true);
-        // イベントの補正より前に測った記録には、今の方式（イベントの補正あり）を出さない
+        // イベントの補正・季節係数より前に測った記録には、そのとき無かった方式を出さない
+        expect(wrapper.find('[data-testid="method-seasonal"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="method-event_adjusted"]').exists()).toBe(false);
         expect(wrapper.find('[data-testid="item-row"]').findAll('[data-testid="item-wape"]')).toHaveLength(3);
     });

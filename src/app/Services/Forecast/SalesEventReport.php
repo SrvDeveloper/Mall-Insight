@@ -4,6 +4,7 @@ namespace App\Services\Forecast;
 
 use App\Enums\Channel;
 use App\Models\Item;
+use App\Models\ItemSeasonalFactor;
 use App\Models\ItemSelection;
 use App\Models\SalesEvent;
 use App\Models\SalesEventMultiplier;
@@ -13,6 +14,7 @@ use Illuminate\Support\Collection;
 /**
  * イベントの画面（B-129、K-112）に出す倍率。これからのイベント（始まる前・開催中）は倍率の候補とその根拠、
  * 終わったイベントは普段の何倍売れたか（測れたチャネルだけ）。対象品番（最新の選定）のSKUで求める。
+ * 季節係数を登録した品番は、普段なら売れた数に季節係数を掛けて比べる（B-106）。
  */
 class SalesEventReport
 {
@@ -28,7 +30,7 @@ class SalesEventReport
     {
         $items = $this->targetItems();
         $ranges = $this->forecaster->channelSalesRanges($today);
-        $measurements = $this->estimator->measure($this->forecaster, $this->estimator->excludedDates($events), $events->filter(fn (SalesEvent $event): bool => $event->hasEndedBefore($today)), $items, $ranges);
+        $measurements = $this->estimator->measure($this->forecaster, $this->estimator->excludedDates($events), $events->filter(fn (SalesEvent $event): bool => $event->hasEndedBefore($today)), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
 
         $overview = [];
         foreach ($events as $event) {
@@ -77,7 +79,7 @@ class SalesEventReport
         $remainingDays = count(array_filter($event->dates(), fn (string $date): bool => $date >= $today->toDateString()));
 
         if ($event->hasEndedBefore($today)) {
-            $measurements = $this->estimator->measure($this->forecaster, $excluded, collect([$event]), $items, $ranges);
+            $measurements = $this->estimator->measure($this->forecaster, $excluded, collect([$event]), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
 
             return [
                 'remaining_days' => 0,
@@ -85,7 +87,7 @@ class SalesEventReport
             ];
         }
 
-        $measurements = $this->estimator->measure($this->forecaster, $excluded, $this->estimator->candidateBasis($events, collect([$event]), $today, $ranges), $items, $ranges);
+        $measurements = $this->estimator->measure($this->forecaster, $excluded, $this->estimator->candidateBasis($events, collect([$event]), $today, $ranges), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
         $forecast = $this->forecaster->forecast($today, $items->pluck('item_no')->all());
 
         return [

@@ -79,7 +79,7 @@ class ForecastBacktestControllerTest extends TestCase
 
         // 毎日1個の品番は、どの方式でも当たる
         $items = collect($response->json('data.items'))->keyBy('item_no');
-        foreach (['event_adjusted', 'base_average', 'recent_30', 'last_year'] as $method) {
+        foreach (['seasonal', 'event_adjusted', 'base_average', 'recent_30', 'last_year'] as $method) {
             $this->assertSame(0.0, (float) $items['fl-01']['methods'][$method]['wape']);
             $this->assertSame(12, $items['fl-01']['methods'][$method]['evaluated']);
         }
@@ -97,10 +97,12 @@ class ForecastBacktestControllerTest extends TestCase
 
         // 全体：販売実績は毎日1個の品番の 365個。WAPE は差の絶対値の合計 ÷ 販売実績
         $methods = collect($response->json('data.methods'))->keyBy('method');
-        $this->assertSame('今の方式（イベントの補正あり）', $methods['event_adjusted']['label']);
+        $this->assertSame('今の方式（イベント＋季節係数）', $methods['seasonal']['label']);
+        $this->assertSame('イベントの補正だけ', $methods['event_adjusted']['label']);
         $this->assertSame('基準平均日販（補正なし）', $methods['base_average']['label']);
-        // イベントを登録していなければ、今の方式は補正なしと同じ
+        // イベントと季節係数を登録していなければ、今の方式は補正なしと同じ
         $this->assertEqualsWithDelta($methods['base_average']['forecast'], $methods['event_adjusted']['forecast'], 0.001);
+        $this->assertEqualsWithDelta($methods['base_average']['forecast'], $methods['seasonal']['forecast'], 0.001);
         $this->assertEqualsWithDelta(365.0, $methods['base_average']['actual'], 0.001);
         $this->assertEqualsWithDelta(309.36 / 365, $methods['base_average']['wape'], 0.0001);
         $this->assertEqualsWithDelta(309.36 / 365, $methods['base_average']['bias'], 0.0001);

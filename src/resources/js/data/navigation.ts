@@ -40,6 +40,7 @@ export const navigation: NavGroup[] = [
             { name: "target-items", label: "対象品番", path: "/target-items" },
             { name: "forecasts", label: "需要予測", path: "/forecasts" },
             { name: "sales-events", label: "イベント", path: "/sales-events" },
+            { name: "seasonal-factors", label: "季節係数", path: "/seasonal-factors" },
             { name: "forecast-accuracy", label: "予測精度", path: "/forecast-accuracy" },
             { name: "sales-targets", label: "販売目標", path: "/sales-targets" },
             { name: "inbound-plans", label: "入荷予定", path: "/inbound-plans" },

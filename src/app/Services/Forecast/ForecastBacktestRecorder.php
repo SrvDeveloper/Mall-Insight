@@ -47,6 +47,8 @@ class ForecastBacktestRecorder
                         'event_recent_events' => EventUpliftEstimator::RECENT_EVENTS,
                         'event_min_expected' => EventUpliftEstimator::MIN_EXPECTED,
                         'events' => $result['events'],
+                        // 季節係数（B-106、K-113）：測ったときに登録してあった品番ごとの係数
+                        'seasonal_factors' => $result['seasonal_factors'],
                         'origins' => array_map(fn (array $origins): array => array_map(fn (CarbonImmutable $origin): string => $origin->toDateString(), $origins), $result['origins']),
                     ],
                     'item_count' => $result['item_count'],

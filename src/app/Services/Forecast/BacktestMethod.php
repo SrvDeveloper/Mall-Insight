@@ -7,7 +7,10 @@ namespace App\Services\Forecast;
  */
 enum BacktestMethod: string
 {
-    /** 今の方式。基準平均日販からイベントの日を除き、これからのイベントの日に倍率を掛ける（B-129、K-112） */
+    /** 今の方式。イベントの補正に加えて、担当者が登録した季節係数で月ごとに増減させる（B-106、K-113） */
+    case Seasonal = 'seasonal';
+
+    /** イベントの補正だけ。基準平均日販からイベントの日を除き、これからのイベントの日に倍率を掛ける（B-129、K-112） */
     case EventAdjusted = 'event_adjusted';
 
     /** 補正を入れる前の方式。3つの期間の平均日販を重みでまとめた基準平均日販（B-006、K-036） */
@@ -22,7 +25,8 @@ enum BacktestMethod: string
     public function label(): string
     {
         return match ($this) {
-            self::EventAdjusted => '今の方式（イベントの補正あり）',
+            self::Seasonal => '今の方式（イベント＋季節係数）',
+            self::EventAdjusted => 'イベントの補正だけ',
             self::BaseAverage => '基準平均日販（補正なし）',
             self::RecentAverage => '直近30日の平均',
             self::LastYear => '前年同月の実績',

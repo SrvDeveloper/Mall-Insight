@@ -30,6 +30,7 @@ import type { DemandForecastResponse, ItemForecast, MonthlyDemand, SkuForecast }
  *
  * イベント（B-129、K-112）の日は平均日販から除き（内訳に日数を出す）、これからのイベントの日は倍率で需要を増やす。
  * 増やした月は、月の見出しにイベントの名前を出し、欄に印を付けてマウスを乗せると増やした数を出す。
+ * 季節係数を登録した品番（B-106、K-113）は、品番の行に印を付け、月の欄にマウスを乗せると係数を出す。平均日販は季節の影響を除いた値になる。
  */
 
 type ForecastView = "total" | "boss" | "amazon";
@@ -69,6 +70,8 @@ interface SkuRow {
     unpriced: boolean;
     /** 月ごとの、イベントで増やした数の説明（増やしていない月は null） */
     monthEventTitles: (string | null)[];
+    /** 月ごとの欄の説明（季節係数とイベント。どちらも無い月は null） */
+    monthTitles: (string | null)[];
 }
 
 interface ItemRows {
@@ -176,6 +179,10 @@ function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
                 }
                 return eventTitle(month);
             });
+            const monthTitles = (figures.monthly ?? []).map((month, index) => {
+                const lines = [month.seasonal_factor === null ? null : `季節係数 ×${month.seasonal_factor.toFixed(2)}`, monthEventTitles[index] ?? null].filter(Boolean);
+                return lines.length > 0 ? lines.join("\n") : null;
+            });
             const monthTexts = unpriced
                 ? []
                 : (figures.monthly ?? []).map((month, index) => {
@@ -200,6 +207,7 @@ function buildTable(forView: ForecastView, forMeasure: Measure): ViewTable {
                 isUnpredictable,
                 unpriced,
                 monthEventTitles,
+                monthTitles,
             };
         });
         return {
@@ -264,6 +272,8 @@ const visibleItems = computed<ItemRows[]>(() => {
 });
 const years = computed(() => yearSpans(months.value));
 const monthEventNames = computed(() => table.value.monthEventNames);
+/** 季節係数を登録した品番（B-106）。 */
+const seasonalItems = computed(() => new Set(result.value?.meta.seasonal_item_nos ?? []));
 
 type FlatRow = { kind: "item"; key: string; group: ItemRows } | { kind: "sku"; key: string; row: SkuRow };
 
@@ -341,7 +351,8 @@ const facts = computed(() => {
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">需要予測</h1>
                 <p class="text-[13px] text-stone-600">
                     対象品番のSKUについて、平均日販から12か月分の需要を予測します。<RouterLink to="/sales-events" class="font-medium text-stone-900 underline">イベント</RouterLink
-                    >の日は平均日販から除き、これからのイベントの日は倍率で増やします。季節による増減はまだ反映しません。画面を開くたびに最新の販売実績で計算します。
+                    >の日は平均日販から除き、これからのイベントの日は倍率で増やします。<RouterLink to="/seasonal-factors" class="font-medium text-stone-900 underline">季節係数</RouterLink
+                    >を登録した品番は、月ごとに係数で増減させます。画面を開くたびに最新の販売実績で計算します。
                 </p>
             </div>
             <div class="flex items-center gap-3">
@@ -540,6 +551,13 @@ const facts = computed(() => {
                                                 >{{ entry.group.item.brand }}・{{ entry.group.item.category }}</span
                                             >
                                             <span
+                                                v-if="seasonalItems.has(entry.group.item.item_no)"
+                                                class="shrink-0 rounded-full bg-stone-200 px-2 py-px text-[11px] font-medium text-stone-700"
+                                                title="季節係数を登録しています。月ごとの欄にマウスを乗せると係数が出ます"
+                                                data-testid="item-seasonal"
+                                                >季節係数</span
+                                            >
+                                            <span
                                                 v-if="entry.group.unpredictableCount > 0"
                                                 class="shrink-0 rounded-full bg-amber-100 px-2 py-px text-[11px] font-semibold text-amber-800"
                                                 data-testid="item-unpredictable"
@@ -595,7 +613,7 @@ const facts = computed(() => {
                                             :key="index"
                                             class="px-3 text-right tabular-nums"
                                             :class="entry.row.monthEventTitles[index] ? 'bg-sky-50/70 text-stone-900' : 'text-stone-700'"
-                                            :title="entry.row.monthEventTitles[index] ?? undefined"
+                                            :title="entry.row.monthTitles[index] ?? undefined"
                                             :data-event="entry.row.monthEventTitles[index] ? true : undefined"
                                         >
                                             {{ text }}

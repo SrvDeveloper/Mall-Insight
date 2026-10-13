@@ -5,7 +5,8 @@ import type { BacktestHorizon, BacktestMethod, BacktestMetrics } from "@/types/a
  */
 
 export const METHODS: { value: BacktestMethod; label: string; short: string }[] = [
-    { value: "event_adjusted", label: "今の方式（イベントの補正あり）", short: "今の方式" },
+    { value: "seasonal", label: "今の方式（イベント＋季節係数）", short: "今の方式" },
+    { value: "event_adjusted", label: "イベントの補正だけ", short: "イベントだけ" },
     { value: "base_average", label: "基準平均日販（補正なし）", short: "補正なし" },
     { value: "recent_30", label: "直近30日の平均", short: "直近30日" },
     { value: "last_year", label: "前年同月の実績", short: "前年同月" },

@@ -36,6 +36,7 @@ final readonly class SkuForecast
                 $month->days,
                 array_sum(array_map(fn (ChannelForecast $channel): float => $channel->monthly[$index]->quantity, $predictable)),
                 array_merge(...array_map(fn (ChannelForecast $channel): array => $channel->monthly[$index]->events, $predictable)),
+                $month->seasonalFactor,
             ),
             $predictable[0]->monthly,
             array_keys($predictable[0]->monthly),

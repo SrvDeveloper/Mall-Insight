@@ -7,7 +7,7 @@ use Carbon\CarbonImmutable;
 /**
  * 1か月分の需要予測。今月も1か月すべての日数分（K-052）。数量は丸めずに持つ。
  * 数量は「基準平均日販×日数」に、イベント（B-129）の日に倍率で増やした分を足したもの。増やした分の内訳を events に持つ（原則4）。
- * イベントの倍率は今日以降の日にだけ掛ける（K-112）。
+ * イベントの倍率は今日以降の日にだけ掛ける（K-112）。季節係数（B-106）を使うときは、基準平均日販にその月の係数を掛ける。
  */
 final readonly class MonthlyDemand
 {
@@ -19,6 +19,7 @@ final readonly class MonthlyDemand
         public int $days,
         public float $quantity,
         public array $events = [],
+        public ?float $seasonalFactor = null,
     ) {}
 
     /**

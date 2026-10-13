@@ -6,6 +6,7 @@ use Carbon\CarbonImmutable;
 
 /**
  * 期間別平均日販（3つの期間のどれか1つ）。販売数・販売できた日数は、欠品日（K-037）とイベントの日（B-129、K-112）を除いた数。
+ * 季節係数（B-106）を使うときは、平均日販は販売数÷（販売できた日の季節係数の合計）で、季節の影響を除いた値。seasonalFactor はその期間の季節係数の平均。
  * 販売できた日数が足りない期間と、欠品日が半分以上ある期間は除外し、平均日販は null。
  * offset は、期間の末日が販売実績の最新日の何日前か（直近30日は0、その前の60日は30、さらに前の90日は90）。
  */
@@ -23,6 +24,7 @@ final readonly class AverageWindow
         public float $baseWeight,
         public float $weight,
         public int $eventDays = 0,
+        public ?float $seasonalFactor = null,
     ) {}
 
     /**

@@ -18,6 +18,7 @@ final readonly class DemandForecast
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channels  チャネルごとの販売実績の期間。取り込んでいなければ null
      * @param  list<array{item: Item, skus: list<SkuForecast>}>  $items  対象品番の順（売上順位の高い順）
      * @param  Collection<int, SalesEvent>  $events  登録したイベント（B-129）。平均日販から除いた日と、倍率を掛けたこれからのイベントの根拠
+     * @param  array<string, array<int, float>>  $seasonalFactors  品番 => 登録した季節係数（B-106）
      */
     public function __construct(
         public CarbonImmutable $calculatedAt,
@@ -26,5 +27,6 @@ final readonly class DemandForecast
         public CarbonImmutable $forecastFrom,
         public array $items,
         public Collection $events = new Collection,
+        public array $seasonalFactors = [],
     ) {}
 }

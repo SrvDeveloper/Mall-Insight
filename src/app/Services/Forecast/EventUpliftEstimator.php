@@ -12,7 +12,8 @@ use Illuminate\Support\Collection;
  * イベント（B-129、決定記録 K-112）の、平均日販から除く日と倍率を決める。
  *
  * - 平均日販から除く日：登録したすべてのイベントの日。イベントのモールのチャネル（楽天市場・Yahoo!ショッピング・au PAY マーケットは BOSS）だけで除く。
- * - 終わったイベントの倍率：売れた数÷普段なら売れた数（EventMeasurement）。普段なら売れた数は、イベントの初日時点の基準平均日販×イベントの日数。
+ * - 終わったイベントの倍率：売れた数÷普段なら売れた数（EventMeasurement）。普段なら売れた数は、イベントの初日時点の基準平均日販×イベントの日数
+ *   （季節係数を登録した品番は、日ごとにその月の係数を掛ける、B-106）。
  *   販売実績をイベントの初日から最終日まで取り込んでいるチャネルだけで測る。
  * - これからのイベントの倍率の候補（EventCandidate）：同じ名前（SalesEvent::nameKey()）の、終わった過去のイベントの新しい方から3回分を合わせて求める。
  *   品番ごとに、売れた数の合計÷普段なら売れた数の合計とし、普段なら売れた数の合計が10個未満の品番は対象品番の全体の倍率を使う。
@@ -61,8 +62,9 @@ class EventUpliftEstimator
      *
      * @param  Collection<int, Item>  $items
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channelRanges
+     * @param  array<string, array<int, float>>  $seasonal  品番 => 登録した季節係数
      */
-    public function plan(DemandForecaster $forecaster, CarbonImmutable $forecastFrom, Collection $items, array $channelRanges, ?Collection $events = null): EventPlan
+    public function plan(DemandForecaster $forecaster, CarbonImmutable $forecastFrom, Collection $items, array $channelRanges, ?Collection $events = null, array $seasonal = []): EventPlan
     {
         $events ??= $this->events();
         $excluded = $this->excludedDates($events);
@@ -70,7 +72,7 @@ class EventUpliftEstimator
         if ($upcoming->isEmpty()) {
             return new EventPlan($excluded);
         }
-        $measurements = $this->measure($forecaster, $excluded, $this->candidateBasis($events, $upcoming, $forecastFrom, $channelRanges), $items, $channelRanges);
+        $measurements = $this->measure($forecaster, $excluded, $this->candidateBasis($events, $upcoming, $forecastFrom, $channelRanges), $items, $channelRanges, $seasonal);
 
         $uplifts = [];
         foreach ($upcoming as $event) {
@@ -136,9 +138,10 @@ class EventUpliftEstimator
      * @param  Collection<int, SalesEvent>  $targets
      * @param  Collection<int, Item>  $items
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channelRanges
+     * @param  array<string, array<int, float>>  $seasonal  品番 => 季節係数（B-106）。登録した品番は、普段なら売れた数に季節係数を掛ける
      * @return array<int, array<string, EventMeasurement>> イベントID => チャネルの値 => 測った結果
      */
-    public function measure(DemandForecaster $forecaster, array $excluded, Collection $targets, Collection $items, array $channelRanges): array
+    public function measure(DemandForecaster $forecaster, array $excluded, Collection $targets, Collection $items, array $channelRanges, array $seasonal = []): array
     {
         $measurements = [];
         foreach ($channelRanges as $range) {
@@ -169,17 +172,19 @@ class EventUpliftEstimator
                 foreach ($skus as [$itemNo, $sku]) {
                     $skuSales = $sales[$sku->id] ?? [];
                     $skuStockouts = $stockouts[$sku->id] ?? [];
-                    $base = $forecaster->forecastChannelWith($channel, $plan, $skuSales, $skuStockouts, $event->starts_on, $excludedDates);
+                    $factors = $seasonal[$itemNo] ?? null;
+                    $base = $forecaster->forecastChannelWith($channel, $plan, $skuSales, $skuStockouts, $event->starts_on, $excludedDates, [], $factors);
                     if (! $base->isPredictable()) {
                         continue;
                     }
-                    $days = 0;
+                    // 普段なら売れた数＝基準平均日販×その日の月の季節係数（登録していなければ1）を、欠品していない日について足す
+                    $days = 0.0;
                     $actual = 0;
                     foreach ($dates as $date) {
                         if (isset($skuStockouts[$date])) {
                             continue;
                         }
-                        $days++;
+                        $days += $factors === null ? 1.0 : $factors[(int) substr($date, 5, 2)];
                         $actual += $skuSales[$date] ?? 0;
                     }
                     $current = $byItem[$itemNo] ?? ['expected' => 0.0, 'actual' => 0];

@@ -13,7 +13,7 @@ const months = Array.from({ length: 12 }, (_, index) => {
 });
 
 function monthly(baseAverage: number): MonthlyDemand[] {
-    return months.map((month) => ({ ...month, quantity: baseAverage * month.days, event_quantity: 0, events: [] }));
+    return months.map((month) => ({ ...month, quantity: baseAverage * month.days, event_quantity: 0, seasonal_factor: null, events: [] }));
 }
 
 const windows: AverageWindow[] = [
@@ -26,6 +26,7 @@ const windows: AverageWindow[] = [
         sales_days: 30,
         stockout_days: 0,
         event_days: 0,
+        seasonal_factor: null,
         sales_quantity: 60,
         average: 2,
         base_weight: 0.5,
@@ -41,6 +42,7 @@ const windows: AverageWindow[] = [
         sales_days: 57,
         stockout_days: 3,
         event_days: 0,
+        seasonal_factor: null,
         sales_quantity: 90,
         average: 1.5,
         base_weight: 0.3,
@@ -56,6 +58,7 @@ const windows: AverageWindow[] = [
         sales_days: 90,
         stockout_days: 0,
         event_days: 0,
+        seasonal_factor: null,
         sales_quantity: 135,
         average: 1.5,
         base_weight: 0.2,
@@ -121,6 +124,7 @@ function response(overrides: Partial<DemandForecastResponse["meta"]> = {}, data:
             ],
             min_sales_days: 14,
             events: [],
+            seasonal_item_nos: [],
             ...overrides,
         },
     };
@@ -408,5 +412,25 @@ describe("DemandForecastView", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
         await flushPromises();
         expect(wrapper.find('[data-testid="tooltip-event-days"]').text()).toBe("・イベント4日を除く");
+    });
+
+    it("marks items with registered seasonal factors and shows the factor of each month (B-106)", async () => {
+        const seasonal = channel("boss", 2);
+        seasonal.windows = windows.map((window) => ({ ...window, seasonal_factor: 1.25 }));
+        seasonal.monthly = seasonal.monthly!.map((month) => ({ ...month, seasonal_factor: month.month === "2026-12" ? 2 : 1 }));
+        const target = sku(1, "fl-01-1-10", [seasonal]);
+        target.monthly = seasonal.monthly;
+        vi.mocked(fetchDemandForecasts).mockResolvedValue(response({ seasonal_item_nos: ["fl-01"] }, [{ item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", skus: [target] }]));
+
+        const wrapper = await mountView();
+
+        expect(wrapper.find('[data-testid="item-seasonal"]').text()).toBe("季節係数");
+        const cells = wrapper.find('[data-testid="sku-row"]').findAll("td");
+        expect(cells.find((cell) => cell.attributes("title") === "季節係数 ×2.00")).toBeDefined();
+        await wrapper.find('[data-testid="base-average-td"]').trigger("focus");
+        await flushPromises();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await flushPromises();
+        expect(wrapper.find('[data-testid="tooltip-seasonal"]').text()).toBe("・季節係数1.25で割り戻し");
     });
 });

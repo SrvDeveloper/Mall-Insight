@@ -3,7 +3,8 @@ import type { AverageWindow, ChannelForecast, SkuForecast } from "@/types/api";
 
 /**
  * 需要予測の基準平均日販の内訳（計算の根拠、K-035〜K-037）。在庫予測のツールチップ（TrendTooltip）と同じ大きさ・色にそろえる。
- * チャネルごとに、3つの期間の平均日販と重みを1行ずつ示し、その下に範囲・販売数・販売日数・欠品日数・除いたイベントの日数（B-129）を小さく添える。
+ * チャネルごとに、3つの期間の平均日販と重みを1行ずつ示し、その下に範囲・販売数・販売日数・欠品日数・除いたイベントの日数（B-129）・
+ * 季節係数で割り戻したこと（B-106）を小さく添える。
  */
 
 const props = defineProps<{
@@ -57,7 +58,8 @@ function excludedLabel(window: AverageWindow): string {
                 <span class="col-span-3 -mt-0.5 text-[10px] text-stone-500 tabular-nums">
                     {{ range(window) }}・{{ window.sales_quantity.toLocaleString() }}個÷{{ window.sales_days }}日<span v-if="window.stockout_days > 0" class="text-amber-300"
                         >・欠品{{ window.stockout_days }}日</span
-                    ><span v-if="window.event_days > 0" class="text-sky-300" data-testid="tooltip-event-days">・イベント{{ window.event_days }}日を除く</span>
+                    ><span v-if="window.event_days > 0" class="text-sky-300" data-testid="tooltip-event-days">・イベント{{ window.event_days }}日を除く</span
+                    ><span v-if="window.seasonal_factor !== null" data-testid="tooltip-seasonal">・季節係数{{ window.seasonal_factor.toFixed(2) }}で割り戻し</span>
                 </span>
             </li>
         </ul>
