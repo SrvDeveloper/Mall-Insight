@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import SalesEventView from "@/views/SalesEventView.vue";
+import SalesEventPeriodDetail from "@/components/salesEvent/SalesEventPeriodDetail.vue";
 import {
     createSalesEvent,
     createSalesEventPeriod,
@@ -261,6 +262,37 @@ describe("SalesEventView", () => {
         await flushPromises();
         expect(router.currentRoute.value.query).toEqual({});
         expect(wrapper.find('[data-testid="event-detail"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
+    it("shows ended period items in descending change rate order, with unmeasurable items last", async () => {
+        const endedDetail = periodDetail();
+        endedDetail.data.status = "ended";
+        endedDetail.data.status_label = "終了";
+        endedDetail.data.channels = [
+            {
+                channel: "boss",
+                label: "BOSS",
+                kind: "measured",
+                overall: 2,
+                expected: 10,
+                actual: 20,
+                basis: [],
+                note: null,
+                items: [
+                    { item_no: "fl-02", brand: "FEELLIFE", category: "老眼鏡", expected: 5, actual: 10, ratio: 2 },
+                    { item_no: "fl-04", brand: "FEELLIFE", category: "老眼鏡", expected: null, actual: null, ratio: null },
+                    { item_no: "fl-03", brand: "FEELLIFE", category: "老眼鏡", expected: 1, actual: 6, ratio: 6 },
+                    { item_no: "fl-01", brand: "FEELLIFE", category: "老眼鏡", expected: 1, actual: 6, ratio: 6 },
+                ],
+            },
+        ];
+        const wrapper = mount(SalesEventPeriodDetail, { props: { detail: endedDetail, isLoading: false } });
+
+        const rows = wrapper.findAll('[data-testid="measured-row"]');
+        expect(rows.map((row) => row.find("th span").text())).toEqual(["fl-01", "fl-03", "fl-02", "fl-04"]);
+        expect(rows.map((row) => row.find("td:last-child").text())).toEqual(["6.00倍", "6.00倍", "2.00倍", "—"]);
+        expect(endedDetail.data.channels[0]?.items.map((item) => item.item_no)).toEqual(["fl-02", "fl-04", "fl-03", "fl-01"]);
         wrapper.unmount();
     });
 

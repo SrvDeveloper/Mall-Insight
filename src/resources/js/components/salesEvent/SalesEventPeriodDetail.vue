@@ -113,7 +113,12 @@ function basisLabel(count: number): string {
 }
 
 const isMeasured = (item: SalesEventCandidateItem | SalesEventMeasuredItem): item is SalesEventMeasuredItem => "ratio" in item;
-const measuredItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)[]): SalesEventMeasuredItem[] => items.filter(isMeasured);
+const measuredItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)[]): SalesEventMeasuredItem[] =>
+    items.filter(isMeasured).sort((a, b) => {
+        if (a.ratio === null) return b.ratio === null ? a.item_no.localeCompare(b.item_no) : 1;
+        if (b.ratio === null) return -1;
+        return b.ratio - a.ratio || a.item_no.localeCompare(b.item_no);
+    });
 const candidateItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)[]): SalesEventCandidateItem[] => items.filter((item): item is SalesEventCandidateItem => !isMeasured(item));
 
 const statusClass = computed(() =>
