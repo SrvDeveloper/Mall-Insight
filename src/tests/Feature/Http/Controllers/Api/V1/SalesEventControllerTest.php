@@ -122,19 +122,21 @@ class SalesEventControllerTest extends TestCase
         $other = $this->postJson('/api/v1/sales-events', ['name' => 'プライム感謝祭', 'malls' => ['amazon']])->assertCreated()->assertJsonPath('data.periods', [])->json('data.id');
         $this->postJson("/api/v1/sales-events/{$other}/periods", ['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08'])->assertCreated()->assertJsonPath('data.status', 'ongoing');
 
-        // 次の期間の早い順。一覧は次の期間と最後の期間だけ倍率を出し（これからは候補、終わったものは測った倍率）、期間の一覧は付けない
+        // イベント名の順（期間の無いイベントも出す）。一覧は次の期間と最後の期間だけ倍率を出し（これからは候補、終わったものは測った倍率）、期間の一覧は付けない
+        $this->postJson('/api/v1/sales-events', ['name' => 'お買い物マラソン', 'malls' => ['rakuten']])->assertCreated();
         $this->getJson('/api/v1/sales-events')
             ->assertOk()
-            ->assertJsonPath('data.*.name', ['プライム感謝祭', '楽天スーパーセール'])
-            ->assertJsonMissingPath('data.1.periods')
-            ->assertJsonPath('data.1.period_count', 2)
-            ->assertJsonPath('data.1.next_period.starts_on', '2026-12-04')
-            ->assertJsonPath('data.1.next_period.multipliers.0.kind', 'candidate')
-            ->assertJsonPath('data.1.last_period.multipliers.0.kind', 'measured')
-            ->assertJsonPath('data.1.last_period.status_label', '終了')
-            ->assertJsonPath('data.1.upcoming_count', 1)
-            ->assertJsonPath('data.1.ended_count', 1)
-            ->assertJsonPath('data.1.last_period.starts_on', '2026-09-04')
+            ->assertJsonPath('data.*.name', ['お買い物マラソン', 'プライム感謝祭', '楽天スーパーセール'])
+            ->assertJsonPath('data.0.next_period', null)
+            ->assertJsonMissingPath('data.2.periods')
+            ->assertJsonPath('data.2.period_count', 2)
+            ->assertJsonPath('data.2.next_period.starts_on', '2026-12-04')
+            ->assertJsonPath('data.2.next_period.multipliers.0.kind', 'candidate')
+            ->assertJsonPath('data.2.last_period.multipliers.0.kind', 'measured')
+            ->assertJsonPath('data.2.last_period.status_label', '終了')
+            ->assertJsonPath('data.2.upcoming_count', 1)
+            ->assertJsonPath('data.2.ended_count', 1)
+            ->assertJsonPath('data.2.last_period.starts_on', '2026-09-04')
             ->assertJsonPath('meta.max_days', 31);
     }
 

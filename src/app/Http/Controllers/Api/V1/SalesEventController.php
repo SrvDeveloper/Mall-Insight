@@ -22,7 +22,7 @@ class SalesEventController extends Controller
     /**
      * イベントの一覧（B-129、K-114・K-120）。イベントごとに、次の期間（開催中かこれから）と最後に終わった期間、期間の数を添える。
      * 倍率（これからの期間は候補、終わった期間は普段の何倍売れたか）は、この2つの期間だけ求める（すべての期間を測ると遅いため。
-     * 期間ごとの倍率はイベントの画面で出す）。次の期間の早い順、無ければ最後の期間の新しい順に並べる。
+     * 期間ごとの倍率はイベントの画面で出す）。イベント名の順に並べる（K-122）。
      */
     public function index(SalesEventReport $report, EventUpliftEstimator $estimator): JsonResponse
     {
@@ -42,18 +42,12 @@ class SalesEventController extends Controller
 
         $rows = $events->map(fn (SalesEvent $event): array => $this->eventData($event, $byEvent->get($event->id, collect()), $overview, $today, withPeriods: false));
 
-        return response()->json([
-            'data' => $rows->sort(function (array $a, array $b): int {
-                // 次の期間のあるイベントを先に、その初日の早い順。無いイベントは、最後の期間の初日の新しい順
-                if (($a['next_period'] === null) !== ($b['next_period'] === null)) {
-                    return $a['next_period'] === null ? 1 : -1;
-                }
-                if ($a['next_period'] !== null) {
-                    return [$a['next_period']['starts_on'], $a['id']] <=> [$b['next_period']['starts_on'], $b['id']];
-                }
+        // イベント名の順（日本語の照合順序。かなは五十音順、漢字は文字コードの順。数字は数の大きさで比べる）
+        $collator = new \Collator('ja_JP');
+        $collator->setAttribute(\Collator::NUMERIC_COLLATION, \Collator::ON);
 
-                return [$b['last_period']['starts_on'] ?? '', $b['id']] <=> [$a['last_period']['starts_on'] ?? '', $a['id']];
-            })->values()->all(),
+        return response()->json([
+            'data' => $rows->sort(fn (array $a, array $b): int => $collator->compare($a['name'], $b['name']) ?: $a['id'] <=> $b['id'])->values()->all(),
             'meta' => $this->meta(),
         ]);
     }
