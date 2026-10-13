@@ -5,6 +5,7 @@ import { ApiError } from "@/api/client";
 import { fetchForecastTimeline } from "@/api/demandForecasts";
 import SalesScopeControls from "@/components/actuals/SalesScopeControls.vue";
 import ForecastItemChart from "@/components/forecast/ForecastItemChart.vue";
+import ForecastTable from "@/components/forecast/ForecastTable.vue";
 import { VARIANCE_THRESHOLDS, columnEvents, timelineItems, timelineLabels, type ForecastMeasure, type ForecastScope } from "@/components/forecast/timelineRows";
 import { formatDateTime } from "@/components/salesTarget/format";
 import type { ForecastTimelineResponse, SalesUnit } from "@/types/api";
@@ -14,7 +15,7 @@ import type { ForecastTimelineResponse, SalesUnit } from "@/types/api";
  * 過去の月・日には、その時点に戻って今の計算方法で予測し直した数を重ね、販売実績との差異を確かめられる（予測精度 B-130 と同じ計算）。
  *
  * - 月ごと（過去12か月・今月・これからの11か月）と日ごと（初期値は過去30日・今日・これからの30日）を切り替える。
- * - 全体・Amazon・BOSS、数量と金額（B-123）、予測し直す起点（その月の初め・3か月前・6か月前）、絞り込みを選べる。選んだものは URL に持たせる。
+ * - 全体・Amazon・BOSS、数量と金額（B-123）、グラフと表、予測し直す起点（その月の初め・3か月前・6か月前）、絞り込みを選べる。選んだものは URL に持たせる。
  * - 差異は、月ごとは30%以上、日ごとは50%以上を強調する。日ごとは欠品した日を差異に数えない。
  * - 予測は保存せず、開くたびに最新の販売実績から計算する（K-035）。予測し直した数は、使ったデータが変わらない間はキャッシュから使う。
  */
@@ -32,6 +33,7 @@ const offset = computed<number>(() => (route.query.offset === "3" ? 3 : route.qu
 const filter = computed<ForecastFilter>(() => (route.query.filter === "large" || route.query.filter === "unpredictable" ? route.query.filter : "all"));
 const period = computed<Period>(() => (unit.value === "day" && typeof route.query.from === "string" && typeof route.query.to === "string" ? { from: route.query.from, to: route.query.to } : null));
 const selectedItemNo = computed(() => (typeof route.query.item === "string" ? route.query.item : null));
+const view = computed<"graph" | "table">(() => (route.query.view === "table" ? "table" : "graph"));
 
 function updateQuery(changes: Record<string, string | undefined>): void {
     void router.replace({ query: { ...route.query, ...changes } });
@@ -220,6 +222,23 @@ const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-ston
                             {{ option.label }}
                         </button>
                     </div>
+                    <div class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-0.75" role="group" aria-label="見せ方">
+                        <button
+                            v-for="option in [
+                                { value: 'graph' as const, label: 'グラフ' },
+                                { value: 'table' as const, label: '表' },
+                            ]"
+                            :key="option.value"
+                            type="button"
+                            class="inline-flex h-8 items-center rounded-[7px] px-3 text-[13px]"
+                            :class="segmentClass(view === option.value)"
+                            :aria-pressed="view === option.value"
+                            :data-testid="`view-${option.value}`"
+                            @click="updateQuery({ view: option.value === 'graph' ? undefined : option.value })"
+                        >
+                            {{ option.label }}
+                        </button>
+                    </div>
                     <div class="inline-flex flex-wrap gap-1.5" role="group" aria-label="絞り込み">
                         <button
                             v-for="option in FILTERS"
@@ -333,6 +352,17 @@ const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-ston
             <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500" data-testid="empty">
                 {{ allItems.length === 0 ? "対象品番がありません。" : "条件に一致する品番はありません。" }}
             </div>
+            <ForecastTable
+                v-else-if="view === 'table'"
+                :class="isLoading ? 'opacity-60' : ''"
+                :items="visibleItems"
+                :columns="result.meta.columns"
+                :labels="labels"
+                :events="events"
+                :unit="result.meta.unit"
+                :measure="measure"
+                :threshold="threshold"
+            />
             <ForecastItemChart
                 v-else
                 :class="isLoading ? 'opacity-60' : ''"

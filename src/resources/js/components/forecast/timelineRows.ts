@@ -152,6 +152,8 @@ export interface TimelineItem {
     /** 予測できないSKUの数 */
     unpredictableCount: number;
     figures: TimelineFigures;
+    /** SKUごとの値（表のSKUの行、SKU別の画面） */
+    skus: { sku: ForecastTimelineSku; figures: TimelineFigures }[];
 }
 
 export function timelineItems(response: ForecastTimelineResponse, scope: ForecastScope, measure: ForecastMeasure): TimelineItem[] {
@@ -163,6 +165,7 @@ export function timelineItems(response: ForecastTimelineResponse, scope: Forecas
         skuCount: item.skus.length,
         unpredictableCount: item.skus.filter((sku) => sku.unpredictable_reason_label !== null).length,
         figures: timelineFigures(item.skus, columns, scope, measure, unit),
+        skus: item.skus.map((sku) => ({ sku, figures: timelineFigures([sku], columns, scope, measure, unit) })),
     }));
 }
 

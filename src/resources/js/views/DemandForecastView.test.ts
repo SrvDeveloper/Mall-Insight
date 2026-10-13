@@ -103,6 +103,33 @@ describe("DemandForecastView", () => {
         wrapper.unmount();
     });
 
+    it("shows the table with the actual sales above and the forecast made again with its variance below, and opens the SKU rows", async () => {
+        const { wrapper, router } = await mountView();
+
+        await wrapper.find('[data-testid="view-table"]').trigger("click");
+        await flushPromises();
+        expect(router.currentRoute.value.query.view).toBe("table");
+        const rows = wrapper.findAll('[data-testid="table-item-row"]');
+        expect(rows.map((row) => row.find(".font-mono").text())).toEqual(["fl-01", "si-13"]);
+        // 過去6か月・今月・これからの11か月
+        expect(rows[0]!.findAll('[data-testid="table-cell"]')).toHaveLength(18);
+        expect(rows[0]!.findAll('[data-testid="table-cell"]')[0]!.text()).toBe("150155（+3%）");
+        expect(rows[0]!.findAll('[data-testid="table-cell"]')[6]!.text()).toContain("180");
+        expect(rows[0]!.find('[data-testid="table-total"]').text()).toBe("2,160");
+        expect(rows[1]!.findAll('[data-testid="table-cell"]')[0]!.classes()).toContain("bg-amber-50");
+        expect(rows[1]!.find('[data-testid="table-wape"]').classes()).toContain("text-amber-700");
+
+        await wrapper.find('[data-testid="past-12"]').trigger("click");
+        expect(wrapper.findAll('[data-testid="table-item-row"]')[0]!.findAll('[data-testid="table-cell"]')).toHaveLength(24);
+
+        expect(wrapper.findAll('[data-testid="table-sku-row"]')).toHaveLength(0);
+        await wrapper.find('[data-testid="toggle-si-13"]').trigger("click");
+        const skuRows = wrapper.findAll('[data-testid="table-sku-row"]');
+        expect(skuRows).toHaveLength(2);
+        expect(skuRows[1]!.text()).toContain("予測不能：販売日数が足りない");
+        wrapper.unmount();
+    });
+
     it("shows why a period was not accepted and asks to confirm the target items first", async () => {
         vi.mocked(fetchForecastTimeline).mockImplementation(async (query) => {
             if (query.period) {
