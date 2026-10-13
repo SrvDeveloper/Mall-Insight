@@ -4,13 +4,15 @@ import { fetchStoreRanking } from "@/api/actuals";
 import { STORE_COLORS, type ActualMeasure } from "@/components/actuals/actualRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
 import { formatYen } from "@/components/salesTarget/format";
-import type { SalesUnit, StoreRankingResponse, StoreSales, StoreSalesProducts } from "@/types/api";
+import type { RankingStockout, SalesUnit, StoreRankingResponse, StoreSales, StoreSalesProducts } from "@/types/api";
 
 /**
  * 店舗売上の月・日の欄を押したときに、表の下に出す売上上位の品番とSKU（各10件、K-091・K-092）。店舗の行の欄ならその店舗、合計の行なら全店舗。
  * 金額と販売数のどちらの多い順かを切り替えられる（初めは店舗売上で見ている方）。各行に、その店舗・期間の全体に対する割合を棒と数字で出す。
  * CrossWalkerに未登録のSKUは、SKUの順位には入れ、品番の順位には入れずに件数と合計を添える。別の欄を押すと読み込み直し、読み込むまでは
  * 前の一覧を薄くして残す（表の高さが変わらないように）。開いたときは一覧が見えるところまで画面を動かす。×で閉じる。
+ * 各行に、前月（日ごとは前日）の順位からの変動と、店舗のチャネル（全店舗なら BOSS と Amazon）の欠品日数を出す。品番の欠品日数は、
+ * 欠品したSKUの欠品日数の合計（K-095）。
  */
 
 const props = defineProps<{
@@ -81,6 +83,54 @@ const formatShare = (value: number): string => `${(value * 100).toFixed(1)}%`;
 const color = computed(() => (props.target?.mall ? STORE_COLORS[props.target.mall] : "#57534e"));
 /** 売れ方が分かるよう、金額順なら販売数、販売数順なら金額を小さく添える。 */
 const subOf = (row: { quantity: number; amount: number }): string => (order.value === "amount" ? `${formatQuantity(row.quantity)}個` : formatYen(row.amount));
+
+const previousLabel = computed(() => (props.unit === "day" ? "前日" : "前月"));
+
+/** 前の期間の順位からの変動。前の期間の販売実績が無ければ出さない。 */
+function rankChange(row: { rank: number; previous_rank: number | null }): { text: string; tone: "up" | "down" | "same" | "new"; title: string } | null {
+    if (!result.value?.meta.previous.available) {
+        return null;
+    }
+    if (row.previous_rank === null) {
+        return { text: "新", tone: "new", title: `${previousLabel.value}は売れていません` };
+    }
+    const diff = row.previous_rank - row.rank;
+    const title = `${previousLabel.value}は${row.previous_rank}位`;
+    return diff > 0 ? { text: `▲${diff}`, tone: "up", title } : diff < 0 ? { text: `▼${-diff}`, tone: "down", title } : { text: "→", tone: "same", title };
+}
+
+const CHANGE_CLASSES = { up: "text-emerald-700", down: "text-amber-700", same: "text-stone-400", new: "rounded bg-sky-50 px-1 text-sky-700 ring-1 ring-sky-200" } as const;
+
+/**
+ * 欠品日数の札。月ごとは「4日」（品番は欠品したSKUの数も）、日ごとはその日に欠品したか（品番は欠品したSKUの数）。在庫の記録の無いときは「—」、
+ * 月の途中から記録があるときは確かめられた日数を添える（K-084）。
+ */
+function stockoutBadge(stockout: (RankingStockout & { skus?: number }) | undefined, label: string | null): { text: string; isOut: boolean; title: string } {
+    const prefix = label === null ? "欠品" : `欠品 ${label}`;
+    if (!stockout || stockout.days === null) {
+        return { text: `${prefix} —`, isOut: false, title: "在庫の記録が無いため、欠品を判定できません" };
+    }
+    const isItem = stockout.skus !== undefined;
+    const partial = stockout.known_days < stockout.period_days ? `（確認${stockout.known_days}/${stockout.period_days}日）` : "";
+    const value =
+        props.unit === "day"
+            ? isItem
+                ? stockout.skus! > 0
+                    ? `${stockout.skus} SKU`
+                    : "なし"
+                : stockout.days > 0
+                  ? "あり"
+                  : "なし"
+            : `${stockout.days}日${isItem && stockout.skus! > 0 ? `・${stockout.skus} SKU` : ""}${partial}`;
+    const title = isItem ? "欠品したSKUの欠品日数の合計と、欠品したSKUの数" : "そのチャネルの在庫の区分の合計が0以下だった日数";
+    return { text: `${prefix} ${value}`, isOut: stockout.days > 0, title };
+}
+
+/** 行の欠品の札（店舗ならそのチャネル、全店舗なら BOSS と Amazon）。 */
+function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", RankingStockout & { skus?: number }>> }) {
+    const channels = result.value?.meta.stockout_channels ?? [];
+    return channels.map((channel) => ({ key: channel.channel, ...stockoutBadge(row.stockouts[channel.channel], channels.length > 1 ? channel.label : null) }));
+}
 </script>
 
 <template>
@@ -136,8 +186,13 @@ const subOf = (row: { quantity: number; amount: number }): string => (order.valu
             <section class="flex min-w-0 flex-col border-stone-200 max-md:border-b md:border-r" aria-labelledby="ranking-items">
                 <h3 id="ranking-items" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">品番 上位{{ result.data.items.length }}</h3>
                 <ol class="flex flex-col pb-2" data-testid="ranking-items">
-                    <li v-for="(row, index) in result.data.items" :key="row.item_no" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-item">
-                        <span class="w-5 shrink-0 text-right text-[11px] text-stone-400 tabular-nums">{{ index + 1 }}</span>
+                    <li v-for="row in result.data.items" :key="row.item_no" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-item">
+                        <span class="flex w-7 shrink-0 flex-col items-end leading-tight tabular-nums">
+                            <span class="text-[12px] text-stone-500">{{ row.rank }}</span>
+                            <span v-if="rankChange(row)" class="text-[10px] font-medium" :class="CHANGE_CLASSES[rankChange(row)!.tone]" :title="rankChange(row)!.title" data-testid="rank-change">{{
+                                rankChange(row)!.text
+                            }}</span>
+                        </span>
                         <span class="flex min-w-0 flex-1 flex-col gap-1">
                             <span class="flex min-w-0 items-center gap-1.5">
                                 <span class="shrink-0 font-mono text-sm font-medium text-stone-900">{{ row.item_no }}</span>
@@ -145,6 +200,17 @@ const subOf = (row: { quantity: number; amount: number }): string => (order.valu
                                 <span class="shrink-0 text-[11px] text-stone-400 tabular-nums">{{ row.sku_count }} SKU</span>
                             </span>
                             <span class="h-1 w-full rounded-full bg-stone-100"><span class="block h-full rounded-full" :style="{ width: `${share(row) * 100}%`, backgroundColor: color }" /></span>
+                            <span class="flex flex-wrap gap-1">
+                                <span
+                                    v-for="badge in stockoutBadges(row)"
+                                    :key="badge.key"
+                                    class="rounded px-1.5 py-px text-[10.5px] tabular-nums"
+                                    :class="badge.isOut ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-stone-50 text-stone-500'"
+                                    :title="badge.title"
+                                    data-testid="stockout-badge"
+                                    >{{ badge.text }}</span
+                                >
+                            </span>
                         </span>
                         <span class="flex shrink-0 flex-col items-end tabular-nums">
                             <span class="text-sm text-stone-900">{{ format(valueOf(row)) }}</span>
@@ -162,14 +228,30 @@ const subOf = (row: { quantity: number; amount: number }): string => (order.valu
             <section class="flex min-w-0 flex-col" aria-labelledby="ranking-skus">
                 <h3 id="ranking-skus" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">SKU 上位{{ result.data.skus.length }}</h3>
                 <ol class="flex flex-col pb-2" data-testid="ranking-skus">
-                    <li v-for="(row, index) in result.data.skus" :key="row.sku_id" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-sku">
-                        <span class="w-5 shrink-0 text-right text-[11px] text-stone-400 tabular-nums">{{ index + 1 }}</span>
+                    <li v-for="row in result.data.skus" :key="row.sku_id" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-sku">
+                        <span class="flex w-7 shrink-0 flex-col items-end leading-tight tabular-nums">
+                            <span class="text-[12px] text-stone-500">{{ row.rank }}</span>
+                            <span v-if="rankChange(row)" class="text-[10px] font-medium" :class="CHANGE_CLASSES[rankChange(row)!.tone]" :title="rankChange(row)!.title" data-testid="rank-change">{{
+                                rankChange(row)!.text
+                            }}</span>
+                        </span>
                         <span class="flex min-w-0 flex-1 flex-col gap-1">
                             <span class="flex min-w-0 items-center gap-1.5">
                                 <span class="truncate font-mono text-sm text-stone-900" :title="row.sku_code">{{ row.sku_code }}</span>
                                 <span v-if="row.item_no === null" class="shrink-0 rounded-full bg-amber-50 px-1.5 py-px text-[10px] text-amber-800 ring-1 ring-amber-200">未登録</span>
                             </span>
                             <span class="h-1 w-full rounded-full bg-stone-100"><span class="block h-full rounded-full" :style="{ width: `${share(row) * 100}%`, backgroundColor: color }" /></span>
+                            <span class="flex flex-wrap gap-1">
+                                <span
+                                    v-for="badge in stockoutBadges(row)"
+                                    :key="badge.key"
+                                    class="rounded px-1.5 py-px text-[10.5px] tabular-nums"
+                                    :class="badge.isOut ? 'bg-red-50 text-red-700 ring-1 ring-red-200' : 'bg-stone-50 text-stone-500'"
+                                    :title="badge.title"
+                                    data-testid="stockout-badge"
+                                    >{{ badge.text }}</span
+                                >
+                            </span>
                         </span>
                         <span class="flex shrink-0 flex-col items-end tabular-nums">
                             <span class="text-sm text-stone-900">{{ format(valueOf(row)) }}</span>
@@ -179,6 +261,20 @@ const subOf = (row: { quantity: number; amount: number }): string => (order.valu
                 </ol>
             </section>
         </div>
-        <p class="border-t border-stone-200 px-5 py-2.5 text-[11px] text-stone-500">割合は、この店舗・期間の合計（{{ order === "amount" ? "金額" : "販売数" }}）に対する割合です。</p>
+        <div class="flex flex-col gap-0.5 border-t border-stone-200 px-5 py-2.5 text-[11px] text-stone-500" data-testid="ranking-notes">
+            <p>割合は、この店舗・期間の合計（{{ order === "amount" ? "金額" : "販売数" }}）に対する割合です。</p>
+            <p v-if="result?.meta.previous.available">
+                順位の変動は{{ previousLabel }}（{{ result.meta.previous.from.replaceAll("-", "/")
+                }}{{ result.meta.previous.from === result.meta.previous.to ? "" : `〜${result.meta.previous.to.replaceAll("-", "/")}` }}）の順位との比較です（▲上がった・▼下がった・新：{{
+                    previousLabel
+                }}は売れていない）。
+            </p>
+            <p v-else-if="result" data-testid="ranking-no-previous">{{ previousLabel }}の販売実績を取り込んでいないため、順位の変動は出していません。</p>
+            <p>
+                欠品日数は、{{
+                    target.mall === null ? "BOSS・Amazonそれぞれ" : "この店舗のチャネル"
+                }}の在庫の区分の合計が0以下だった日数です（在庫を取得していない日は直前の状態を引き継ぎます）。品番は、欠品したSKUの欠品日数の合計です。
+            </p>
+        </div>
     </section>
 </template>

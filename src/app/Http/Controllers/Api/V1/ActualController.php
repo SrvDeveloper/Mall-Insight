@@ -154,7 +154,7 @@ class ActualController extends Controller
     /**
      * 店舗売上の月・日の欄の、売上上位の品番とSKU（各10件、K-091）。period は月ごとなら YYYY-MM、日ごとなら YYYY-MM-DD（今月・今日まで）。
      * mall を指定するとその店舗だけ、無ければ全店舗。products は店舗売上と同じ。order（amount（初期値）か quantity）の多い順。
-     * CrossWalkerに未登録のSKUは、品番の順位に入れず unregistered にまとめる。
+     * CrossWalkerに未登録のSKUは、品番の順位に入れず unregistered にまとめる。各行に、前の期間の順位（previous_rank）とチャネルごとの欠品日数（stockouts）を添える（K-095）。
      */
     public function storeRanking(Request $request, ActualsReader $reader, StoreSalesReader $stores): JsonResponse
     {
@@ -190,6 +190,10 @@ class ActualController extends Controller
                 'products' => $isTarget ? 'target' : 'all',
                 'order' => $order,
                 'total' => $ranking['total'],
+                // 順位の変動を比べる前の期間（前月・前日）。販売実績を取り込んでいなければ available は false
+                'previous' => ['from' => $ranking['previous']['start']->toDateString(), 'to' => $ranking['previous']['end']->toDateString(), 'available' => $ranking['previous']['available']],
+                // 欠品日数を数えるチャネル（店舗のチャネル。全店舗なら BOSS と Amazon）
+                'stockout_channels' => array_map(fn (Channel $channel): array => ['channel' => $channel->value, 'label' => $channel->label()], $ranking['channels']),
             ],
         ]);
     }

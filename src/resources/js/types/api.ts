@@ -640,8 +640,8 @@ export interface StoreSalesResponse {
 /** 店舗売上の月・日の欄の、売上上位の品番とSKU（各10件、K-091）。CrossWalkerに未登録のSKUは品番の順位に入れず unregistered にまとめる。 */
 export interface StoreRankingResponse {
     data: {
-        items: { item_no: string; brand: string; category: string; sku_count: number; quantity: number; amount: number }[];
-        skus: { sku_id: number; sku_code: string; item_no: string | null; quantity: number; amount: number }[];
+        items: (StoreRankingRow & { item_no: string; brand: string; category: string; sku_count: number; stockouts: Partial<Record<"boss" | "amazon", RankingStockout & { skus: number }>> })[];
+        skus: (StoreRankingRow & { sku_id: number; sku_code: string; item_no: string | null })[];
         unregistered: { sku_count: number; quantity: number; amount: number };
     };
     meta: {
@@ -655,7 +655,27 @@ export interface StoreRankingResponse {
         products: StoreSalesProducts;
         order: "amount" | "quantity";
         total: { quantity: number; amount: number };
+        /** 順位の変動を比べる前の期間（前月・前日）。販売実績を取り込んでいなければ available は false */
+        previous: { from: string; to: string; available: boolean };
+        /** 欠品日数を数えるチャネル（店舗のチャネル。全店舗なら BOSS と Amazon） */
+        stockout_channels: { channel: "boss" | "amazon"; label: string }[];
     };
+}
+
+/** 売上上位の行（K-091・K-095）。previous_rank は前の期間の順位（前の期間に売れていなければ null）。 */
+interface StoreRankingRow {
+    quantity: number;
+    amount: number;
+    rank: number;
+    previous_rank: number | null;
+    stockouts: Partial<Record<"boss" | "amazon", RankingStockout>>;
+}
+
+/** 期間の欠品日数（K-037・K-038）。在庫の記録が無ければ days は null。品番はSKUの欠品日数の合計で、skus は欠品したSKUの数。 */
+export interface RankingStockout {
+    days: number | null;
+    known_days: number;
+    period_days: number;
 }
 
 /** 日ごとの在庫数（直近31日）。在庫を取得していない日は、販売実績から推定した在庫を SKU の estimates に持つ（K-087）。 */
