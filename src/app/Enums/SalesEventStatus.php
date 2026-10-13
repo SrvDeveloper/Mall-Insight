@@ -3,7 +3,7 @@
 namespace App\Enums;
 
 /**
- * イベント（B-129）の、今日から見た状態。始まる前と開催中のイベントは倍率で需要予測を増やし、終わったイベントは倍率を測るのに使う（K-112）。
+ * イベント（B-129）の、今日から見た状態。始まる前と開催中のイベントは倍率で需要予測を増やし、終了したイベントは倍率を測るのに使う（K-112）。
  */
 enum SalesEventStatus: string
 {
@@ -16,7 +16,7 @@ enum SalesEventStatus: string
         return match ($this) {
             self::Upcoming => 'これから',
             self::Ongoing => '開催中',
-            self::Ended => '終わった',
+            self::Ended => '終了',
         };
     }
 }

@@ -29,7 +29,7 @@ vi.mock("@/api/salesEvents", () => ({
 }));
 
 const meta = { recent_events: 3, min_expected: 10, max_days: 31 };
-const STATUS_LABELS: Record<SalesEventStatus, string> = { upcoming: "これから", ongoing: "開催中", ended: "終わった" };
+const STATUS_LABELS: Record<SalesEventStatus, string> = { upcoming: "これから", ongoing: "開催中", ended: "終了" };
 
 function period(id: number, startsOn: string, endsOn: string, status: SalesEventStatus, multiplier: number | null = 4.67): SalesEventPeriodSummary {
     return {
@@ -160,7 +160,7 @@ describe("SalesEventView", () => {
         expect(rows).toHaveLength(2);
         expect(rows[0]!.find('[data-testid="row-period"]').text()).toContain("2026/12/4〜12/7");
         expect(rows[0]!.find('[data-testid="row-multiplier"]').text()).toContain("4.67倍");
-        expect(rows[0]!.find('[data-testid="row-counts"]').text()).toBe("3件（これから 1・終わった 2）");
+        expect(rows[0]!.find('[data-testid="row-counts"]').text()).toBe("3件（予定 1・終了 2）");
 
         // 次の期間が無いイベントは、最後の期間と実績の倍率を出す
         expect(rows[1]!.find('[data-testid="row-period"]').text()).toContain("2026/1/9〜1/16");
@@ -181,7 +181,13 @@ describe("SalesEventView", () => {
         const section = wrapper.find('[data-testid="event-periods"]');
         expect(section.find("h2").text()).toBe("楽天スーパーセール");
         expect(section.findAll('[data-testid="period-row"]')).toHaveLength(3);
+        expect(section.findAll('[data-testid="period-row"]')[0]!.text()).toContain("終了");
+        expect(wrapper.find('[data-testid="event-workspace"]').classes()).toContain("xl:grid-cols-12");
+        expect(wrapper.find('[data-testid="period-detail-placeholder"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(false);
 
+        await wrapper.find('[data-testid="open-period-add"]').trigger("click");
+        expect(wrapper.find('[role="dialog"]').attributes("aria-modal")).toBe("true");
         await wrapper.find('[data-testid="add-starts-on"]').setValue("2027-03-04");
         await wrapper.find('[data-testid="add-ends-on"]').setValue("2027-03-11");
         expect(wrapper.find('[data-testid="add-days"]').text()).toBe("8日間");
@@ -190,6 +196,11 @@ describe("SalesEventView", () => {
         expect(createSalesEventPeriod).toHaveBeenCalledWith(1, { starts_on: "2027-03-04", ends_on: "2027-03-11", note: null });
         expect(wrapper.find('[data-testid="message"]').text()).toContain("楽天スーパーセールに 2027/3/4〜3/11 の期間を追加しました。");
         expect(fetchSalesEvents).toHaveBeenCalledTimes(2);
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(false);
+
+        await wrapper.find('[data-testid="open-period-add"]').trigger("click");
+        await wrapper.find('[data-testid="period-add-close"]').trigger("click");
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(false);
 
         await wrapper.findAll('[data-testid="period-edit"]')[2]!.trigger("click");
         await wrapper.find('[data-testid="edit-starts-on"]').setValue("2026-09-05");
@@ -200,6 +211,25 @@ describe("SalesEventView", () => {
         wrapper.unmount();
     });
 
+    it("keeps the period dialog open for validation errors and closes it with Escape", async () => {
+        vi.mocked(createSalesEventPeriod).mockRejectedValue(new ApiError("入力内容を確認してください。", 422, { starts_on: ["別の期間と重なっています。"] }));
+        const { wrapper } = await mountView("/sales-events?event=1");
+
+        await wrapper.find('[data-testid="open-period-add"]').trigger("click");
+        await wrapper.find('[data-testid="add-starts-on"]').setValue("2026-09-04");
+        await wrapper.find('[data-testid="add-ends-on"]').setValue("2026-09-11");
+        await wrapper.find('[data-testid="period-add"]').trigger("submit");
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="add-error"]').text()).toBe("別の期間と重なっています。");
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        await flushPromises();
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
     it("opens the multipliers of an upcoming period and saves the ones entered for that period", async () => {
         vi.mocked(saveSalesEventPeriodMultipliers).mockResolvedValue(periodDetail(3.5));
         const { wrapper, router } = await mountView("/sales-events?event=1");
@@ -207,6 +237,8 @@ describe("SalesEventView", () => {
         await wrapper.findAll('[data-testid="period-row"]')[2]!.trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query).toEqual({ event: "1", period: "13" });
+        expect(wrapper.find('[data-testid="event-workspace"]').classes()).toContain("xl:grid-cols-12");
+        expect(wrapper.find('[data-testid="period-detail-column"] [data-testid="event-detail"]').exists()).toBe(true);
         expect(fetchSalesEventPeriod).toHaveBeenCalledWith(13);
         const detail = wrapper.find('[data-testid="event-detail"]');
         expect(detail.find('[data-testid="candidate-summary"]').text()).toContain("このイベントの過去の期間 2回");
@@ -217,6 +249,12 @@ describe("SalesEventView", () => {
         await flushPromises();
         expect(saveSalesEventPeriodMultipliers).toHaveBeenCalledWith(13, [{ item_no: "fl-01", channel: "boss", multiplier: 3.5 }]);
         expect(wrapper.find('[data-testid="saved-note"]').text()).toContain("1品番の倍率を保存しました。");
+
+        await detail.find('[data-testid="detail-close"]').trigger("click");
+        await flushPromises();
+        expect(router.currentRoute.value.query).toEqual({ event: "1" });
+        expect(wrapper.find('[data-testid="event-workspace"]').classes()).toContain("xl:grid-cols-12");
+        expect(wrapper.find('[data-testid="period-detail-placeholder"]').exists()).toBe(true);
 
         // イベントを閉じると期間の倍率も閉じる
         await wrapper.find('[data-testid="periods-close"]').trigger("click");

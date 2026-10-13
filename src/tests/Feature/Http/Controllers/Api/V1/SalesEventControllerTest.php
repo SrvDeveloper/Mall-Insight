@@ -127,6 +127,7 @@ class SalesEventControllerTest extends TestCase
             ->assertJsonPath('data.*.name', ['プライム感謝祭', '楽天スーパーセール'])
             ->assertJsonPath('data.1.periods.*.starts_on', ['2026-09-04', '2026-12-04'])
             ->assertJsonPath('data.1.periods.0.multipliers.0.kind', 'measured')
+            ->assertJsonPath('data.1.periods.0.status_label', '終了')
             ->assertJsonPath('data.1.periods.1.multipliers.0.kind', 'candidate')
             ->assertJsonPath('data.1.upcoming_count', 1)
             ->assertJsonPath('data.1.ended_count', 1)
@@ -246,7 +247,7 @@ class SalesEventControllerTest extends TestCase
 
         $this->putJson("/api/v1/sales-event-periods/{$ended->id}/multipliers", ['multipliers' => []])
             ->assertUnprocessable()
-            ->assertJsonPath('errors.multipliers.0', '終わった期間の倍率は、需要予測に使わないため変えられません。');
+            ->assertJsonPath('errors.multipliers.0', '終了した期間の倍率は、需要予測に使わないため変えられません。');
 
         // 販売実績を取り込んでいないチャネルでは測らない
         $amazon = $this->period('2026-07-07', '2026-07-10', SalesEvent::factory()->create(['name' => 'プライムデー', 'malls' => [Mall::Amazon]]));

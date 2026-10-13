@@ -11,7 +11,7 @@ use Illuminate\Validation\Validator;
 
 /**
  * イベントの期間の品番ごとの倍率を、担当者が入れる（B-129、K-112・K-114）。送った内容でまるごと置き換え、送らなかった品番はシステムの候補に戻す。
- * 終わった期間の倍率は需要予測に使わないため、入れられない。チャネルはイベントのモールのチャネルだけ。
+ * 終了した期間の倍率は需要予測に使わないため、入れられない。チャネルはイベントのモールのチャネルだけ。
  */
 class SaveSalesEventMultipliersRequest extends FormRequest
 {
@@ -54,7 +54,7 @@ class SaveSalesEventMultipliersRequest extends FormRequest
                 /** @var SalesEventPeriod $event */
                 $event = $this->route('salesEventPeriod');
                 if ($event->hasEndedBefore(today()->toImmutable())) {
-                    $validator->errors()->add('multipliers', '終わった期間の倍率は、需要予測に使わないため変えられません。');
+                    $validator->errors()->add('multipliers', '終了した期間の倍率は、需要予測に使わないため変えられません。');
 
                     return;
                 }

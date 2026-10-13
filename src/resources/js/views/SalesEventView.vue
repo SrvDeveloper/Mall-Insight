@@ -14,8 +14,8 @@ import type { SalesEvent, SalesEventListResponse, SalesEventPeriodDetailResponse
  * これからの期間の日は、品番ごとの倍率で需要予測と在庫予測を増やす。倍率は、同じイベントの過去の期間で普段の何倍売れたかから
  * システムが候補を出し、担当者が期間ごとに直せる。
  *
- * - 一覧はイベントごと。次の期間（開催中かこれから）と最後に終わった期間、期間の数を出す。次の期間のあるイベントを先に、その初日の早い順に並べる。
- * - イベントを押すと、一覧の下にその期間を出し、期間を追加・編集・削除できる。期間を押すと、さらにその下に品番ごとの倍率を出す。
+ * - 一覧はイベントごと。次の期間（開催中かこれから）と最後に終了した期間、期間の数を出す。次の期間のあるイベントを先に、その初日の早い順に並べる。
+ * - イベントを押すと、その期間を出し、期間を追加・編集・削除できる。期間を押すと、横に品番ごとの倍率を出す。
  *   選んだイベントと期間は URL に持たせる。
  */
 
@@ -187,7 +187,7 @@ const statusClass = (period: SalesEventPeriodSummary): string =>
           ? "bg-sky-50 text-sky-800 ring-sky-200"
           : "bg-stone-100 text-stone-600 ring-stone-200";
 
-/** 一覧の倍率に出す期間（次の期間、無ければ最後に終わった期間）。 */
+/** 一覧の倍率に出す期間（次の期間、無ければ最後に終了した期間）。 */
 const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | null => event.next_period ?? event.last_period;
 </script>
 
@@ -244,7 +244,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
             </div>
 
             <div v-else class="overflow-x-auto" :class="isLoading ? 'opacity-60' : ''">
-                <table class="w-full min-w-[60rem] border-separate border-spacing-0 text-left text-[13px]">
+                <table class="w-full min-w-240 border-separate border-spacing-0 text-left text-[13px]">
                     <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-300 [&_th]:bg-white">
                         <tr>
                             <th scope="col" class="px-4 py-2.5">名前</th>
@@ -259,7 +259,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                         <tr
                             v-for="event in events"
                             :key="event.id"
-                            class="cursor-pointer [&>*]:border-t [&>*]:border-stone-100"
+                            class="cursor-pointer *:border-t *:border-stone-100"
                             :class="selectedEventId === event.id ? 'bg-stone-100' : 'hover:bg-stone-50'"
                             :aria-selected="selectedEventId === event.id"
                             data-testid="event-row"
@@ -286,9 +286,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                             <td class="px-3 py-3 align-top whitespace-nowrap tabular-nums" data-testid="row-period">
                                 <template v-if="shownPeriod(event)">
                                     {{ periodLabel(shownPeriod(event)!.starts_on, shownPeriod(event)!.ends_on) }}
-                                    <span class="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="statusClass(shownPeriod(event)!)">{{
-                                        shownPeriod(event)!.status === "ended" ? "終了" : shownPeriod(event)!.status_label
-                                    }}</span>
+                                    <span class="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="statusClass(shownPeriod(event)!)">{{ shownPeriod(event)!.status_label }}</span>
                                 </template>
                                 <span v-else class="text-xs text-amber-700">期間がありません</span>
                             </td>
@@ -309,7 +307,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                                 </span>
                             </td>
                             <td class="px-3 py-3 align-top text-xs whitespace-nowrap text-stone-600 tabular-nums" data-testid="row-counts">
-                                {{ event.periods.length }}件<span class="ml-1 text-stone-400">（これから {{ event.upcoming_count }}・終わった {{ event.ended_count }}）</span>
+                                {{ event.periods.length }}件<span class="ml-1 text-stone-400">（予定 {{ event.upcoming_count }}・終了 {{ event.ended_count }}）</span>
                             </td>
                             <td class="px-3 py-2 text-right align-top whitespace-nowrap" @click.stop>
                                 <button
@@ -328,30 +326,40 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
             </div>
         </section>
 
-        <div ref="periodsSection">
-            <SalesEventPeriods
-                v-if="selectedEvent"
-                :event="selectedEvent"
-                :selected-period-id="selectedPeriodId"
-                :max-days="maxDays"
-                @select="selectPeriod"
-                @changed="onPeriodsChanged"
-                @edit-event="openForm(selectedEvent)"
-                @close="closeEvent"
-            />
-        </div>
+        <div v-if="selectedEvent" class="grid items-stretch gap-5 xl:h-[min(72vh,48rem)] xl:min-h-[28rem] xl:grid-cols-12" data-testid="event-workspace">
+            <div ref="periodsSection" class="min-h-0 min-w-0 xl:col-span-5">
+                <SalesEventPeriods
+                    :event="selectedEvent"
+                    :selected-period-id="selectedPeriodId"
+                    :max-days="maxDays"
+                    @select="selectPeriod"
+                    @changed="onPeriodsChanged"
+                    @edit-event="openForm(selectedEvent)"
+                    @close="closeEvent"
+                />
+            </div>
 
-        <div ref="periodSection">
-            <template v-if="selectedEvent && selectedPeriodId !== null">
-                <div v-if="periodError" class="flex flex-col items-center gap-3 rounded-xl border border-stone-200 bg-white px-6 py-10 text-center">
+            <div ref="periodSection" class="min-h-0 min-w-0 xl:col-span-7" data-testid="period-detail-column">
+                <div
+                    v-if="selectedPeriodId === null"
+                    class="flex h-full min-h-48 flex-col items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-6 py-10 text-center"
+                    data-testid="period-detail-placeholder"
+                >
+                    <p class="text-sm font-semibold text-stone-900">期間を選んでください</p>
+                    <p class="text-xs text-stone-500">左の期間を押すと、倍率とその根拠をここに表示します。</p>
+                </div>
+                <div v-else-if="periodError" class="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-stone-200 bg-white px-6 py-10 text-center">
                     <p class="text-sm text-stone-600">倍率を表示できませんでした。</p>
                     <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="loadPeriod">再読み込み</button>
                 </div>
-                <div v-else-if="!periodDetail || periodDetail.data.id !== selectedPeriodId" class="rounded-xl border border-stone-200 bg-white px-6 py-10 text-center text-sm text-stone-500">
+                <div
+                    v-else-if="!periodDetail || periodDetail.data.id !== selectedPeriodId"
+                    class="flex h-full min-h-48 items-center justify-center rounded-xl border border-stone-200 bg-white px-6 py-10 text-center text-sm text-stone-500"
+                >
                     読み込み中…
                 </div>
                 <SalesEventPeriodDetail v-else :key="periodDetail.data.id" :detail="periodDetail" :is-loading="isPeriodLoading" @saved="onPeriodSaved" @close="closePeriod" />
-            </template>
+            </div>
         </div>
 
         <div v-if="editing" class="fixed inset-0 z-50 flex items-start justify-center bg-stone-900/40 p-4 sm:p-10" @click.self="closeForm">
