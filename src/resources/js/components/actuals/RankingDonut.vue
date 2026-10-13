@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { arcPath, type DonutSegment } from "@/components/actuals/rankingDonut";
+import { computed, ref, useId } from "vue";
+import { arcPath, swatchStyle, type DonutSegment } from "@/components/actuals/rankingDonut";
 
 /**
- * 売上上位の円グラフ（ドーナツ、K-097）。上位の品番・その他の品番・未登録のSKUの割合を、12時の位置から時計回りに順位の順（まとめた区分は最後）で描く。
- * 区分の間は2pxの白い隙間で分ける。区分にマウスを乗せる（フォーカスする）と、中央にその区分の名前・値・割合を出し、乗せていないときは合計を出す。
- * 凡例は右に置き、名前と割合を並べる（色だけで見分けさせない）。
+ * 売上上位の円グラフ（ドーナツ、K-097・K-098）。上位10品番・その他の品番・未登録のSKUの割合を、12時の位置から時計回りに順位の順（まとめた区分は最後）で描く。
+ * 区分の間は2pxの白い隙間で分け、8～10位は同じ色の濃い斜線を重ねる。区分にマウスを乗せる（フォーカスする）と、中央にその区分の名前・割合・値を出し、
+ * 乗せていないときは合計を出す。凡例は円グラフの下に置き、順位・名前・割合を並べる（色だけで見分けさせない）。
  */
 
 const props = defineProps<{ segments: DonutSegment[]; total: number; format: (value: number) => string; totalLabel: string }>();
 
 const hovered = ref<string | null>(null);
+const patternPrefix = useId();
+const patternId = (segment: DonutSegment): string => `${patternPrefix}-${segment.key}`;
 
 const arcs = computed(() => {
     let start = 0;
@@ -27,14 +29,28 @@ const formatShare = (share: number): string => `${(share * 100).toFixed(1)}%`;
 </script>
 
 <template>
-    <div class="flex flex-wrap items-center gap-x-6 gap-y-3" data-testid="ranking-donut">
-        <div class="relative size-44 shrink-0">
+    <div class="flex flex-col items-center gap-4" data-testid="ranking-donut">
+        <div class="relative size-52 shrink-0">
             <svg viewBox="0 0 200 200" class="size-full" role="img" :aria-label="`${totalLabel}の品番ごとの割合`" @mouseleave="hovered = null">
+                <defs>
+                    <pattern
+                        v-for="segment in segments.filter((item) => item.ink)"
+                        :id="patternId(segment)"
+                        :key="segment.key"
+                        width="6"
+                        height="6"
+                        patternUnits="userSpaceOnUse"
+                        patternTransform="rotate(45)"
+                    >
+                        <rect width="6" height="6" :fill="segment.color" />
+                        <line x1="0" y1="0" x2="0" y2="6" :stroke="segment.ink!" stroke-width="2.4" />
+                    </pattern>
+                </defs>
                 <path
                     v-for="arc in arcs"
                     :key="arc.segment.key"
                     :d="arc.path"
-                    :fill="arc.segment.color"
+                    :fill="arc.segment.ink ? `url(#${patternId(arc.segment)})` : arc.segment.color"
                     fill-rule="evenodd"
                     class="cursor-default stroke-white transition-opacity focus:outline-none"
                     :class="hovered !== null && hovered !== arc.segment.key ? 'opacity-40' : ''"
@@ -48,7 +64,7 @@ const formatShare = (share: number): string => `${(share * 100).toFixed(1)}%`;
                     @blur="hovered = null"
                 />
             </svg>
-            <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-9 text-center" data-testid="donut-center">
+            <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-12 text-center" data-testid="donut-center">
                 <template v-if="focused">
                     <span class="w-full truncate text-[11px] text-stone-500" :class="focused.isGroup ? '' : 'font-mono'">{{ focused.label }}</span>
                     <span class="text-base font-semibold text-stone-900 tabular-nums">{{ formatShare(focused.share) }}</span>
@@ -60,16 +76,17 @@ const formatShare = (share: number): string => `${(share * 100).toFixed(1)}%`;
                 </template>
             </div>
         </div>
-        <ul class="flex min-w-48 flex-col gap-1.5 text-xs" aria-label="円グラフの凡例" data-testid="donut-legend">
+        <ul class="grid w-full grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2" aria-label="円グラフの凡例" data-testid="donut-legend">
             <li
-                v-for="segment in segments"
+                v-for="(segment, index) in segments"
                 :key="segment.key"
-                class="flex items-center gap-2 rounded px-1 py-0.5"
+                class="flex min-w-0 items-center gap-2 rounded px-1 py-0.5"
                 :class="hovered === segment.key ? 'bg-stone-100' : ''"
                 @mouseenter="hovered = segment.key"
                 @mouseleave="hovered = null"
             >
-                <span class="size-2.5 shrink-0 rounded-sm" :style="{ backgroundColor: segment.color }" aria-hidden="true" />
+                <span class="size-2.5 shrink-0 rounded-sm" :style="swatchStyle(segment)" aria-hidden="true" data-testid="legend-swatch" />
+                <span class="w-4 shrink-0 text-right text-[10px] text-stone-400 tabular-nums">{{ segment.isGroup ? "" : index + 1 }}</span>
                 <span class="min-w-0 flex-1 truncate text-stone-700" :class="segment.isGroup ? '' : 'font-mono'">{{ segment.label }}</span>
                 <span class="text-stone-900 tabular-nums">{{ formatShare(segment.share) }}</span>
             </li>

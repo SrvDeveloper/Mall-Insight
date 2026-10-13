@@ -3,7 +3,7 @@ import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from "vue"
 import { fetchStoreRanking } from "@/api/actuals";
 import RankingDonut from "@/components/actuals/RankingDonut.vue";
 import StockoutIcon from "@/components/actuals/StockoutIcon.vue";
-import { donutSegments } from "@/components/actuals/rankingDonut";
+import { donutSegments, swatchStyle } from "@/components/actuals/rankingDonut";
 import { STORE_COLORS, type ActualMeasure } from "@/components/actuals/actualRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
 import { formatYen } from "@/components/salesTarget/format";
@@ -15,8 +15,8 @@ import type { RankingStockout, SalesUnit, StoreRankingResponse, StoreSales, Stor
  * CrossWalkerに未登録のSKUは、品番の順位には入れずに件数と合計を添える。別の欄を押すと読み込み直し、読み込むまでは
  * 前の一覧を薄くして残す（表の高さが変わらないように）。開いたときは一覧が見えるところまで画面を動かす。×で閉じる。
  * 各行に、前月（日ごとは前日）の順位からの変動と、店舗のチャネル（全店舗なら BOSS と Amazon）の欠品日数を出す。品番の欠品日数は、
- * 欠品したSKUの欠品日数の合計（K-095）。一覧の上に、上位の品番・その他の品番・未登録のSKUの割合の円グラフを出し、円グラフに出した品番は
- * 一覧にも同じ色の印を付ける（K-097）。
+ * 欠品したSKUの欠品日数の合計（K-095）。広い画面では、左に上位10品番・その他の品番・未登録のSKUの割合の円グラフ、右に順位の一覧を並べ、
+ * 円グラフに出した品番は一覧にも同じ色の印を付ける（K-097・K-098）。
  */
 
 const props = defineProps<{
@@ -98,8 +98,11 @@ const segments = computed(() =>
           )
         : [],
 );
-/** 円グラフに出した品番の色。 */
-const segmentColor = (itemNo: string): string | null => segments.value.find((segment) => !segment.isGroup && segment.key === itemNo)?.color ?? null;
+/** 円グラフに出した品番の色の印（出していなければ null）。 */
+function segmentSwatch(itemNo: string): Record<string, string> | null {
+    const segment = segments.value.find((item) => !item.isGroup && item.key === itemNo);
+    return segment ? swatchStyle(segment) : null;
+}
 
 const previousLabel = computed(() => (props.unit === "day" ? "前日" : "前月"));
 
@@ -190,18 +193,15 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
         </div>
         <div v-else-if="!result" class="px-6 py-12 text-center text-sm text-stone-500">読み込み中…</div>
         <div v-else-if="result.meta.total.quantity === 0" class="px-6 py-12 text-center text-sm text-stone-500" data-testid="ranking-empty">この期間の販売実績はありません。</div>
-        <div v-else class="transition-opacity" :class="isLoading ? 'opacity-50' : ''" :aria-busy="isLoading">
+        <!-- 広い画面では、左に円グラフ、右に順位の一覧を並べる -->
+        <div v-else class="grid transition-opacity lg:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]" :class="isLoading ? 'opacity-50' : ''" :aria-busy="isLoading">
+            <div class="border-stone-200 px-5 py-5 max-lg:border-b lg:border-r" data-testid="ranking-chart-column">
+                <h3 class="mb-3 text-sm font-semibold text-stone-900">品番ごとの割合</h3>
+                <RankingDonut :segments="segments" :total="totalValue" :format="format" :total-label="order === 'amount' ? '合計金額' : '合計販売数'" />
+            </div>
             <section class="flex min-w-0 flex-col" aria-labelledby="ranking-items">
-                <div class="border-b border-stone-100 px-5 py-4">
-                    <RankingDonut :segments="segments" :total="totalValue" :format="format" :total-label="order === 'amount' ? '合計金額' : '合計販売数'" />
-                </div>
                 <h3 id="ranking-items" class="px-5 pt-4 pb-2 text-sm font-semibold text-stone-900">品番 上位{{ result.data.items.length }}</h3>
-                <!-- 広い画面では 1～10位を左、11～20位を右に並べる -->
-                <ol
-                    class="flex flex-col pb-2 md:grid md:grid-flow-col md:grid-cols-2 md:gap-x-6"
-                    :style="{ gridTemplateRows: `repeat(${Math.min(10, result.data.items.length)}, auto)` }"
-                    data-testid="ranking-items"
-                >
+                <ol class="flex flex-col pb-2" data-testid="ranking-items">
                     <li v-for="row in result.data.items" :key="row.item_no" class="flex items-center gap-3 px-5 py-2" data-testid="ranking-item">
                         <span class="flex w-7 shrink-0 flex-col items-end leading-tight tabular-nums">
                             <span class="text-[12px] text-stone-500">{{ row.rank }}</span>
@@ -212,9 +212,9 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
                         <span class="flex min-w-0 flex-1 flex-col gap-1">
                             <span class="flex min-w-0 items-center gap-1.5">
                                 <span
-                                    v-if="segmentColor(row.item_no)"
+                                    v-if="segmentSwatch(row.item_no)"
                                     class="size-2.5 shrink-0 rounded-sm"
-                                    :style="{ backgroundColor: segmentColor(row.item_no)! }"
+                                    :style="segmentSwatch(row.item_no)!"
                                     aria-hidden="true"
                                     data-testid="ranking-item-swatch"
                                 />
