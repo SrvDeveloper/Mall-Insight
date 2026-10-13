@@ -6,7 +6,7 @@ import { MAX_MULTIPLIER, formatChange, formatCount, formatMultiplier, parseMulti
 import type { SalesEventCandidateItem, SalesEventMeasuredItem, SalesEventPeriodDetailResponse } from "@/types/api";
 
 /**
- * イベントの期間1つの倍率（B-129、K-112・K-114）。イベントの期間の一覧の下に、別のセクションとして出す。
+ * イベントの期間1つの倍率（B-129、K-112・K-114）。期間の画面に出す（期間・イベントの名前は画面の見出しに出す）。
  *
  * - これからの期間：チャネルごとに、候補の根拠（同じイベントの過去の期間で、普段なら売れた数と売れた数）と、品番ごとの候補・使う倍率・
  *   期間（今日以降）の普段の予測・倍率で増える数を出す。使う倍率を入れた品番は、候補の代わりにその倍率でこの期間の需要予測を増やす。
@@ -15,7 +15,7 @@ import type { SalesEventCandidateItem, SalesEventMeasuredItem, SalesEventPeriodD
  */
 
 const props = defineProps<{ detail: SalesEventPeriodDetailResponse; isLoading: boolean }>();
-const emit = defineEmits<{ saved: [detail: SalesEventPeriodDetailResponse]; close: [] }>();
+const emit = defineEmits<{ saved: [detail: SalesEventPeriodDetailResponse] }>();
 
 const event = computed(() => props.detail.data);
 const isEnded = computed(() => event.value.status === "ended");
@@ -120,49 +120,11 @@ const measuredItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)
         return b.ratio - a.ratio || a.item_no.localeCompare(b.item_no);
     });
 const candidateItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)[]): SalesEventCandidateItem[] => items.filter((item): item is SalesEventCandidateItem => !isMeasured(item));
-
-const statusClass = computed(() =>
-    event.value.status === "ongoing"
-        ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-        : event.value.status === "upcoming"
-          ? "bg-sky-50 text-sky-800 ring-sky-200"
-          : "bg-stone-100 text-stone-600 ring-stone-200",
-);
 </script>
 
 <template>
-    <section
-        class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white transition-opacity xl:h-full"
-        :class="isLoading ? 'opacity-60' : ''"
-        aria-labelledby="event-detail-title"
-        data-testid="event-detail"
-    >
-        <header class="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
-            <div class="flex flex-col gap-1">
-                <div class="flex flex-wrap items-center gap-2">
-                    <h2 id="event-detail-title" class="text-base font-bold text-stone-900">{{ event.event.name }}</h2>
-                    <span class="rounded-full px-2 py-px text-[11px] font-semibold ring-1" :class="statusClass">{{ event.status_label }}</span>
-                </div>
-                <p class="text-xs text-stone-500 tabular-nums">
-                    {{ periodLabel(event.starts_on, event.ends_on) }}（{{ event.days }}日間）・{{ event.event.malls.map((mall) => mall.label).join("・")
-                    }}<template v-if="event.note">・{{ event.note }}</template>
-                    <template v-if="!isEnded && event.remaining_days < event.days">・今日からの残り {{ event.remaining_days }}日に倍率を掛けます</template>
-                </p>
-            </div>
-            <button
-                type="button"
-                class="flex size-8 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-900"
-                aria-label="閉じる"
-                data-testid="detail-close"
-                @click="emit('close')"
-            >
-                <svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                    <path d="m5 5 10 10M15 5 5 15" />
-                </svg>
-            </button>
-        </header>
-
-        <div class="min-h-0 flex-1 overflow-y-auto">
+    <section class="rounded-xl border border-stone-200 bg-white transition-opacity" :class="isLoading ? 'opacity-60' : ''" aria-label="品番ごとの倍率" data-testid="event-detail">
+        <div>
             <div v-for="channel in event.channels" :key="channel.channel" class="border-b border-stone-200 last:border-b-0" :data-testid="`detail-${channel.channel}`">
                 <!-- 終了した期間：普段の何倍売れたか -->
                 <template v-if="channel.kind === 'measured'">
@@ -315,7 +277,7 @@ const statusClass = computed(() =>
             </div>
         </div>
 
-        <footer v-if="!isEnded" class="flex flex-wrap items-center justify-end gap-3 border-t border-stone-200 px-4 py-3">
+        <footer v-if="!isEnded" class="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 rounded-b-xl border-t border-stone-200 bg-white/95 px-4 py-3 backdrop-blur">
             <span v-if="invalidKeys.size > 0" class="text-xs font-medium text-red-700" data-testid="invalid-note">倍率は 0〜{{ MAX_MULTIPLIER }} の数（小数2桁まで）で入れてください。</span>
             <span v-else-if="saveError" class="text-xs font-medium text-red-700" data-testid="save-error">{{ saveError }}</span>
             <span v-else-if="savedNote && !isDirty" class="text-xs text-emerald-700" data-testid="saved-note">{{ savedNote }}</span>

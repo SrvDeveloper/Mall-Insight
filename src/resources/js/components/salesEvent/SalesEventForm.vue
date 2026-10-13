@@ -8,16 +8,16 @@ import type { SalesEvent, SalesEventWithPeriods } from "@/types/api";
 /**
  * イベントの登録・変更（B-129、K-112・K-114）。名前・モール・メモを入れる。期間はイベントに別に登録するが、
  * 登録するときは最初の期間（初日・最終日・その回のメモ）を一緒に入れられる（空欄なら期間無しで登録する）。
- * 倍率の候補は同じイベントの過去の期間から求めるため、同じ名前のイベントは登録できない。
+ * 倍率の候補は同じイベントの過去の期間から求めるため、同じ名前のイベントは登録できない。登録するときは、一覧で選んでいるモールを最初から選んでおく。
  */
 
-const props = defineProps<{ event: SalesEvent | null; maxDays: number; refreshAfterSave: (event: SalesEventWithPeriods) => Promise<void> }>();
+const props = defineProps<{ event: SalesEvent | null; maxDays: number; defaultMalls?: string[]; refreshAfterSave: (event: SalesEventWithPeriods) => Promise<void> }>();
 const emit = defineEmits<{ saved: []; cancel: []; saving: [value: boolean] }>();
 
 const isEdit = computed(() => props.event !== null);
 const form = reactive({
     name: props.event?.name ?? "",
-    malls: (props.event?.malls.map((mall) => mall.value) ?? []) as string[],
+    malls: (props.event?.malls.map((mall) => mall.value) ?? props.defaultMalls ?? []) as string[],
     note: props.event?.note ?? "",
     startsOn: "",
     endsOn: "",

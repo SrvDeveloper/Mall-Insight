@@ -6,6 +6,12 @@ export async function fetchSalesEvents(): Promise<SalesEventListResponse> {
     return data;
 }
 
+/** イベント1つと、その期間・倍率。 */
+export async function fetchSalesEvent(id: number): Promise<SalesEventResponse> {
+    const { data } = await apiClient.get<SalesEventResponse>(`/sales-events/${id}`);
+    return data;
+}
+
 /** イベントを登録する（最初の期間を一緒に入れられる）。 */
 export async function createSalesEvent(payload: SalesEventPayload): Promise<SalesEventResponse> {
     const { data } = await apiClient.post<SalesEventResponse>("/sales-events", payload);

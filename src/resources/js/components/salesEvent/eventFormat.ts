@@ -2,6 +2,8 @@
  * イベント（B-129、K-112）の表示の整え方。
  */
 
+import type { SalesEventStatus } from "@/types/api";
+
 /** モールの選択肢（店舗売上と同じ順、K-093）。楽天市場・Yahoo!ショッピング・au PAY マーケットは BOSS で受注する。 */
 export const MALLS = [
     { value: "rakuten", label: "楽天市場", channel: "boss" },
@@ -9,6 +11,10 @@ export const MALLS = [
     { value: "yahoo", label: "Yahoo!ショッピング", channel: "boss" },
     { value: "au_pay", label: "au PAY マーケット", channel: "boss" },
 ] as const;
+
+export type MallValue = (typeof MALLS)[number]["value"];
+
+export const isMall = (value: unknown): value is MallValue => MALLS.some((mall) => mall.value === value);
 
 export const CHANNEL_LABELS = { boss: "BOSS", amazon: "Amazon" } as const;
 
@@ -61,4 +67,22 @@ export function parseMultiplier(input: string): number | null | undefined {
     }
     const value = Number(text);
     return value <= MAX_MULTIPLIER ? value : undefined;
+}
+
+/** 期間の状態の色（開催中は緑、これからは青、終了は灰色）。 */
+export const statusClass = (status: SalesEventStatus): string =>
+    status === "ongoing" ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : status === "upcoming" ? "bg-sky-50 text-sky-800 ring-sky-200" : "bg-stone-100 text-stone-600 ring-stone-200";
+
+let flash: string | null = null;
+
+/** 次に開くイベントの画面に出すお知らせ（登録・削除してから画面を移るとき）。 */
+export function setEventFlash(message: string): void {
+    flash = message;
+}
+
+/** お知らせを受け取る（一度だけ）。 */
+export function takeEventFlash(): string | null {
+    const message = flash;
+    flash = null;
+    return message;
 }

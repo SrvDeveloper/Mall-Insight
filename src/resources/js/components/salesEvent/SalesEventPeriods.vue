@@ -1,20 +1,36 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, useTemplateRef } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { ApiError } from "@/api/client";
 import { createSalesEventPeriod, deleteSalesEventPeriod, updateSalesEventPeriod } from "@/api/salesEvents";
-import { daysBetween, formatMultiplier, periodLabel } from "@/components/salesEvent/eventFormat";
+import { daysBetween, formatMultiplier, periodLabel, statusClass } from "@/components/salesEvent/eventFormat";
+import { formatDateTime } from "@/components/salesTarget/format";
 import type { SalesEventPeriod, SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api";
 
 /**
- * イベント1つの期間（B-129、K-114）。イベントの一覧の下に、別のセクションとして出す。
- * 期間を初日の順に並べ、これからの期間は倍率の候補、終了した期間は普段の何倍売れたかを出す。期間を押すと、横に品番ごとの倍率を出す。
+ * イベント1つの期間（B-129、K-114）。イベントの画面に出す。
+ * 開催中・これからの期間（初日の早い順）と、終了した期間（新しい順）に分けて並べ、これからの期間は倍率の候補、
+ * 終了した期間は普段の何倍売れたかを出す。期間を押すと、期間の画面（品番ごとの倍率）に移る。
  * 期間はモーダルで追加し、行の「編集」でその行を入力欄にして直せる。
  */
 
-const props = defineProps<{ event: SalesEventWithPeriods; selectedPeriodId: number | null; maxDays: number; refreshAfterAdd: (period: SalesEventPeriod, message: string) => Promise<void> }>();
-const emit = defineEmits<{ select: [periodId: number]; changed: [message: string]; editEvent: []; close: [] }>();
+const props = defineProps<{ event: SalesEventWithPeriods; maxDays: number; refreshAfterAdd: (period: SalesEventPeriod, message: string) => Promise<void> }>();
+const emit = defineEmits<{ changed: [message: string] }>();
 
-const periods = computed(() => props.event.periods);
+const route = useRoute();
+const router = useRouter();
+
+const groups = computed(() => [
+    { key: "upcoming", label: "開催中・これから", periods: props.event.periods.filter((period) => period.status !== "ended") },
+    { key: "ended", label: "終了した期間", periods: props.event.periods.filter((period) => period.status === "ended").reverse() },
+]);
+
+/** 期間の画面へ（一覧で選んだモールを引き継ぐ）。 */
+const periodLink = (period: SalesEventPeriodSummary) => ({
+    name: "sales-event-period",
+    params: { eventId: String(props.event.id), periodId: String(period.id) },
+    query: typeof route.query.mall === "string" ? { mall: route.query.mall } : {},
+});
 
 const adding = reactive({ startsOn: "", endsOn: "", note: "" });
 const isAddOpen = ref(false);
@@ -136,81 +152,70 @@ async function remove(period: SalesEventPeriodSummary): Promise<void> {
     }
 }
 
-const statusClass = (period: SalesEventPeriodSummary): string =>
-    period.status === "ongoing"
-        ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-        : period.status === "upcoming"
-          ? "bg-sky-50 text-sky-800 ring-sky-200"
-          : "bg-stone-100 text-stone-600 ring-stone-200";
-
 const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 text-sm tabular-nums focus:border-stone-900 focus:outline-none";
 </script>
 
 <template>
-    <section class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white xl:h-full" aria-labelledby="event-periods-title" data-testid="event-periods">
-        <header class="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
-            <div class="flex flex-col gap-1">
-                <h2 id="event-periods-title" class="text-base font-bold text-stone-900">{{ event.name }}</h2>
-                <p class="text-xs text-stone-500">
-                    {{ event.malls.map((mall) => mall.label).join("・") }}<template v-if="event.note">・{{ event.note }}</template>
-                </p>
-            </div>
-            <div class="flex items-center gap-1">
-                <button ref="addButton" type="button" class="h-8 rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white hover:bg-stone-700" data-testid="open-period-add" @click="openAddForm">
-                    期間を追加
-                </button>
-                <button
-                    type="button"
-                    class="h-8 rounded-lg px-2.5 text-xs font-medium text-stone-700 hover:bg-stone-100 hover:text-stone-900"
-                    data-testid="periods-edit-event"
-                    @click="emit('editEvent')"
-                >
-                    イベントを編集
-                </button>
-                <button
-                    type="button"
-                    class="flex size-8 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-900"
-                    aria-label="閉じる"
-                    data-testid="periods-close"
-                    @click="emit('close')"
-                >
-                    <svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                        <path d="m5 5 10 10M15 5 5 15" />
-                    </svg>
-                </button>
-            </div>
+    <section class="overflow-hidden rounded-xl border border-stone-200 bg-white" aria-labelledby="event-periods-title" data-testid="event-periods">
+        <header class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
+            <h2 id="event-periods-title" class="text-[13px] font-semibold text-stone-900">
+                期間 <span class="ml-1 font-normal text-stone-500 tabular-nums">{{ event.periods.length }}</span>
+            </h2>
+            <button
+                ref="addButton"
+                type="button"
+                class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white hover:bg-stone-700"
+                data-testid="open-period-add"
+                @click="openAddForm"
+            >
+                <svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                    <path d="M8 3v10M3 8h10" />
+                </svg>
+                期間を追加
+            </button>
         </header>
 
-        <div class="min-h-0 flex-1 overflow-auto">
-            <table class="w-full min-w-104 border-separate border-spacing-0 text-left text-[13px]">
-                <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-200 [&_th]:bg-stone-50">
+        <p v-if="event.periods.length === 0" class="px-4 py-10 text-center text-sm text-stone-500" data-testid="no-periods">期間がまだありません。「期間を追加」から登録してください。</p>
+
+        <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-200 border-separate border-spacing-0 text-left text-[13px]">
+                <thead class="text-xs font-medium text-stone-500 [&_th]:border-b [&_th]:border-stone-200 [&_th]:bg-white">
                     <tr>
                         <th scope="col" class="px-4 py-2">期間</th>
-                        <th scope="col" class="px-3 py-2">倍率<span class="block font-normal text-stone-400">開催中・予定は候補／終了は実績</span></th>
+                        <th scope="col" class="px-3 py-2">倍率<span class="ml-1 font-normal text-stone-400">（開催中・これからは候補／終了は実績）</span></th>
+                        <th scope="col" class="px-3 py-2">その回のメモ</th>
+                        <th scope="col" class="px-3 py-2">更新</th>
                         <th scope="col" class="px-3 py-2"><span class="sr-only">操作</span></th>
                     </tr>
                 </thead>
-                <tbody>
-                    <tr v-if="periods.length === 0">
-                        <td colspan="3" class="px-4 py-6 text-center text-sm text-stone-500" data-testid="no-periods">期間がまだありません。「期間を追加」から登録してください。</td>
+                <tbody v-for="group in groups" :key="group.key" :data-testid="`period-group-${group.key}`">
+                    <tr>
+                        <th colspan="5" scope="colgroup" class="border-b border-stone-200 bg-stone-50 px-4 py-1.5 text-left text-xs font-semibold text-stone-600">
+                            {{ group.label }}<span class="ml-1.5 font-normal text-stone-400 tabular-nums">{{ group.periods.length }}件</span>
+                        </th>
                     </tr>
-                    <template v-for="period in periods" :key="period.id">
+                    <tr v-if="group.periods.length === 0">
+                        <td colspan="5" class="border-b border-stone-100 px-4 py-3 text-xs text-stone-400">
+                            {{ group.key === "ended" ? "終了した期間はありません。" : "これからの期間はありません。" }}
+                        </td>
+                    </tr>
+                    <template v-for="period in group.periods" :key="period.id">
                         <!-- 編集中の行 -->
-                        <tr v-if="editing?.id === period.id" class="bg-amber-50/40 *:border-t *:border-stone-100" data-testid="period-edit-row">
-                            <td colspan="2" class="px-4 py-2">
+                        <tr v-if="editing?.id === period.id" class="bg-amber-50/40 *:border-b *:border-stone-100" data-testid="period-edit-row">
+                            <td colspan="4" class="px-4 py-2">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <input v-model="editing.startsOn" type="date" :class="dateInputClass" aria-label="初日" data-testid="edit-starts-on" />
                                     <span class="text-stone-400">〜</span>
                                     <input v-model="editing.endsOn" type="date" :min="editing.startsOn || undefined" :class="dateInputClass" aria-label="最終日" data-testid="edit-ends-on" />
+                                    <input
+                                        v-model="editing.note"
+                                        type="text"
+                                        maxlength="500"
+                                        placeholder="その回のメモ"
+                                        class="h-9 min-w-48 flex-1 rounded-md border border-stone-300 bg-white px-2 text-sm focus:border-stone-900 focus:outline-none"
+                                        aria-label="メモ"
+                                    />
                                 </div>
-                                <input
-                                    v-model="editing.note"
-                                    type="text"
-                                    maxlength="500"
-                                    placeholder="その回のメモ"
-                                    class="mt-2 h-9 w-full rounded-md border border-stone-300 bg-white px-2 text-sm focus:border-stone-900 focus:outline-none"
-                                    aria-label="メモ"
-                                />
                                 <p v-if="errorOf(period.id, 'starts_on', 'ends_on')" class="mt-1 text-xs text-red-700" data-testid="edit-error">{{ errorOf(period.id, "starts_on", "ends_on") }}</p>
                             </td>
                             <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -226,28 +231,18 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                                 </button>
                             </td>
                         </tr>
-                        <tr
-                            v-else
-                            class="cursor-pointer *:border-t *:border-stone-100"
-                            :class="selectedPeriodId === period.id ? 'bg-stone-100' : 'hover:bg-stone-50'"
-                            :aria-selected="selectedPeriodId === period.id"
-                            data-testid="period-row"
-                            @click="emit('select', period.id)"
-                        >
-                            <td class="px-4 py-2.5 align-top tabular-nums">
-                                <div class="flex flex-wrap items-center gap-1.5">
-                                    <button
-                                        type="button"
-                                        class="font-medium text-stone-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900"
-                                        :aria-expanded="selectedPeriodId === period.id"
-                                        @click.stop="emit('select', period.id)"
-                                    >
-                                        {{ periodLabel(period.starts_on, period.ends_on) }}
-                                    </button>
-                                    <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ring-1" :class="statusClass(period)">{{ period.status_label }}</span>
-                                </div>
-                                <span class="text-[11px] text-stone-400">{{ period.days }}日間</span>
-                                <p v-if="period.note" class="max-w-48 truncate text-[11px] text-stone-500" :title="period.note">{{ period.note }}</p>
+                        <tr v-else class="cursor-pointer *:border-b *:border-stone-100 hover:bg-stone-50" data-testid="period-row" @click="router.push(periodLink(period))">
+                            <td class="px-4 py-2.5 align-top whitespace-nowrap tabular-nums">
+                                <RouterLink
+                                    :to="periodLink(period)"
+                                    class="font-medium text-stone-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900"
+                                    data-testid="period-link"
+                                    @click.stop
+                                >
+                                    {{ periodLabel(period.starts_on, period.ends_on) }}
+                                </RouterLink>
+                                <span class="ml-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1" :class="statusClass(period.status)">{{ period.status_label }}</span>
+                                <span class="ml-1.5 text-[11px] text-stone-400">{{ period.days }}日間</span>
                             </td>
                             <td class="px-3 py-2.5 align-top">
                                 <span class="flex flex-col gap-0.5">
@@ -257,7 +252,7 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                                         class="text-xs whitespace-nowrap text-stone-600 tabular-nums"
                                         data-testid="period-multiplier"
                                     >
-                                        <span class="inline-block w-14 text-stone-400">{{ multiplier.label }}</span>
+                                        <span v-if="period.multipliers.length > 1" class="inline-block w-14 text-stone-400">{{ multiplier.label }}</span>
                                         <strong class="font-semibold" :class="multiplier.multiplier === null ? 'text-stone-300' : 'text-stone-900'">{{
                                             formatMultiplier(multiplier.multiplier)
                                         }}</strong>
@@ -271,6 +266,13 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                                         <span v-else-if="multiplier.multiplier === null" class="ml-1 text-[11px] text-stone-400">測れません</span>
                                     </span>
                                 </span>
+                            </td>
+                            <td class="px-3 py-2.5 align-top text-xs text-stone-600">
+                                <span v-if="period.note" class="block max-w-64 truncate" :title="period.note">{{ period.note }}</span>
+                                <span v-else class="text-stone-300">—</span>
+                            </td>
+                            <td class="px-3 py-2.5 align-top text-[11px] whitespace-nowrap text-stone-500 tabular-nums">
+                                {{ period.updated_at ? formatDateTime(period.updated_at) : "" }} {{ period.updated_by ?? "" }}
                             </td>
                             <td class="px-3 py-2 text-right align-top whitespace-nowrap" @click.stop>
                                 <button

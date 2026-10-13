@@ -1,9 +1,11 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import { createRouter, createWebHistory, type RouteLocationNormalized, type RouteLocationRaw, type RouteRecordRaw } from "vue-router";
 import { onUnauthorized } from "@/api/client";
 import { afterLoginLocation } from "@/router/afterLogin";
 import AppLayout from "@/layouts/AppLayout.vue";
 import DemandForecastView from "@/views/DemandForecastView.vue";
 import ForecastAccuracyView from "@/views/ForecastAccuracyView.vue";
+import SalesEventDetailView from "@/views/SalesEventDetailView.vue";
+import SalesEventPeriodView from "@/views/SalesEventPeriodView.vue";
 import SalesEventView from "@/views/SalesEventView.vue";
 import SeasonalFactorView from "@/views/SeasonalFactorView.vue";
 import InboundPlanView from "@/views/InboundPlanView.vue";
@@ -29,6 +31,17 @@ declare module "vue-router" {
     }
 }
 
+/** 以前の一覧の URL（?event=1&period=2）は、イベントの画面・期間の画面へ移す。 */
+function redirectOldSalesEventQuery(to: RouteLocationNormalized): RouteLocationRaw | true {
+    const { event, period, ...query } = to.query;
+    if (typeof event !== "string" || !/^\d+$/.test(event)) {
+        return true;
+    }
+    return typeof period === "string" && /^\d+$/.test(period)
+        ? { name: "sales-event-period", params: { eventId: event, periodId: period }, query }
+        : { name: "sales-event", params: { eventId: event }, query };
+}
+
 const routes: RouteRecordRaw[] = [
     { path: "/login", name: "login", component: LoginView, meta: { title: "ログイン", public: true } },
     {
@@ -51,7 +64,15 @@ const routes: RouteRecordRaw[] = [
             },
             { path: "store-sales", name: "store-sales", component: StoreSalesView, meta: { title: "店舗売上" } },
             { path: "forecasts", name: "forecasts", component: DemandForecastView, meta: { title: "需要予測" } },
-            { path: "sales-events", name: "sales-events", component: SalesEventView, meta: { title: "イベント" } },
+            // イベントの画面と期間の画面はイベントの一覧の下に置き、左メニューの「イベント」を選んだままにする
+            {
+                path: "sales-events",
+                children: [
+                    { path: "", name: "sales-events", component: SalesEventView, meta: { title: "イベント" }, beforeEnter: redirectOldSalesEventQuery },
+                    { path: ":eventId(\\d+)", name: "sales-event", component: SalesEventDetailView, meta: { title: "イベント" } },
+                    { path: ":eventId(\\d+)/periods/:periodId(\\d+)", name: "sales-event-period", component: SalesEventPeriodView, meta: { title: "イベントの期間" } },
+                ],
+            },
             { path: "seasonal-factors", name: "seasonal-factors", component: SeasonalFactorView, meta: { title: "季節係数" } },
             { path: "forecast-accuracy", name: "forecast-accuracy", component: ForecastAccuracyView, meta: { title: "予測精度" } },
             { path: "sales-targets", name: "sales-targets", component: SalesTargetView, meta: { title: "販売目標" } },
