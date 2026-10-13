@@ -15,7 +15,7 @@ import {
     updateSalesEventPeriod,
 } from "@/api/salesEvents";
 import { ApiError } from "@/api/client";
-import type { SalesEventListResponse, SalesEventPeriodDetailResponse, SalesEventPeriodSummary, SalesEventStatus, SalesEventWithPeriods } from "@/types/api";
+import type { SalesEventListResponse, SalesEventPeriod, SalesEventPeriodDetailResponse, SalesEventPeriodSummary, SalesEventStatus, SalesEventWithPeriods } from "@/types/api";
 
 vi.mock("@/api/salesEvents", () => ({
     fetchSalesEvents: vi.fn(),
@@ -172,7 +172,11 @@ describe("SalesEventView", () => {
     });
 
     it("shows the periods of an event below the list, adds a period and edits one in place", async () => {
-        vi.mocked(createSalesEventPeriod).mockResolvedValue({ ...salePeriods[2]!, id: 14, starts_on: "2027-03-04", ends_on: "2027-03-11" });
+        const added = { ...salePeriods[2]!, id: 14, starts_on: "2027-03-04", ends_on: "2027-03-11", days: 8 };
+        vi.mocked(createSalesEventPeriod).mockResolvedValue(added);
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce({ data: [withPeriods([...salePeriods, added]), marathon], meta });
         vi.mocked(updateSalesEventPeriod).mockRejectedValue(new ApiError("入力内容を確認してください。", 422, { starts_on: ["このイベントの別の期間（2026/9/4〜2026/9/7）と重なっています。"] }));
         const { wrapper, router } = await mountView();
 
@@ -198,6 +202,7 @@ describe("SalesEventView", () => {
         expect(wrapper.find('[data-testid="message"]').text()).toContain("楽天スーパーセールに 2027/3/4〜3/11 の期間を追加しました。");
         expect(fetchSalesEvents).toHaveBeenCalledTimes(2);
         expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(false);
+        expect(wrapper.findAll('[data-testid="period-row"]')).toHaveLength(4);
 
         await wrapper.find('[data-testid="open-period-add"]').trigger("click");
         await wrapper.find('[data-testid="period-add-close"]').trigger("click");
@@ -209,6 +214,68 @@ describe("SalesEventView", () => {
         await flushPromises();
         expect(updateSalesEventPeriod).toHaveBeenCalledWith(13, { starts_on: "2026-09-05", ends_on: "2026-12-07", note: null });
         expect(wrapper.find('[data-testid="edit-error"]').text()).toBe("このイベントの別の期間（2026/9/4〜2026/9/7）と重なっています。");
+        wrapper.unmount();
+    });
+
+    it("keeps the add dialog open and shows a spinner until the new period appears in the list", async () => {
+        const added = { ...salePeriods[2]!, id: 14, starts_on: "2027-03-04", ends_on: "2027-03-11", days: 8 };
+        let finishCreate!: (period: SalesEventPeriod) => void;
+        let finishRefresh!: (result: SalesEventListResponse) => void;
+        vi.mocked(createSalesEventPeriod).mockReturnValue(new Promise((resolve) => (finishCreate = resolve)));
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockReturnValueOnce(new Promise((resolve) => (finishRefresh = resolve)));
+        const { wrapper } = await mountView("/sales-events?event=1");
+
+        await wrapper.find('[data-testid="open-period-add"]').trigger("click");
+        await wrapper.find('[data-testid="add-starts-on"]').setValue("2027-03-04");
+        await wrapper.find('[data-testid="add-ends-on"]').setValue("2027-03-11");
+        await wrapper.find('[data-testid="period-add"]').trigger("submit");
+
+        expect(wrapper.find('[data-testid="period-add"]').attributes("aria-busy")).toBe("true");
+        expect(wrapper.find('[data-testid="add-submit"] svg').classes()).toContain("animate-spin");
+        expect(wrapper.find('[data-testid="add-submit"]').text()).toBe("追加中…");
+        expect(wrapper.find('[data-testid="period-add-close"]').attributes("disabled")).toBeDefined();
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        await flushPromises();
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(true);
+
+        finishCreate(added);
+        await flushPromises();
+        expect(fetchSalesEvents).toHaveBeenCalledTimes(2);
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="add-submit"] svg').exists()).toBe(true);
+
+        finishRefresh({ data: [withPeriods([...salePeriods, added]), marathon], meta });
+        await flushPromises();
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(false);
+        expect(wrapper.findAll('[data-testid="period-row"]')).toHaveLength(4);
+        wrapper.unmount();
+    });
+
+    it("retries the list refresh without creating the period again", async () => {
+        const added = { ...salePeriods[2]!, id: 14, starts_on: "2027-03-04", ends_on: "2027-03-11", days: 8 };
+        vi.mocked(createSalesEventPeriod).mockResolvedValue(added);
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce({ data: [withPeriods([...salePeriods, added]), marathon], meta });
+        const { wrapper } = await mountView("/sales-events?event=1");
+
+        await wrapper.find('[data-testid="open-period-add"]').trigger("click");
+        await wrapper.find('[data-testid="add-starts-on"]').setValue("2027-03-04");
+        await wrapper.find('[data-testid="add-ends-on"]').setValue("2027-03-11");
+        await wrapper.find('[data-testid="period-add"]').trigger("submit");
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="add-error"]').text()).toContain("一覧を更新できませんでした");
+        expect(wrapper.find('[data-testid="add-submit"]').text()).toBe("一覧を再読み込み");
+        await wrapper.find('[data-testid="period-add"]').trigger("submit");
+        await flushPromises();
+
+        expect(createSalesEventPeriod).toHaveBeenCalledTimes(1);
+        expect(wrapper.find('[data-testid="period-add"]').exists()).toBe(false);
+        expect(wrapper.findAll('[data-testid="period-row"]')).toHaveLength(4);
         wrapper.unmount();
     });
 

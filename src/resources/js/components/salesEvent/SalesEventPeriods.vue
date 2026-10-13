@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, useTemplateRef } fr
 import { ApiError } from "@/api/client";
 import { createSalesEventPeriod, deleteSalesEventPeriod, updateSalesEventPeriod } from "@/api/salesEvents";
 import { daysBetween, formatMultiplier, periodLabel } from "@/components/salesEvent/eventFormat";
-import type { SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api";
+import type { SalesEventPeriod, SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api";
 
 /**
  * イベント1つの期間（B-129、K-114）。イベントの一覧の下に、別のセクションとして出す。
@@ -11,7 +11,7 @@ import type { SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api
  * 期間はモーダルで追加し、行の「編集」でその行を入力欄にして直せる。
  */
 
-const props = defineProps<{ event: SalesEventWithPeriods; selectedPeriodId: number | null; maxDays: number }>();
+const props = defineProps<{ event: SalesEventWithPeriods; selectedPeriodId: number | null; maxDays: number; refreshAfterAdd: (period: SalesEventPeriod, message: string) => Promise<void> }>();
 const emit = defineEmits<{ select: [periodId: number]; changed: [message: string]; editEvent: []; close: [] }>();
 
 const periods = computed(() => props.event.periods);
@@ -23,6 +23,8 @@ const addCloseButton = useTemplateRef<HTMLButtonElement>("addCloseButton");
 const editing = ref<{ id: number; startsOn: string; endsOn: string; note: string } | null>(null);
 const errors = ref<{ target: "add" | number; messages: Record<string, string[]> } | null>(null);
 const isSaving = ref(false);
+const createdPeriod = ref<SalesEventPeriod | null>(null);
+const addError = ref<string | null>(null);
 
 const addDays = computed(() => daysBetween(adding.startsOn, adding.endsOn));
 
@@ -31,6 +33,8 @@ async function openAddForm(): Promise<void> {
     adding.endsOn = "";
     adding.note = "";
     errors.value = null;
+    createdPeriod.value = null;
+    addError.value = null;
     isAddOpen.value = true;
     document.addEventListener("keydown", onAddKeydown);
     await nextTick();
@@ -38,6 +42,7 @@ async function openAddForm(): Promise<void> {
 }
 
 function closeAddForm(): void {
+    if (isSaving.value) return;
     isAddOpen.value = false;
     document.removeEventListener("keydown", onAddKeydown);
     void nextTick(() => addButton.value?.focus());
@@ -70,19 +75,27 @@ async function add(): Promise<void> {
     }
     isSaving.value = true;
     errors.value = null;
+    addError.value = null;
+    let completed = false;
     try {
-        const period = await createSalesEventPeriod(props.event.id, { starts_on: adding.startsOn, ends_on: adding.endsOn, note: adding.note.trim() || null });
-        adding.startsOn = "";
-        adding.endsOn = "";
-        adding.note = "";
-        closeAddForm();
-        emit("changed", `${props.event.name}に ${periodLabel(period.starts_on, period.ends_on)} の期間を追加しました。需要予測と在庫予測に反映されます。`);
+        if (createdPeriod.value === null) {
+            createdPeriod.value = await createSalesEventPeriod(props.event.id, { starts_on: adding.startsOn, ends_on: adding.endsOn, note: adding.note.trim() || null });
+        }
+        const period = createdPeriod.value;
+        await props.refreshAfterAdd(period, `${props.event.name}に ${periodLabel(period.starts_on, period.ends_on)} の期間を追加しました。需要予測と在庫予測に反映されます。`);
+        await nextTick();
+        completed = true;
     } catch (error) {
-        if (error instanceof ApiError && error.isValidationError) {
+        if (createdPeriod.value !== null) {
+            addError.value = "期間は追加されましたが、一覧を更新できませんでした。再読み込みしてください。";
+        } else if (error instanceof ApiError && error.isValidationError) {
             errors.value = { target: "add", messages: error.errors };
+        } else {
+            addError.value = error instanceof ApiError ? error.message : "期間を追加できませんでした。もう一度お試しください。";
         }
     } finally {
         isSaving.value = false;
+        if (completed) closeAddForm();
     }
 }
 
@@ -289,6 +302,7 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                     type="button"
                     class="flex size-8 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-900"
                     aria-label="閉じる"
+                    :disabled="isSaving"
                     data-testid="period-add-close"
                     @click="closeAddForm"
                 >
@@ -297,16 +311,23 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                     </svg>
                 </button>
             </header>
-            <form class="flex min-h-0 flex-col" data-testid="period-add" @submit.prevent="add">
+            <form class="flex min-h-0 flex-col" :aria-busy="isSaving" data-testid="period-add" @submit.prevent="add">
                 <div class="flex flex-col gap-4 overflow-y-auto px-5 py-5">
                     <div class="grid gap-4 sm:grid-cols-2">
                         <label class="flex flex-col gap-1.5 text-xs font-medium text-stone-700">
                             初日
-                            <input v-model="adding.startsOn" type="date" :class="[dateInputClass, 'w-full']" data-testid="add-starts-on" />
+                            <input v-model="adding.startsOn" type="date" :disabled="isSaving || createdPeriod !== null" :class="[dateInputClass, 'w-full']" data-testid="add-starts-on" />
                         </label>
                         <label class="flex flex-col gap-1.5 text-xs font-medium text-stone-700">
                             最終日
-                            <input v-model="adding.endsOn" type="date" :min="adding.startsOn || undefined" :class="[dateInputClass, 'w-full']" data-testid="add-ends-on" />
+                            <input
+                                v-model="adding.endsOn"
+                                type="date"
+                                :min="adding.startsOn || undefined"
+                                :disabled="isSaving || createdPeriod !== null"
+                                :class="[dateInputClass, 'w-full']"
+                                data-testid="add-ends-on"
+                            />
                         </label>
                     </div>
                     <p class="min-h-4 text-xs text-stone-500 tabular-nums" data-testid="add-days">
@@ -318,20 +339,27 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                             v-model="adding.note"
                             type="text"
                             maxlength="500"
+                            :disabled="isSaving || createdPeriod !== null"
                             class="h-9 w-full rounded-md border border-stone-300 bg-white px-3 text-sm focus:border-stone-900 focus:outline-none"
                         />
                     </label>
                     <p v-if="errorOf('add', 'starts_on', 'ends_on')" class="text-xs text-red-700" data-testid="add-error">{{ errorOf("add", "starts_on", "ends_on") }}</p>
+                    <p v-if="addError" class="text-xs text-red-700" role="alert" data-testid="add-error">{{ addError }}</p>
                 </div>
                 <footer class="flex items-center justify-end gap-2 border-t border-stone-200 px-5 py-4">
-                    <button type="button" class="h-9 rounded-lg px-4 text-[13px] font-medium text-stone-600 hover:bg-stone-100" @click="closeAddForm">キャンセル</button>
+                    <button type="button" class="h-9 rounded-lg px-4 text-[13px] font-medium text-stone-600 hover:bg-stone-100 disabled:opacity-40" :disabled="isSaving" @click="closeAddForm">
+                        キャンセル
+                    </button>
                     <button
                         type="submit"
-                        class="h-9 rounded-lg bg-stone-900 px-4 text-[13px] font-semibold text-white hover:bg-stone-700 disabled:opacity-40"
-                        :disabled="isSaving || !adding.startsOn || !adding.endsOn"
+                        class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-stone-900 px-4 text-[13px] font-semibold text-white hover:bg-stone-700 disabled:opacity-40"
+                        :disabled="isSaving || (createdPeriod === null && (!adding.startsOn || !adding.endsOn))"
                         data-testid="add-submit"
                     >
-                        {{ isSaving ? "追加中…" : "追加" }}
+                        <svg v-if="isSaving" class="size-4 animate-spin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+                        </svg>
+                        {{ isSaving ? "追加中…" : createdPeriod === null ? "追加" : "一覧を再読み込み" }}
                     </button>
                 </footer>
             </form>

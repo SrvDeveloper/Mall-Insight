@@ -6,7 +6,7 @@ import SalesEventForm from "@/components/salesEvent/SalesEventForm.vue";
 import SalesEventPeriodDetail from "@/components/salesEvent/SalesEventPeriodDetail.vue";
 import SalesEventPeriods from "@/components/salesEvent/SalesEventPeriods.vue";
 import { formatMultiplier, periodLabel } from "@/components/salesEvent/eventFormat";
-import type { SalesEvent, SalesEventListResponse, SalesEventPeriodDetailResponse, SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api";
+import type { SalesEvent, SalesEventListResponse, SalesEventPeriod, SalesEventPeriodDetailResponse, SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api";
 
 /**
  * イベント（バックログ B-129、決定記録 K-112・K-114）。左メニュー「在庫試算」の需要予測の下に置く。
@@ -120,6 +120,15 @@ async function onPeriodsChanged(text: string): Promise<void> {
     } else {
         void loadPeriod();
     }
+}
+
+async function refreshAfterPeriodAdd(period: SalesEventPeriod, text: string): Promise<void> {
+    const refreshed = await fetchSalesEvents();
+    if (!refreshed.data.some((event) => event.id === period.event_id && event.periods.some((item) => item.id === period.id))) {
+        throw new Error("追加した期間が一覧に表示されていません。");
+    }
+    result.value = refreshed;
+    message.value = text;
 }
 
 function onPeriodSaved(saved: SalesEventPeriodDetailResponse): void {
@@ -332,6 +341,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                     :event="selectedEvent"
                     :selected-period-id="selectedPeriodId"
                     :max-days="maxDays"
+                    :refresh-after-add="refreshAfterPeriodAdd"
                     @select="selectPeriod"
                     @changed="onPeriodsChanged"
                     @edit-event="openForm(selectedEvent)"
