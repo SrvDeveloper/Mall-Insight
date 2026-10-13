@@ -795,9 +795,9 @@ export interface SalesEventChannelMultiplier {
 
 export type SalesEventPeriodSummary = SalesEventPeriod & { multipliers: SalesEventChannelMultiplier[] };
 
-/** イベントと、その期間（初日の順）。 */
-export interface SalesEventWithPeriods extends SalesEvent {
-    periods: SalesEventPeriodSummary[];
+/** イベントの一覧の1行。倍率は次の期間と最後に終わった期間だけ持つ（期間ごとの倍率はイベント1つの取得で出す）。 */
+export interface SalesEventSummary extends SalesEvent {
+    period_count: number;
     /** 次の期間（開催中かこれから） */
     next_period: SalesEventPeriodSummary | null;
     /** 最後に終わった期間 */
@@ -806,8 +806,13 @@ export interface SalesEventWithPeriods extends SalesEvent {
     ended_count: number;
 }
 
+/** イベントと、その期間（初日の順）。 */
+export interface SalesEventWithPeriods extends SalesEventSummary {
+    periods: SalesEventPeriodSummary[];
+}
+
 export interface SalesEventListResponse {
-    data: SalesEventWithPeriods[];
+    data: SalesEventSummary[];
     meta: SalesEventMeta;
 }
 

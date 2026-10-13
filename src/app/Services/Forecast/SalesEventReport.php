@@ -21,20 +21,25 @@ class SalesEventReport
     public function __construct(private DemandForecaster $forecaster, private EventUpliftEstimator $estimator) {}
 
     /**
-     * 一覧に添える、期間・チャネルごとの倍率（品番の全体）。
+     * 一覧に添える、期間・チャネルごとの倍率（品番の全体）。$targets の期間だけ求める（画面に出す期間だけ測り、速くする）。
+     * 終わった期間はその期間を測り、これからの期間の候補は、需要予測と同じく candidateBasis() の期間から求める。
      *
-     * @param  Collection<int, SalesEventPeriod>  $events  登録したすべての期間（イベントを読み込んだもの）
+     * @param  Collection<int, SalesEventPeriod>  $events  登録したすべての期間（イベントを読み込んだもの。平均日販から除く日と候補の根拠に使う）
+     * @param  Collection<int, SalesEventPeriod>  $targets  倍率を求める期間（$events に含まれるもの）
      * @return array<int, list<array<string, mixed>>> 期間ID => チャネルごとの倍率
      */
-    public function overview(Collection $events, CarbonImmutable $today): array
+    public function overview(Collection $events, Collection $targets, CarbonImmutable $today): array
     {
         $items = $this->targetItems();
         $ranges = $this->forecaster->channelSalesRanges($today);
-        $measurements = $this->estimator->measure($this->forecaster, $this->estimator->excludedDates($events), $events->filter(fn (SalesEventPeriod $event): bool => $event->hasEndedBefore($today)), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
+        $ended = $targets->filter(fn (SalesEventPeriod $event): bool => $event->hasEndedBefore($today));
+        $basis = $this->estimator->candidateBasis($events, $targets->reject(fn (SalesEventPeriod $event): bool => $event->hasEndedBefore($today)), $today, $ranges);
+        $measurements = $this->estimator->measure($this->forecaster, $this->estimator->excludedDates($events), $ended->merge($basis)->unique('id')->values(), $items, $ranges, ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()));
+        $basisMeasurements = array_intersect_key($measurements, array_flip($basis->pluck('id')->all()));
 
         $overview = [];
-        foreach ($events as $event) {
-            $overview[$event->id] = array_map(function (Channel $channel) use ($event, $events, $measurements, $today): array {
+        foreach ($targets as $event) {
+            $overview[$event->id] = array_map(function (Channel $channel) use ($event, $events, $measurements, $basisMeasurements, $today): array {
                 if ($event->hasEndedBefore($today)) {
                     $measurement = $measurements[$event->id][$channel->value] ?? null;
 
@@ -47,7 +52,7 @@ class SalesEventReport
                         'override_count' => 0,
                     ];
                 }
-                $candidate = $this->estimator->candidate($event, $channel, $events, $measurements, $today);
+                $candidate = $this->estimator->candidate($event, $channel, $events, $basisMeasurements, $today);
 
                 return [
                     'channel' => $channel->value,

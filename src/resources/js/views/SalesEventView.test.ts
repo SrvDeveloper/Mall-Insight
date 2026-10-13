@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises } from "@vue/test-utils";
 import { createSalesEvent, fetchSalesEvent, fetchSalesEvents } from "@/api/salesEvents";
-import { list, meta, mountAt, period, primeDay, withPeriods } from "@/views/salesEvent.fixture";
+import { list, meta, mountAt, period, primeDay, summary, withPeriods } from "@/views/salesEvent.fixture";
 import type { SalesEventListResponse, SalesEventWithPeriods } from "@/types/api";
 
 vi.mock("@/api/salesEvents", () => ({
@@ -34,7 +34,7 @@ describe("SalesEventView", () => {
                 { value: "yahoo", label: "Yahoo!ショッピング" },
             ],
         });
-        vi.mocked(fetchSalesEvents).mockResolvedValue({ data: [...list().data, summerSale], meta });
+        vi.mocked(fetchSalesEvents).mockResolvedValue({ data: [...list().data, summary(summerSale)], meta });
         const { wrapper, router } = await mountAt("/sales-events");
 
         expect(wrapper.find("h1").text()).toBe("イベント");
@@ -91,7 +91,7 @@ describe("SalesEventView", () => {
         vi.mocked(createSalesEvent).mockResolvedValue({ data: created, meta });
         vi.mocked(fetchSalesEvents)
             .mockResolvedValueOnce(list())
-            .mockResolvedValueOnce({ data: [...list().data, created], meta });
+            .mockResolvedValueOnce({ data: [...list().data, summary(created)], meta });
         vi.mocked(fetchSalesEvent).mockResolvedValue({ data: created, meta });
         const { wrapper, router } = await mountAt("/sales-events?mall=amazon");
 
@@ -144,7 +144,7 @@ describe("SalesEventView", () => {
         expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="event-save"] svg').exists()).toBe(true);
 
-        finishRefresh({ data: [...list().data, created], meta });
+        finishRefresh({ data: [...list().data, summary(created)], meta });
         await flushPromises();
         expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
         expect(router.currentRoute.value.params.eventId).toBe("4");
@@ -158,7 +158,7 @@ describe("SalesEventView", () => {
         vi.mocked(fetchSalesEvents)
             .mockResolvedValueOnce(list())
             .mockResolvedValueOnce(list())
-            .mockResolvedValueOnce({ data: [...list().data, created], meta });
+            .mockResolvedValueOnce({ data: [...list().data, summary(created)], meta });
         vi.mocked(fetchSalesEvent).mockResolvedValue({ data: created, meta });
         const { wrapper, router } = await mountAt("/sales-events");
 

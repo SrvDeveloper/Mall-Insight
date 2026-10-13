@@ -114,8 +114,9 @@ class SalesEventPeriod extends Model
     public function dates(): array
     {
         $dates = [];
-        for ($day = $this->starts_on; $day->lte($this->ends_on); $day = $day->addDay()) {
-            $dates[] = $day->toDateString();
+        $end = $this->ends_on->format('Y-m-d');
+        for ($day = new \DateTime($this->starts_on->format('Y-m-d')); ($date = $day->format('Y-m-d')) <= $end; $day->modify('+1 day')) {
+            $dates[] = $date;
         }
 
         return $dates;

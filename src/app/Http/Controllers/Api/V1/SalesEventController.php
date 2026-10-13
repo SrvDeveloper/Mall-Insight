@@ -20,17 +20,27 @@ use Illuminate\Support\Facades\DB;
 class SalesEventController extends Controller
 {
     /**
-     * イベントの一覧（B-129、K-114）。イベントごとに、期間（初日の順）と、期間・チャネルごとの倍率（これからの期間は候補、
-     * 終わった期間は普段の何倍売れたか）を添える。次の期間（開催中かこれから）の早い順、無ければ最後の期間の新しい順に並べる。
+     * イベントの一覧（B-129、K-114・K-120）。イベントごとに、次の期間（開催中かこれから）と最後に終わった期間、期間の数を添える。
+     * 倍率（これからの期間は候補、終わった期間は普段の何倍売れたか）は、この2つの期間だけ求める（すべての期間を測ると遅いため。
+     * 期間ごとの倍率はイベントの画面で出す）。次の期間の早い順、無ければ最後の期間の新しい順に並べる。
      */
-    public function index(SalesEventReport $report): JsonResponse
+    public function index(SalesEventReport $report, EventUpliftEstimator $estimator): JsonResponse
     {
         $today = CarbonImmutable::today();
-        $events = SalesEvent::query()->with(['periods.multipliers', 'periods.updatedBy', 'createdBy', 'updatedBy'])->get();
-        $periods = $events->flatMap(fn (SalesEvent $event) => $event->periods->each(fn (SalesEventPeriod $period) => $period->setRelation('salesEvent', $event)))->sortBy(fn (SalesEventPeriod $period): string => $period->starts_on->toDateString())->values();
-        $overview = $report->overview($periods, $today);
+        $all = $estimator->periods()->load('updatedBy');
+        $events = SalesEvent::query()->with(['createdBy', 'updatedBy'])->get();
+        $byEvent = $all->groupBy('sales_event_id');
+        $shown = $events->flatMap(function (SalesEvent $event) use ($byEvent, $today): array {
+            $periods = $byEvent->get($event->id, collect());
 
-        $rows = $events->map(fn (SalesEvent $event): array => $this->eventData($event, $overview, $today));
+            return array_values(array_filter([
+                $periods->first(fn (SalesEventPeriod $period): bool => ! $period->hasEndedBefore($today)),
+                $periods->filter(fn (SalesEventPeriod $period): bool => $period->hasEndedBefore($today))->last(),
+            ]));
+        });
+        $overview = $report->overview($all, $shown, $today);
+
+        $rows = $events->map(fn (SalesEvent $event): array => $this->eventData($event, $byEvent->get($event->id, collect()), $overview, $today, withPeriods: false));
 
         return response()->json([
             'data' => $rows->sort(function (array $a, array $b): int {
@@ -49,16 +59,18 @@ class SalesEventController extends Controller
     }
 
     /**
-     * 1つのイベントと、その期間・倍率。
+     * 1つのイベントと、その期間・倍率（このイベントの期間だけ求める）。
      */
-    public function show(SalesEvent $salesEvent, SalesEventReport $report): JsonResponse
+    public function show(SalesEvent $salesEvent, SalesEventReport $report, EventUpliftEstimator $estimator): JsonResponse
     {
         $today = CarbonImmutable::today();
-        $salesEvent->load(['periods.multipliers', 'periods.updatedBy', 'createdBy', 'updatedBy']);
-        $all = app(EventUpliftEstimator::class)->periods();
+        $salesEvent->load(['createdBy', 'updatedBy']);
+        $all = $estimator->periods();
+        $periods = $all->where('sales_event_id', $salesEvent->id)->values();
+        $periods->load('updatedBy');
 
         return response()->json([
-            'data' => $this->eventData($salesEvent, $report->overview($all, $today), $today),
+            'data' => $this->eventData($salesEvent, $periods, $report->overview($all, $periods, $today), $today),
             'meta' => $this->meta(),
         ]);
     }
@@ -84,7 +96,7 @@ class SalesEventController extends Controller
             return $event;
         });
 
-        return $this->show($event, $report)->setStatusCode(201);
+        return $this->show($event, $report, app(EventUpliftEstimator::class))->setStatusCode(201);
     }
 
     /**
@@ -98,7 +110,7 @@ class SalesEventController extends Controller
             SalesEventMultiplier::query()->whereIn('sales_event_period_id', $salesEvent->periods()->select('id'))->whereNotIn('channel', $channels)->delete();
         });
 
-        return $this->show($salesEvent->refresh(), $report);
+        return $this->show($salesEvent->refresh(), $report, app(EventUpliftEstimator::class));
     }
 
     /**
@@ -112,27 +124,29 @@ class SalesEventController extends Controller
     }
 
     /**
-     * @param  array<int, list<array<string, mixed>>>  $overview  期間ID => チャネルごとの倍率
+     * @param  Collection<int, SalesEventPeriod>  $periods  イベントの期間（初日の順）
+     * @param  array<int, list<array<string, mixed>>>  $overview  期間ID => チャネルごとの倍率（求めた期間だけ）
+     * @param  bool  $withPeriods  false なら期間の一覧を付けず、期間の数だけにする（一覧）
      * @return array<string, mixed>
      */
-    private function eventData(SalesEvent $event, array $overview, CarbonImmutable $today): array
+    private function eventData(SalesEvent $event, Collection $periods, array $overview, CarbonImmutable $today, bool $withPeriods = true): array
     {
-        /** @var Collection<int, SalesEventPeriod> $periods */
-        $periods = $event->periods;
-        $periodRows = $periods->map(fn (SalesEventPeriod $period): array => [
+        $row = fn (SalesEventPeriod $period): array => [
             ...SalesEventPeriodResource::make($period)->resolve(),
             'multipliers' => $overview[$period->id] ?? [],
-        ])->values();
-        $next = $periodRows->first(fn (array $period): bool => $period['status'] !== 'ended');
-        $last = $periodRows->filter(fn (array $period): bool => $period['status'] === 'ended')->last();
+        ];
+        $next = $periods->first(fn (SalesEventPeriod $period): bool => ! $period->hasEndedBefore($today));
+        $last = $periods->filter(fn (SalesEventPeriod $period): bool => $period->hasEndedBefore($today))->last();
+        $endedCount = $periods->filter(fn (SalesEventPeriod $period): bool => $period->hasEndedBefore($today))->count();
 
         return [
             ...SalesEventResource::make($event)->resolve(),
-            'periods' => $periodRows->all(),
-            'next_period' => $next,
-            'last_period' => $last,
-            'upcoming_count' => $periodRows->filter(fn (array $period): bool => $period['status'] !== 'ended')->count(),
-            'ended_count' => $periodRows->filter(fn (array $period): bool => $period['status'] === 'ended')->count(),
+            ...($withPeriods ? ['periods' => $periods->map($row)->values()->all()] : []),
+            'period_count' => $periods->count(),
+            'next_period' => $next === null ? null : $row($next),
+            'last_period' => $last === null ? null : $row($last),
+            'upcoming_count' => $periods->count() - $endedCount,
+            'ended_count' => $endedCount,
         ];
     }
 

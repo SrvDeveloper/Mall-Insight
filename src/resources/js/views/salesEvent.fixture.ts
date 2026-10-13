@@ -4,7 +4,7 @@ import { RouterView, createMemoryHistory, createRouter } from "vue-router";
 import SalesEventDetailView from "@/views/SalesEventDetailView.vue";
 import SalesEventPeriodView from "@/views/SalesEventPeriodView.vue";
 import SalesEventView from "@/views/SalesEventView.vue";
-import type { SalesEventListResponse, SalesEventPeriodDetailResponse, SalesEventPeriodSummary, SalesEventStatus, SalesEventWithPeriods } from "@/types/api";
+import type { SalesEventListResponse, SalesEventPeriodDetailResponse, SalesEventPeriodSummary, SalesEventStatus, SalesEventSummary, SalesEventWithPeriods } from "@/types/api";
 
 /**
  * イベントの一覧・イベントの画面・期間の画面のテストで使うデータ。楽天スーパーセール（楽天市場、終了2・これから1）と
@@ -47,6 +47,7 @@ export function withPeriods(periods: SalesEventPeriodSummary[], overrides: Parti
         periods,
         next_period: periods.find((item) => item.status !== "ended") ?? null,
         last_period: periods.filter((item) => item.status === "ended").at(-1) ?? null,
+        period_count: periods.length,
         upcoming_count: periods.filter((item) => item.status !== "ended").length,
         ended_count: periods.filter((item) => item.status === "ended").length,
         ...overrides,
@@ -73,8 +74,13 @@ export const primeDay = withPeriods(
     },
 );
 
+/** 一覧の行（期間の一覧は付かない）。 */
+export function summary(event: SalesEventWithPeriods): SalesEventSummary {
+    return Object.fromEntries(Object.entries(event).filter(([key]) => key !== "periods")) as unknown as SalesEventSummary;
+}
+
 export function list(): SalesEventListResponse {
-    return { data: [withPeriods(salePeriods), marathon, primeDay], meta };
+    return { data: [withPeriods(salePeriods), marathon, primeDay].map(summary), meta };
 }
 
 /** 3つの画面を持つルーターで、path の画面を開く。 */

@@ -13,6 +13,7 @@ use App\Models\Sku;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class SalesEventControllerTest extends TestCase
@@ -121,14 +122,16 @@ class SalesEventControllerTest extends TestCase
         $other = $this->postJson('/api/v1/sales-events', ['name' => 'プライム感謝祭', 'malls' => ['amazon']])->assertCreated()->assertJsonPath('data.periods', [])->json('data.id');
         $this->postJson("/api/v1/sales-events/{$other}/periods", ['starts_on' => '2026-10-06', 'ends_on' => '2026-10-08'])->assertCreated()->assertJsonPath('data.status', 'ongoing');
 
-        // 次の期間の早い順。期間ごとに、これからは候補、終わったものは測った倍率
+        // 次の期間の早い順。一覧は次の期間と最後の期間だけ倍率を出し（これからは候補、終わったものは測った倍率）、期間の一覧は付けない
         $this->getJson('/api/v1/sales-events')
             ->assertOk()
             ->assertJsonPath('data.*.name', ['プライム感謝祭', '楽天スーパーセール'])
-            ->assertJsonPath('data.1.periods.*.starts_on', ['2026-09-04', '2026-12-04'])
-            ->assertJsonPath('data.1.periods.0.multipliers.0.kind', 'measured')
-            ->assertJsonPath('data.1.periods.0.status_label', '終了')
-            ->assertJsonPath('data.1.periods.1.multipliers.0.kind', 'candidate')
+            ->assertJsonMissingPath('data.1.periods')
+            ->assertJsonPath('data.1.period_count', 2)
+            ->assertJsonPath('data.1.next_period.starts_on', '2026-12-04')
+            ->assertJsonPath('data.1.next_period.multipliers.0.kind', 'candidate')
+            ->assertJsonPath('data.1.last_period.multipliers.0.kind', 'measured')
+            ->assertJsonPath('data.1.last_period.status_label', '終了')
             ->assertJsonPath('data.1.upcoming_count', 1)
             ->assertJsonPath('data.1.ended_count', 1)
             ->assertJsonPath('data.1.last_period.starts_on', '2026-09-04')
@@ -218,7 +221,8 @@ class SalesEventControllerTest extends TestCase
         $this->assertEqualsWithDelta(62 + 20, $months['2026-12']['quantity'], 0.01);
         $this->assertFalse($months['2026-12']['events'][0]['is_candidate']);
         $this->assertSame(6, $months['2027-03']['events'][0]['multiplier']);
-        $this->getJson('/api/v1/sales-events')->assertJsonPath('data.0.periods.2.multipliers.0.override_count', 1)->assertJsonPath('data.0.periods.3.multipliers.0.override_count', 0);
+        $this->getJson("/api/v1/sales-events/{$this->sale->id}")->assertJsonPath('data.periods.2.multipliers.0.override_count', 1)->assertJsonPath('data.periods.3.multipliers.0.override_count', 0);
+        $this->getJson('/api/v1/sales-events')->assertJsonPath('data.0.next_period.multipliers.0.override_count', 1);
 
         $this->putJson("/api/v1/sales-event-periods/{$december->id}/multipliers", ['multipliers' => [['item_no' => 'fl-01', 'channel' => 'amazon', 'multiplier' => 2]]])->assertUnprocessable()->assertJsonValidationErrors('multipliers.0.channel');
         $this->putJson("/api/v1/sales-event-periods/{$december->id}/multipliers", ['multipliers' => [['item_no' => 'fl-01', 'channel' => 'boss', 'multiplier' => 2.125]]])->assertUnprocessable()->assertJsonValidationErrors('multipliers.0.multiplier');
@@ -258,6 +262,35 @@ class SalesEventControllerTest extends TestCase
         $this->assertNull($ended->fresh());
         $this->deleteJson("/api/v1/sales-events/{$this->sale->id}")->assertNoContent();
         $this->assertSame(1, SalesEventPeriod::query()->count());
+    }
+
+    public function test_reuses_a_measured_period_until_what_it_was_measured_from_changes(): void
+    {
+        [$popular] = $this->salesWithTwoPastPeriods();
+        $ended = SalesEventPeriod::query()->whereDate('starts_on', '2026-09-04')->firstOrFail();
+        $readsSales = function (callable $request): bool {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $request();
+
+            return collect(DB::getQueryLog())->contains(fn (array $query): bool => str_contains($query['query'], 'sum(quantity)') && str_contains($query['query'], 'sales_lines'));
+        };
+
+        $this->assertTrue($readsSales(fn () => $this->getJson("/api/v1/sales-event-periods/{$ended->id}")->assertJsonPath('data.channels.0.actual', 56)));
+        // 何も変わらなければ、測り直さない（需要予測で候補を求めるときも同じ結果を使う）
+        $this->assertFalse($readsSales(fn () => $this->getJson("/api/v1/sales-event-periods/{$ended->id}")->assertJsonPath('data.channels.0.actual', 56)));
+
+        // その期間の販売実績が増えたら測り直す
+        $this->sellDaily($popular, '2026-09-05', '2026-09-05', fn (): int => 10);
+        $this->assertTrue($readsSales(fn () => $this->getJson("/api/v1/sales-event-periods/{$ended->id}")->assertJsonPath('data.channels.0.actual', 66)));
+
+        // 欠品の記録が入ったら測り直す（9月5日から欠品なら、セールの日は4日だけ数える）
+        Inventory::create(['stock_date' => '2026-09-05', 'sku_id' => $popular->id, 'warehouse' => 'boss_own', 'quantity' => 0]);
+        $this->getJson("/api/v1/sales-event-periods/{$ended->id}")->assertJsonPath('data.channels.0.items.0.actual', 12);
+
+        // 平均日販の期間に別のイベントの日が入ったら測り直す
+        $this->period('2026-08-10', '2026-08-12', SalesEvent::factory()->create(['name' => 'お買い物マラソン']));
+        $this->assertTrue($readsSales(fn () => $this->getJson("/api/v1/sales-event-periods/{$ended->id}")));
     }
 
     public function test_counts_the_increase_of_an_ongoing_period_in_full_for_the_rest_of_this_month_in_the_inventory_trend(): void

@@ -288,9 +288,14 @@ class DemandForecaster
      */
     private function dates(?CarbonImmutable $from, ?CarbonImmutable $to): array
     {
+        if ($from === null || $to === null) {
+            return [];
+        }
+        // 平均日販の期間の日付は何度も作るため、Carbon より速い DateTime で数える
         $dates = [];
-        for ($day = $from; $day !== null && $day <= $to; $day = $day->addDay()) {
-            $dates[] = $day->toDateString();
+        $end = $to->format('Y-m-d');
+        for ($day = new \DateTime($from->format('Y-m-d')); ($date = $day->format('Y-m-d')) <= $end; $day->modify('+1 day')) {
+            $dates[] = $date;
         }
 
         return $dates;
@@ -336,10 +341,11 @@ class DemandForecaster
      * @param  array<string, true>  $eventDates  平均日販から除くイベントの日 [Y-m-d => true]
      * @param  list<EventUplift>  $uplifts  倍率を掛けるこれからのイベント
      * @param  array<int, float>|null  $seasonal  季節係数（月 => 係数）。null なら季節による増減を掛けない
+     * @param  bool  $withMonthly  false なら月別の予測を作らない（イベントの倍率を測るときなど、基準平均日販だけ使うとき。monthly は空になる）
      */
-    public function forecastChannelWith(Channel $channel, array $plan, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = [], ?array $seasonal = null): ChannelForecast
+    public function forecastChannelWith(Channel $channel, array $plan, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = [], ?array $seasonal = null, bool $withMonthly = true): ChannelForecast
     {
-        return $this->forecastChannel($channel, $plan['ranges'], $plan['window_dates'], $dailySales, $stockoutDates, $forecastFrom, $eventDates, $uplifts, $seasonal);
+        return $this->forecastChannel($channel, $plan['ranges'], $plan['window_dates'], $dailySales, $stockoutDates, $forecastFrom, $eventDates, $uplifts, $seasonal, $withMonthly);
     }
 
     /**
@@ -350,7 +356,7 @@ class DemandForecaster
      * @param  array<string, true>  $eventDates  [Y-m-d => true]
      * @param  list<EventUplift>  $uplifts
      */
-    private function forecastChannel(Channel $channel, array $ranges, array $windowDates, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = [], ?array $seasonal = null): ChannelForecast
+    private function forecastChannel(Channel $channel, array $ranges, array $windowDates, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = [], ?array $seasonal = null, bool $withMonthly = true): ChannelForecast
     {
         // 期間ごとに、欠品日とイベントの日を除いた販売数と販売できた日数を数える。欠品していたイベントの日は欠品日として数える。
         // 季節係数があれば、販売できた日の係数を足し（季節で割り戻した日数）、平均日販を季節の影響を除いた値にする（B-106）
@@ -406,7 +412,7 @@ class DemandForecaster
             return new ChannelForecast($channel, $windows, null, null, UnpredictableReason::NoSales);
         }
 
-        return new ChannelForecast($channel, $windows, $baseAverage, $this->monthly($channel, $baseAverage, $forecastFrom, $uplifts, $seasonal));
+        return new ChannelForecast($channel, $windows, $baseAverage, $withMonthly ? $this->monthly($channel, $baseAverage, $forecastFrom, $uplifts, $seasonal) : []);
     }
 
     /**

@@ -16,9 +16,11 @@ class StockoutHistory
      */
     public function dailyStates(array $skuIds, CarbonImmutable $from, CarbonImmutable $to, Channel $channel): array
     {
+        // 日数が多いため、Carbon より速い DateTime で数える
         $dates = [];
-        for ($day = $from->startOfDay(); $day->lte($to); $day = $day->addDay()) {
-            $dates[] = $day->toDateString();
+        $end = $to->format('Y-m-d');
+        for ($day = new \DateTime($from->format('Y-m-d')); ($date = $day->format('Y-m-d')) <= $end; $day->modify('+1 day')) {
+            $dates[] = $date;
         }
         if ($dates === []) {
             return [];

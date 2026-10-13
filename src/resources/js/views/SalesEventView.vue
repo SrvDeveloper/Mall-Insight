@@ -4,7 +4,7 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 import { fetchSalesEvents } from "@/api/salesEvents";
 import SalesEventFormDialog from "@/components/salesEvent/SalesEventFormDialog.vue";
 import { MALLS, formatMultiplier, isMall, periodLabel, setEventFlash, statusClass, takeEventFlash, type MallValue } from "@/components/salesEvent/eventFormat";
-import type { SalesEventListResponse, SalesEventPeriodSummary, SalesEventWithPeriods } from "@/types/api";
+import type { SalesEventListResponse, SalesEventPeriodSummary, SalesEventSummary, SalesEventWithPeriods } from "@/types/api";
 
 /**
  * イベントの一覧（バックログ B-129、決定記録 K-112・K-114）。左メニュー「在庫試算」の需要予測の下に置く。
@@ -43,7 +43,7 @@ onMounted(() => void load());
 const events = computed(() => result.value?.data ?? []);
 const maxDays = computed(() => result.value?.meta.max_days ?? 31);
 
-const hasMall = (event: SalesEventWithPeriods, mall: MallValue): boolean => event.malls.some((item) => item.value === mall);
+const hasMall = (event: SalesEventSummary, mall: MallValue): boolean => event.malls.some((item) => item.value === mall);
 
 /** URL で選んだモール。無ければ、イベントのある最初のモール。 */
 const selectedMall = computed<MallValue>(() => {
@@ -60,14 +60,14 @@ function selectMall(mall: MallValue): void {
     void router.replace({ query: { ...route.query, mall } });
 }
 
-const eventLink = (event: SalesEventWithPeriods) => ({ name: "sales-event", params: { eventId: String(event.id) }, query: { mall: selectedMall.value } });
+const eventLink = (event: SalesEventSummary) => ({ name: "sales-event", params: { eventId: String(event.id) }, query: { mall: selectedMall.value } });
 
 /** 一覧の倍率に出す期間（次の期間、無ければ最後に終了した期間）。 */
-const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | null => event.next_period ?? event.last_period;
+const shownPeriod = (event: SalesEventSummary): SalesEventPeriodSummary | null => event.next_period ?? event.last_period;
 /** 選んでいるモールのチャネルの倍率。 */
-const shownMultiplier = (event: SalesEventWithPeriods) => shownPeriod(event)?.multipliers.find((multiplier) => multiplier.channel === selectedMallInfo.value.channel) ?? null;
+const shownMultiplier = (event: SalesEventSummary) => shownPeriod(event)?.multipliers.find((multiplier) => multiplier.channel === selectedMallInfo.value.channel) ?? null;
 /** 選んでいるモールのほかに開くモール。 */
-const otherMalls = (event: SalesEventWithPeriods) => event.malls.filter((mall) => mall.value !== selectedMall.value);
+const otherMalls = (event: SalesEventSummary) => event.malls.filter((mall) => mall.value !== selectedMall.value);
 
 // イベントの登録のモーダル
 const isFormOpen = ref(false);
@@ -122,24 +122,24 @@ async function refreshAfterEventSave(saved: SalesEventWithPeriods): Promise<void
         </p>
 
         <section class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">
-            <div class="flex flex-wrap items-end justify-between gap-x-3 border-b border-stone-200 px-4">
-                <div class="-mb-px flex flex-wrap gap-1" role="tablist" aria-label="モール">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3.5">
+                <div class="inline-flex flex-wrap gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="tablist" aria-label="モール">
                     <button
                         v-for="tab in tabs"
                         :key="tab.value"
                         type="button"
                         role="tab"
-                        class="flex h-11 items-center gap-1.5 border-b-2 px-3 text-[13px]"
-                        :class="selectedMall === tab.value ? 'border-stone-900 font-semibold text-stone-900' : 'border-transparent text-stone-500 hover:border-stone-300 hover:text-stone-800'"
+                        class="inline-flex h-8 items-center gap-1.5 rounded-[7px] px-3 text-[13px]"
+                        :class="selectedMall === tab.value ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
                         :aria-selected="selectedMall === tab.value"
                         :data-testid="`mall-tab-${tab.value}`"
                         @click="selectMall(tab.value)"
                     >
                         {{ tab.label }}
-                        <span class="rounded-full bg-stone-100 px-1.5 text-[11px] font-medium text-stone-600 tabular-nums">{{ result ? tab.count : "" }}</span>
+                        <span class="font-normal tabular-nums" :class="selectedMall === tab.value ? 'text-stone-300' : 'text-stone-500'">{{ result ? tab.count : "" }}</span>
                     </button>
                 </div>
-                <p class="py-3 text-[11px] text-stone-400">イベントを押すと、期間の一覧を開きます</p>
+                <p class="text-[11px] text-stone-400">イベントを押すと、期間の一覧を開きます</p>
             </div>
 
             <div v-if="hasError" class="flex flex-col items-center gap-3 px-6 py-16 text-center">
@@ -216,7 +216,7 @@ async function refreshAfterEventSave(saved: SalesEventWithPeriods): Promise<void
                                 </template>
                             </td>
                             <td class="px-3 py-3 align-top text-xs whitespace-nowrap text-stone-600 tabular-nums" data-testid="row-counts">
-                                {{ event.periods.length }}件<span class="ml-1 text-stone-400">（予定 {{ event.upcoming_count }}・終了 {{ event.ended_count }}）</span>
+                                {{ event.period_count }}件<span class="ml-1 text-stone-400">（予定 {{ event.upcoming_count }}・終了 {{ event.ended_count }}）</span>
                             </td>
                             <td class="px-3 py-3 text-right align-top text-stone-400">
                                 <svg class="ml-auto size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

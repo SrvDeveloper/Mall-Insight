@@ -5,8 +5,11 @@ namespace App\Services\Forecast;
 use App\Enums\Channel;
 use App\Models\Item;
 use App\Models\SalesEventPeriod;
+use App\Models\Sku;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /**
  * イベント（B-129、決定記録 K-112・K-114）の期間の、平均日販から除く日と倍率を決める。以下の「イベント」は、イベントの1回の期間を指す。
@@ -26,6 +29,12 @@ class EventUpliftEstimator
 
     /** 品番の倍率を候補にするのに必要な、過去のイベントで普段なら売れた数の合計。これ未満なら全体の倍率を使う。 */
     public const MIN_EXPECTED = 10.0;
+
+    /** 終わった期間を測った結果をキャッシュに残す日数（測るのに使うものが変われば、キーが変わって測り直す）。 */
+    private const CACHE_DAYS = 30;
+
+    /** 測り方を変えたら上げる（古いキャッシュを使わないため）。 */
+    private const CACHE_VERSION = 1;
 
     /**
      * 登録したすべてのイベントの期間（初日の順）。イベント（名前・モール）と担当者が入れた倍率を読み込んでおく。
@@ -144,6 +153,7 @@ class EventUpliftEstimator
     public function measure(DemandForecaster $forecaster, array $excluded, Collection $targets, Collection $items, array $channelRanges, array $seasonal = []): array
     {
         $measurements = [];
+        $versions = null;
         foreach ($channelRanges as $range) {
             $channel = $range['channel'];
             if ($range['from'] === null || $range['to'] === null) {
@@ -154,17 +164,32 @@ class EventUpliftEstimator
             if ($measurable->isEmpty() || $skus->isEmpty()) {
                 continue;
             }
+            $excludedDates = $excluded[$channel->value] ?? [];
+
+            // 測った結果は、測るのに使ったもの（期間・除く日・SKU・季節係数・その期間の販売実績と在庫）が同じ間は変わらないため、キャッシュから使う
+            $versions ??= $this->dataVersions();
+            $keys = $measurable->mapWithKeys(fn (SalesEventPeriod $event): array => [$event->id => $this->cacheKey($event, $channel, $range['from'], $skus, $seasonal, $excludedDates, $versions)])->all();
+            $cached = Cache::many(array_values($keys));
+            $missing = $measurable->filter(fn (SalesEventPeriod $event): bool => ! is_array($cached[$keys[$event->id]] ?? null))->values();
+            foreach ($measurable as $event) {
+                $values = $cached[$keys[$event->id]] ?? null;
+                if (is_array($values)) {
+                    $measurements[$event->id][$channel->value] = new EventMeasurement($event, $channel, $values['items'], $values['expected'], $values['actual'], $values['sku_count']);
+                }
+            }
+            if ($missing->isEmpty()) {
+                continue;
+            }
 
             // 平均日販の期間（初日の180日前から）とイベントの期間の販売実績・欠品を、1回で読む
-            $windowDays = array_sum(array_keys(DemandForecaster::WINDOW_WEIGHTS));
-            $loadFrom = $measurable->min(fn (SalesEventPeriod $event): CarbonImmutable => $event->starts_on)->subDays($windowDays)->max($range['from']);
-            $loadTo = $measurable->max(fn (SalesEventPeriod $event): CarbonImmutable => $event->ends_on);
+            $loadFrom = $missing->min(fn (SalesEventPeriod $event): CarbonImmutable => $event->starts_on)->subDays(self::windowDays())->max($range['from']);
+            $loadTo = $missing->max(fn (SalesEventPeriod $event): CarbonImmutable => $event->ends_on);
             $skuIds = $skus->map(fn (array $entry): int => $entry[1]->id)->all();
             $sales = $forecaster->channelDailySales($skuIds, $channel, $loadFrom, $loadTo);
             $stockouts = $forecaster->channelStockoutDates($skuIds, $channel, $loadFrom, $loadTo);
-            $excludedDates = $excluded[$channel->value] ?? [];
 
-            foreach ($measurable as $event) {
+            $computed = [];
+            foreach ($missing as $event) {
                 $plan = $forecaster->windowPlan($range['from'], $range['to'], $event->starts_on);
                 $dates = $event->dates();
                 $byItem = [];
@@ -173,7 +198,7 @@ class EventUpliftEstimator
                     $skuSales = $sales[$sku->id] ?? [];
                     $skuStockouts = $stockouts[$sku->id] ?? [];
                     $factors = $seasonal[$itemNo] ?? null;
-                    $base = $forecaster->forecastChannelWith($channel, $plan, $skuSales, $skuStockouts, $event->starts_on, $excludedDates, [], $factors);
+                    $base = $forecaster->forecastChannelWith($channel, $plan, $skuSales, $skuStockouts, $event->starts_on, $excludedDates, [], $factors, withMonthly: false);
                     if (! $base->isPredictable()) {
                         continue;
                     }
@@ -191,18 +216,69 @@ class EventUpliftEstimator
                     $byItem[$itemNo] = ['expected' => $current['expected'] + $base->baseAverage * $days, 'actual' => $current['actual'] + $actual];
                     $skuCount++;
                 }
-                $measurements[$event->id][$channel->value] = new EventMeasurement(
-                    $event,
-                    $channel,
-                    $byItem,
-                    array_sum(array_column($byItem, 'expected')),
-                    array_sum(array_column($byItem, 'actual')),
-                    $skuCount,
-                );
+                $values = ['items' => $byItem, 'expected' => array_sum(array_column($byItem, 'expected')), 'actual' => array_sum(array_column($byItem, 'actual')), 'sku_count' => $skuCount];
+                $computed[$keys[$event->id]] = $values;
+                $measurements[$event->id][$channel->value] = new EventMeasurement($event, $channel, $values['items'], $values['expected'], $values['actual'], $values['sku_count']);
             }
+            Cache::putMany($computed, now()->addDays(self::CACHE_DAYS));
         }
 
         return $measurements;
+    }
+
+    /** 平均日販を出す期間の日数の合計（初日の何日前から販売実績を使うか）。 */
+    private static function windowDays(): int
+    {
+        return array_sum(array_keys(DemandForecaster::WINDOW_WEIGHTS));
+    }
+
+    /**
+     * 販売実績と在庫の、月ごとの版（いちばん大きい行IDと行数）。取込は行を消して入れ直すため、月の中身が変わればどちらかが変わる。
+     *
+     * @return array{sales: array<string, string>, inventories: array<string, string>} 種類 => 年月（Y-m） => 版
+     */
+    private function dataVersions(): array
+    {
+        $byMonth = fn (string $table, string $column): array => DB::table($table)
+            ->selectRaw("substr({$column}, 1, 7) as month, max(id) as max_id, count(*) as row_count")
+            ->groupByRaw("substr({$column}, 1, 7)")
+            ->get()
+            ->mapWithKeys(fn (object $row): array => [(string) $row->month => $row->max_id.'/'.$row->row_count])
+            ->all();
+
+        return ['sales' => $byMonth('sales_lines', 'sales_date'), 'inventories' => $byMonth('inventories', 'stock_date')];
+    }
+
+    /**
+     * 終わった期間をチャネルで測った結果のキャッシュのキー。測るのに使うものをすべて含める：期間の日付、販売実績の最初の日（平均日販の期間に入るとき）、
+     * SKUと季節係数、平均日販の期間とイベントの期間に入る除く日、その間の月の販売実績の版、イベントの最終日の月までの在庫の版
+     * （欠品は、記録の無い日に直前の記録の状態を引き継ぐため、それより前の在庫も使う）。
+     *
+     * @param  Collection<int, array{0: string, 1: Sku}>  $skus
+     * @param  array<string, array<int, float>>  $seasonal
+     * @param  array<string, true>  $excludedDates
+     * @param  array{sales: array<string, string>, inventories: array<string, string>}  $versions
+     */
+    private function cacheKey(SalesEventPeriod $event, Channel $channel, CarbonImmutable $salesDataFrom, Collection $skus, array $seasonal, array $excludedDates, array $versions): string
+    {
+        $windowFrom = $event->starts_on->subDays(self::windowDays())->toDateString();
+        $endsOn = $event->ends_on->toDateString();
+        $fromMonth = substr($windowFrom, 0, 7);
+        $toMonth = substr($endsOn, 0, 7);
+        $excludedInWindow = array_values(array_filter(array_keys($excludedDates), fn (string $date): bool => $date >= $windowFrom && $date <= $endsOn));
+        sort($excludedInWindow);
+
+        return 'event-measurement:'.md5((string) json_encode([
+            self::CACHE_VERSION,
+            $channel->value,
+            $event->starts_on->toDateString(),
+            $endsOn,
+            max($salesDataFrom->toDateString(), $windowFrom),
+            $skus->map(fn (array $entry): array => [$entry[0], $entry[1]->id, $seasonal[$entry[0]] ?? null])->all(),
+            $excludedInWindow,
+            array_filter($versions['sales'], fn (string $month): bool => $month >= $fromMonth && $month <= $toMonth, ARRAY_FILTER_USE_KEY),
+            array_filter($versions['inventories'], fn (string $month): bool => $month <= $toMonth, ARRAY_FILTER_USE_KEY),
+        ]));
     }
 
     /**
