@@ -12,7 +12,6 @@ use App\Models\SalesLine;
 use App\Services\Actuals\StockoutHistory;
 use App\Services\InventoryTrend\TrendSettings;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Collection;
 
 /**
  * 需要予測の当たり具合を、過去に戻って予測をやり直して測る（バックテスト、バックログ B-130・決定記録 K-111）。
@@ -143,8 +142,8 @@ class ForecastBacktester
             foreach ($allOrigins as $origin) {
                 $contexts[] = [
                     ...$this->context($range, $origin, $origins, $checkMonthOffset),
-                    'uplifts' => $this->uplifts($channel, $origin, $events, $measurements, $items),
-                    'seasonal_uplifts' => $this->uplifts($channel, $origin, $events, $seasonalMeasurements, $items),
+                    'uplifts' => $this->eventUplifts->candidateUplifts($channel, $origin, $events, $measurements, $items),
+                    'seasonal_uplifts' => $this->eventUplifts->candidateUplifts($channel, $origin, $events, $seasonalMeasurements, $items),
                 ];
             }
 
@@ -308,31 +307,6 @@ class ForecastBacktester
             BacktestMethod::RecentAverage->value => $recentMonthly,
             BacktestMethod::LastYear->value => $lastYearMonthly,
         ];
-    }
-
-    /**
-     * 起点時点の、品番ごとのこれからのイベントの倍率の候補（起点より前に終わった同じイベントの期間から求める）。倍率は起点以降の日に掛ける。
-     *
-     * @param  Collection<int, SalesEventPeriod>  $events
-     * @param  array<int, array<string, EventMeasurement>>  $measurements
-     * @param  list<Item>  $items
-     * @return array<string, list<EventUplift>> 品番 => イベント
-     */
-    private function uplifts(Channel $channel, CarbonImmutable $origin, Collection $events, array $measurements, array $items): array
-    {
-        $uplifts = [];
-        foreach ($this->eventUplifts->upcoming($events, $origin) as $event) {
-            if (! $event->isOn($channel)) {
-                continue;
-            }
-            $candidate = $this->eventUplifts->candidate($event, $channel, $events, $measurements, $origin);
-            $dates = array_values(array_filter($event->dates(), fn (string $date): bool => $date >= $origin->toDateString()));
-            foreach ($items as $item) {
-                $uplifts[$item->item_no][] = new EventUplift($event, $candidate->forItem($item->item_no), true, $dates);
-            }
-        }
-
-        return $uplifts;
     }
 
     /**

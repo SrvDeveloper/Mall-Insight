@@ -107,6 +107,7 @@ class DemandForecaster
             ])->values()->all(),
             events: $events,
             seasonalFactors: $seasonal,
+            eventPlan: $eventPlan,
         );
     }
 
@@ -346,6 +347,41 @@ class DemandForecaster
     public function forecastChannelWith(Channel $channel, array $plan, array $dailySales, array $stockoutDates, CarbonImmutable $forecastFrom, array $eventDates = [], array $uplifts = [], ?array $seasonal = null, bool $withMonthly = true): ChannelForecast
     {
         return $this->forecastChannel($channel, $plan['ranges'], $plan['window_dates'], $dailySales, $stockoutDates, $forecastFrom, $eventDates, $uplifts, $seasonal, $withMonthly);
+    }
+
+    /**
+     * 日ごとの需要（B-131）の、日ごとのイベントの倍率。monthly() と同じく、その日に重なるイベントの倍率の大きい方とし
+     * （倍率を出せないイベントは掛けない）、$from より前の日には掛けない。1日分の需要＝基準平均日販×その月の季節係数×この倍率（無い日は1）。
+     *
+     * @param  list<array{dates: list<string>, multiplier: float|null}>  $uplifts  イベントの、倍率を掛ける日と倍率
+     * @return array<string, float> Y-m-d => 倍率
+     */
+    public static function eventMultipliers(array $uplifts, string $from): array
+    {
+        $multipliers = [];
+        foreach ($uplifts as $uplift) {
+            if ($uplift['multiplier'] === null) {
+                continue;
+            }
+            foreach ($uplift['dates'] as $date) {
+                if ($date >= $from && $uplift['multiplier'] > ($multipliers[$date] ?? 0.0)) {
+                    $multipliers[$date] = $uplift['multiplier'];
+                }
+            }
+        }
+
+        return $multipliers;
+    }
+
+    /**
+     * 1日分の需要（B-131）＝基準平均日販×その月の季節係数（登録した品番）×その日のイベントの倍率（eventMultipliers()）。
+     *
+     * @param  array<int, float>|null  $seasonal
+     * @param  array<string, float>  $multipliers
+     */
+    public static function dailyQuantity(float $baseAverage, ?array $seasonal, array $multipliers, string $date): float
+    {
+        return $baseAverage * ($seasonal === null ? 1.0 : $seasonal[(int) substr($date, 5, 2)]) * ($multipliers[$date] ?? 1.0);
     }
 
     /**

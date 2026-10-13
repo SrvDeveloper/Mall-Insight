@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
 use App\Http\Controllers\Api\V1\DemandForecastController;
 use App\Http\Controllers\Api\V1\ForecastBacktestController;
+use App\Http\Controllers\Api\V1\ForecastTimelineController;
 use App\Http\Controllers\Api\V1\InboundPlanController;
 use App\Http\Controllers\Api\V1\InboundPlanReceiptController;
 use App\Http\Controllers\Api\V1\InventoryDateController;
@@ -40,6 +41,7 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::get('/item-selections/current', [ItemSelectionController::class, 'current'])->name('item-selections.current');
         Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
         Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
+        Route::get('/demand-forecasts/timeline', [ForecastTimelineController::class, 'index'])->name('demand-forecasts.timeline');
         Route::apiResource('sales-events', SalesEventController::class)->parameters(['sales-events' => 'salesEvent']);
         Route::post('/sales-events/{salesEvent}/periods', [SalesEventPeriodController::class, 'store'])->name('sales-events.periods.store');
         Route::apiResource('sales-event-periods', SalesEventPeriodController::class)->only(['show', 'update', 'destroy'])->parameters(['sales-event-periods' => 'salesEventPeriod']);

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\SkuForecastResource;
 use App\Models\Item;
 use App\Models\SalesEventPeriod;
+use App\Services\Forecast\DemandForecast;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\Forecast\SkuForecast;
 use App\Services\Pricing\UnitPriceCatalog;
@@ -39,59 +40,47 @@ class DemandForecastController extends Controller
                 'category' => $entry['item']->category,
                 'skus' => array_map(fn (SkuForecast $sku, array $resource): array => [
                     ...$resource,
-                    'unit_prices' => $this->unitPrices($sku, $entry['item']->item_no, $prices),
+                    'unit_prices' => $prices->forecastPrices($sku, $entry['item']->item_no),
                 ], $entry['skus'], SkuForecastResource::collection($entry['skus'])->resolve()),
             ], $forecast->items),
-            'meta' => [
-                'calculated_at' => $forecast->calculatedAt->toIso8601String(),
-                'channels' => array_map(fn (array $channel): array => [
-                    'channel' => $channel['channel']->value,
-                    'label' => $channel['channel']->label(),
-                    'sales_data_from' => $channel['from']?->toDateString(),
-                    'sales_data_to' => $channel['to']?->toDateString(),
-                ], $forecast->channels),
-                'forecast_from' => $forecast->forecastFrom->toDateString(),
-                'selection' => $forecast->selection === null ? null : [
-                    'confirmed_at' => $forecast->selection->confirmed_at->toIso8601String(),
-                    'item_count' => $forecast->selection->items->count(),
-                ],
-                'window_weights' => array_map(fn (int $length, float $weight): array => ['length' => $length, 'weight' => $weight], array_keys(DemandForecaster::WINDOW_WEIGHTS), DemandForecaster::WINDOW_WEIGHTS),
-                'min_sales_days' => DemandForecaster::MIN_SALES_DAYS,
-                // 平均日販から日を除き、これからの日に倍率を掛けたイベントの期間（B-129、K-112・K-114）
-                'events' => $forecast->events->map(fn (SalesEventPeriod $period): array => [
-                    'id' => $period->id,
-                    'event_id' => $period->sales_event_id,
-                    'name' => $period->name,
-                    'starts_on' => $period->starts_on->toDateString(),
-                    'ends_on' => $period->ends_on->toDateString(),
-                    'channels' => array_map(fn (Channel $channel): string => $channel->value, $period->channels()),
-                    'status' => $period->status($forecast->forecastFrom)->value,
-                ])->values()->all(),
-                // 季節係数を登録した品番（B-106、K-113）
-                'seasonal_item_nos' => array_keys($forecast->seasonalFactors),
-            ],
+            'meta' => self::meta($forecast),
         ]);
     }
 
     /**
-     * SKUの金額の概算に使う単価（税込）。合計は予測できたモールの基準平均日販で加重平均する。出せなければ null。
+     * 需要予測の計算の条件（販売実績の期間・対象品番・平均日販の期間と重み・イベント・季節係数を登録した品番）。需要予測の画面（B-131）でも使う。
      *
-     * @return array<string, float|null> total・Channel の値 => 単価
+     * @return array<string, mixed>
      */
-    private function unitPrices(SkuForecast $sku, string $itemNo, UnitPriceCatalog $prices): array
+    public static function meta(DemandForecast $forecast): array
     {
-        $weights = [];
-        foreach ($sku->channels as $channel) {
-            if ($channel->isPredictable()) {
-                $weights[$channel->channel->value] = $channel->baseAverage;
-            }
-        }
-        $round = fn (?float $price): ?float => $price === null ? null : round($price, 2);
-        $unitPrices = ['total' => $round($prices->blendedPrice($itemNo, $weights))];
-        foreach (Channel::cases() as $channel) {
-            $unitPrices[$channel->value] = $round($prices->channelPrice($itemNo, $channel));
-        }
-
-        return $unitPrices;
+        return [
+            'calculated_at' => $forecast->calculatedAt->toIso8601String(),
+            'channels' => array_map(fn (array $channel): array => [
+                'channel' => $channel['channel']->value,
+                'label' => $channel['channel']->label(),
+                'sales_data_from' => $channel['from']?->toDateString(),
+                'sales_data_to' => $channel['to']?->toDateString(),
+            ], $forecast->channels),
+            'forecast_from' => $forecast->forecastFrom->toDateString(),
+            'selection' => $forecast->selection === null ? null : [
+                'confirmed_at' => $forecast->selection->confirmed_at->toIso8601String(),
+                'item_count' => $forecast->selection->items->count(),
+            ],
+            'window_weights' => array_map(fn (int $length, float $weight): array => ['length' => $length, 'weight' => $weight], array_keys(DemandForecaster::WINDOW_WEIGHTS), DemandForecaster::WINDOW_WEIGHTS),
+            'min_sales_days' => DemandForecaster::MIN_SALES_DAYS,
+            // 平均日販から日を除き、これからの日に倍率を掛けたイベントの期間（B-129、K-112・K-114）
+            'events' => $forecast->events->map(fn (SalesEventPeriod $period): array => [
+                'id' => $period->id,
+                'event_id' => $period->sales_event_id,
+                'name' => $period->name,
+                'starts_on' => $period->starts_on->toDateString(),
+                'ends_on' => $period->ends_on->toDateString(),
+                'channels' => array_map(fn (Channel $channel): string => $channel->value, $period->channels()),
+                'status' => $period->status($forecast->forecastFrom)->value,
+            ])->values()->all(),
+            // 季節係数を登録した品番（B-106、K-113）
+            'seasonal_item_nos' => array_keys($forecast->seasonalFactors),
+        ];
     }
 }

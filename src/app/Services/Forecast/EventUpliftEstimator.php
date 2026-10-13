@@ -9,7 +9,6 @@ use App\Models\Sku;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 /**
  * イベント（B-129、決定記録 K-112・K-114）の期間の、平均日販から除く日と倍率を決める。以下の「イベント」は、イベントの1回の期間を指す。
@@ -167,7 +166,7 @@ class EventUpliftEstimator
             $excludedDates = $excluded[$channel->value] ?? [];
 
             // 測った結果は、測るのに使ったもの（期間・除く日・SKU・季節係数・その期間の販売実績と在庫）が同じ間は変わらないため、キャッシュから使う
-            $versions ??= $this->dataVersions();
+            $versions ??= DataVersions::current();
             $keys = $measurable->mapWithKeys(fn (SalesEventPeriod $event): array => [$event->id => $this->cacheKey($event, $channel, $range['from'], $skus, $seasonal, $excludedDates, $versions)])->all();
             $cached = Cache::many(array_values($keys));
             $missing = $measurable->filter(fn (SalesEventPeriod $event): bool => ! is_array($cached[$keys[$event->id]] ?? null))->values();
@@ -233,23 +232,6 @@ class EventUpliftEstimator
     }
 
     /**
-     * 販売実績と在庫の、月ごとの版（いちばん大きい行IDと行数）。取込は行を消して入れ直すため、月の中身が変わればどちらかが変わる。
-     *
-     * @return array{sales: array<string, string>, inventories: array<string, string>} 種類 => 年月（Y-m） => 版
-     */
-    private function dataVersions(): array
-    {
-        $byMonth = fn (string $table, string $column): array => DB::table($table)
-            ->selectRaw("substr({$column}, 1, 7) as month, max(id) as max_id, count(*) as row_count")
-            ->groupByRaw("substr({$column}, 1, 7)")
-            ->get()
-            ->mapWithKeys(fn (object $row): array => [(string) $row->month => $row->max_id.'/'.$row->row_count])
-            ->all();
-
-        return ['sales' => $byMonth('sales_lines', 'sales_date'), 'inventories' => $byMonth('inventories', 'stock_date')];
-    }
-
-    /**
      * 終わった期間をチャネルで測った結果のキャッシュのキー。測るのに使うものをすべて含める：期間の日付、販売実績の最初の日（平均日販の期間に入るとき）、
      * SKUと季節係数、平均日販の期間とイベントの期間に入る除く日、その間の月の販売実績の版、イベントの最終日の月までの在庫の版
      * （欠品は、記録の無い日に直前の記録の状態を引き継ぐため、それより前の在庫も使う）。
@@ -257,9 +239,8 @@ class EventUpliftEstimator
      * @param  Collection<int, array{0: string, 1: Sku}>  $skus
      * @param  array<string, array<int, float>>  $seasonal
      * @param  array<string, true>  $excludedDates
-     * @param  array{sales: array<string, string>, inventories: array<string, string>}  $versions
      */
-    private function cacheKey(SalesEventPeriod $event, Channel $channel, CarbonImmutable $salesDataFrom, Collection $skus, array $seasonal, array $excludedDates, array $versions): string
+    private function cacheKey(SalesEventPeriod $event, Channel $channel, CarbonImmutable $salesDataFrom, Collection $skus, array $seasonal, array $excludedDates, DataVersions $versions): string
     {
         $windowFrom = $event->starts_on->subDays(self::windowDays())->toDateString();
         $endsOn = $event->ends_on->toDateString();
@@ -276,9 +257,36 @@ class EventUpliftEstimator
             max($salesDataFrom->toDateString(), $windowFrom),
             $skus->map(fn (array $entry): array => [$entry[0], $entry[1]->id, $seasonal[$entry[0]] ?? null])->all(),
             $excludedInWindow,
-            array_filter($versions['sales'], fn (string $month): bool => $month >= $fromMonth && $month <= $toMonth, ARRAY_FILTER_USE_KEY),
-            array_filter($versions['inventories'], fn (string $month): bool => $month <= $toMonth, ARRAY_FILTER_USE_KEY),
+            $versions->salesBetween($fromMonth, $toMonth),
+            $versions->inventoriesUntil($toMonth),
         ]));
+    }
+
+    /**
+     * 過去のある日（$origin）に戻ったときの、品番ごとのこれからのイベントの倍率の候補（$origin より前に終わった同じイベントの期間から求める）。
+     * 担当者が入れた倍率は、後から分かったことで決めた値のため使わない。倍率は $origin 以降の日に掛ける。
+     * 予測精度の測定（B-130）と、需要予測の画面の予測し直した数（B-131）で使う。
+     *
+     * @param  Collection<int, SalesEventPeriod>  $events
+     * @param  array<int, array<string, EventMeasurement>>  $measurements
+     * @param  iterable<Item>  $items
+     * @return array<string, list<EventUplift>> 品番 => イベント
+     */
+    public function candidateUplifts(Channel $channel, CarbonImmutable $origin, Collection $events, array $measurements, iterable $items): array
+    {
+        $uplifts = [];
+        foreach ($this->upcoming($events, $origin) as $event) {
+            if (! $event->isOn($channel)) {
+                continue;
+            }
+            $candidate = $this->candidate($event, $channel, $events, $measurements, $origin);
+            $dates = array_values(array_filter($event->dates(), fn (string $date): bool => $date >= $origin->toDateString()));
+            foreach ($items as $item) {
+                $uplifts[$item->item_no][] = new EventUplift($event, $candidate->forItem($item->item_no), true, $dates);
+            }
+        }
+
+        return $uplifts;
     }
 
     /**

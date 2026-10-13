@@ -8,6 +8,7 @@ use App\Models\Item;
 use App\Models\ItemUnitPrice;
 use App\Models\SalesLine;
 use App\Models\Sku;
+use App\Services\Forecast\SkuForecast;
 use App\Services\SalesTarget\PriceBasis;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -152,5 +153,27 @@ final class UnitPriceCatalog
         }
 
         return $total / array_sum($weights);
+    }
+
+    /**
+     * 需要予測の金額の概算に使う、SKUの単価（税込、B-123）。合計は予測できたモールの基準平均日販で加重平均する（K-073）。出せなければ null。
+     *
+     * @return array<string, float|null> total・Channel の値 => 単価
+     */
+    public function forecastPrices(SkuForecast $sku, string $itemNo): array
+    {
+        $weights = [];
+        foreach ($sku->channels as $channel) {
+            if ($channel->isPredictable()) {
+                $weights[$channel->channel->value] = $channel->baseAverage;
+            }
+        }
+        $round = fn (?float $price): ?float => $price === null ? null : round($price, 2);
+        $prices = ['total' => $round($this->blendedPrice($itemNo, $weights))];
+        foreach (Channel::cases() as $channel) {
+            $prices[$channel->value] = $round($this->channelPrice($itemNo, $channel));
+        }
+
+        return $prices;
     }
 }

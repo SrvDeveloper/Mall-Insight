@@ -19,6 +19,7 @@ final readonly class DemandForecast
      * @param  list<array{item: Item, skus: list<SkuForecast>}>  $items  対象品番の順（売上順位の高い順）
      * @param  Collection<int, SalesEventPeriod>  $events  登録したイベントの期間（B-129、K-114）。平均日販から除いた日と、倍率を掛けたこれからの期間の根拠
      * @param  array<string, array<int, float>>  $seasonalFactors  品番 => 登録した季節係数（B-106）
+     * @param  EventPlan  $eventPlan  平均日販から除いた日と、品番・チャネルごとのこれからのイベントの倍率（日ごとの予測に使う、B-131）
      */
     public function __construct(
         public CarbonImmutable $calculatedAt,
@@ -28,5 +29,6 @@ final readonly class DemandForecast
         public array $items,
         public Collection $events = new Collection,
         public array $seasonalFactors = [],
+        public EventPlan $eventPlan = new EventPlan,
     ) {}
 }
