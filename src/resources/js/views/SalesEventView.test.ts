@@ -364,7 +364,11 @@ describe("SalesEventView", () => {
     });
 
     it("registers an event with its first period and opens its periods", async () => {
-        vi.mocked(createSalesEvent).mockResolvedValue({ data: withPeriods([period(31, "2026-11-24", "2026-12-01", "upcoming")], { id: 3, name: "ブラックフライデー" }), meta });
+        const created = withPeriods([period(31, "2026-11-24", "2026-12-01", "upcoming")], { id: 3, name: "ブラックフライデー" });
+        vi.mocked(createSalesEvent).mockResolvedValue({ data: created, meta });
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce({ data: [...list().data, created], meta });
         const { wrapper, router } = await mountView();
 
         await wrapper.find('[data-testid="add-event"]').trigger("click");
@@ -380,6 +384,71 @@ describe("SalesEventView", () => {
         expect(createSalesEvent).toHaveBeenCalledWith({ name: "ブラックフライデー", malls: ["amazon"], note: null, period: { starts_on: "2026-11-24", ends_on: "2026-12-01", note: null } });
         expect(wrapper.find('[data-testid="message"]').text()).toContain("ブラックフライデーを登録しました。");
         expect(router.currentRoute.value.query.event).toBe("3");
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+        expect(wrapper.findAll('[data-testid="event-row"]')).toHaveLength(3);
+        wrapper.unmount();
+    });
+
+    it("keeps the event dialog open with a spinner until the registered event appears in the list", async () => {
+        const created = withPeriods([], { id: 3, name: "ブラックフライデー", note: null });
+        let finishCreate!: (response: { data: SalesEventWithPeriods; meta: typeof meta }) => void;
+        let finishRefresh!: (result: SalesEventListResponse) => void;
+        vi.mocked(createSalesEvent).mockReturnValue(new Promise((resolve) => (finishCreate = resolve)));
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockReturnValueOnce(new Promise((resolve) => (finishRefresh = resolve)));
+        const { wrapper, router } = await mountView();
+
+        await wrapper.find('[data-testid="add-event"]').trigger("click");
+        await wrapper.find('[data-testid="event-name"]').setValue("ブラックフライデー");
+        await wrapper.find('[data-testid="event-mall-amazon"]').setValue(true);
+        await wrapper.find("form").trigger("submit");
+
+        expect(wrapper.find("form").attributes("aria-busy")).toBe("true");
+        expect(wrapper.find('[data-testid="event-save"] svg').classes()).toContain("animate-spin");
+        expect(wrapper.find('[data-testid="event-save"]').text()).toBe("登録中…");
+        expect(wrapper.find('[role="dialog"] button[aria-label="閉じる"]').attributes("disabled")).toBeDefined();
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        await flushPromises();
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+
+        finishCreate({ data: created, meta });
+        await flushPromises();
+        expect(fetchSalesEvents).toHaveBeenCalledTimes(2);
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="event-save"] svg').exists()).toBe(true);
+
+        finishRefresh({ data: [...list().data, created], meta });
+        await flushPromises();
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+        expect(wrapper.findAll('[data-testid="event-row"]')).toHaveLength(3);
+        expect(router.currentRoute.value.query.event).toBe("3");
+        wrapper.unmount();
+    });
+
+    it("retries the event list refresh without registering the event again", async () => {
+        const created = withPeriods([], { id: 3, name: "ブラックフライデー", note: null });
+        vi.mocked(createSalesEvent).mockResolvedValue({ data: created, meta });
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce({ data: [...list().data, created], meta });
+        const { wrapper } = await mountView();
+
+        await wrapper.find('[data-testid="add-event"]').trigger("click");
+        await wrapper.find('[data-testid="event-name"]').setValue("ブラックフライデー");
+        await wrapper.find('[data-testid="event-mall-amazon"]').setValue(true);
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="event-save-error"]').text()).toContain("一覧を更新できませんでした");
+        expect(wrapper.find('[data-testid="event-save"]').text()).toBe("一覧を再読み込み");
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+
+        expect(createSalesEvent).toHaveBeenCalledTimes(1);
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+        expect(wrapper.findAll('[data-testid="event-row"]')).toHaveLength(3);
         wrapper.unmount();
     });
 
@@ -397,6 +466,25 @@ describe("SalesEventView", () => {
 
         expect(updateSalesEvent).toHaveBeenCalledWith(1, { name: "お買い物マラソン", malls: ["rakuten"], note: "4日20時から", period: null });
         expect(wrapper.find('[data-testid="name-error"]').text()).toContain("同じ名前のイベント（お買い物マラソン）");
+        wrapper.unmount();
+    });
+
+    it("shows an edited event in the list before closing its dialog", async () => {
+        const updated = withPeriods(salePeriods, { name: "楽天スーパーセール改" });
+        vi.mocked(updateSalesEvent).mockResolvedValue({ data: updated, meta });
+        vi.mocked(fetchSalesEvents)
+            .mockResolvedValueOnce(list())
+            .mockResolvedValueOnce({ data: [updated, marathon], meta });
+        const { wrapper } = await mountView("/sales-events?event=1");
+
+        await wrapper.find('[data-testid="periods-edit-event"]').trigger("click");
+        await wrapper.find('[data-testid="event-name"]').setValue("楽天スーパーセール改");
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+
+        expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="event-row"]').text()).toContain("楽天スーパーセール改");
+        expect(wrapper.find('[data-testid="message"]').text()).toContain("楽天スーパーセール改を保存しました。");
         wrapper.unmount();
     });
 

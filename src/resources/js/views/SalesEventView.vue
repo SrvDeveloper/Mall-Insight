@@ -138,6 +138,7 @@ function onPeriodSaved(saved: SalesEventPeriodDetailResponse): void {
 
 // イベントの登録・変更のモーダル
 const editing = ref<{ event: SalesEvent | null } | null>(null);
+const isEventSaving = ref(false);
 const closeButton = useTemplateRef<HTMLButtonElement>("closeButton");
 
 function onKeydown(event: KeyboardEvent): void {
@@ -148,6 +149,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 async function openForm(event: SalesEvent | null): Promise<void> {
     editing.value = { event };
+    isEventSaving.value = false;
     message.value = null;
     document.addEventListener("keydown", onKeydown);
     await nextTick();
@@ -155,22 +157,39 @@ async function openForm(event: SalesEvent | null): Promise<void> {
 }
 
 function closeForm(): void {
+    if (isEventSaving.value) return;
     editing.value = null;
     document.removeEventListener("keydown", onKeydown);
 }
 
 onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
 
-async function onSaved(saved: SalesEventWithPeriods): Promise<void> {
+async function refreshAfterEventSave(saved: SalesEventWithPeriods): Promise<void> {
+    const refreshed = await fetchSalesEvents();
+    const reflected = refreshed.data.find((event) => event.id === saved.id);
+    if (
+        !reflected ||
+        reflected.name !== saved.name ||
+        reflected.note !== saved.note ||
+        reflected.malls.length !== saved.malls.length ||
+        !saved.malls.every((mall) => reflected.malls.some((item) => item.value === mall.value)) ||
+        !saved.periods.every((period) => reflected.periods.some((item) => item.id === period.id))
+    ) {
+        throw new Error("保存したイベントが一覧に反映されていません。");
+    }
+    result.value = refreshed;
     const isEdit = editing.value?.event !== null;
-    message.value = isEdit ? `${saved.name}を保存しました。` : `${saved.name}を登録しました。${saved.periods.length === 0 ? "期間を追加してください。" : "需要予測と在庫予測に反映されます。"}`;
-    closeForm();
-    await load();
     if (!isEdit) {
         await router.replace({ query: { ...route.query, event: String(saved.id), period: undefined } });
     } else {
         void loadPeriod();
     }
+    message.value = isEdit ? `${saved.name}を保存しました。` : `${saved.name}を登録しました。${saved.periods.length === 0 ? "期間を追加してください。" : "需要予測と在庫予測に反映されます。"}`;
+}
+
+function onSaved(): void {
+    isEventSaving.value = false;
+    closeForm();
 }
 
 async function remove(event: SalesEventWithPeriods): Promise<void> {
@@ -386,6 +405,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                         type="button"
                         class="flex size-8 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-900"
                         aria-label="閉じる"
+                        :disabled="isEventSaving"
                         @click="closeForm"
                     >
                         <svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
@@ -394,7 +414,7 @@ const shownPeriod = (event: SalesEventWithPeriods): SalesEventPeriodSummary | nu
                     </button>
                 </header>
                 <div class="overflow-y-auto px-5 py-5">
-                    <SalesEventForm :event="editing.event" :max-days="maxDays" @saved="onSaved" @cancel="closeForm" />
+                    <SalesEventForm :event="editing.event" :max-days="maxDays" :refresh-after-save="refreshAfterEventSave" @saved="onSaved" @saving="isEventSaving = $event" @cancel="closeForm" />
                 </div>
             </div>
         </div>
