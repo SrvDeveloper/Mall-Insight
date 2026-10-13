@@ -61,7 +61,7 @@ describe("StockActualsView", () => {
     it("shows the daily stock with days without data as a dash and zero stock in red", async () => {
         const { wrapper, router } = await mountView();
 
-        expect(wrapper.find("h1").text()).toBe("在庫実績");
+        expect(wrapper.find("h1").text()).toBe("在庫推移");
         expect(fetchStockActuals).toHaveBeenCalledWith("total");
         expect(wrapper.findAll("thead th").map((th) => th.text())).toEqual(["品番・SKU", "最新", "10/4 調査なし", "10/5 月", "10/6 火", "10/7 推定"]);
         const cells = wrapper.findAll('[data-testid="actual-cell"]');

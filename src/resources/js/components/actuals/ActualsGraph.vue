@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { actualSparkline, type ActualColumn, type ActualItemRows } from "@/components/actuals/actualRows";
 
 /**
- * 実績（B-124）のグラフ。在庫推移のグラフ（K-047）とそろえ、品番ごとのカードにSKUの推移を小さなグラフで並べる。
+ * 実績（B-124）のグラフ。在庫予測のグラフ（K-047）とそろえ、品番ごとのカードにSKUの推移を小さなグラフで並べる。
  * データの無い列では線を切り、在庫0の点は赤く示す。推定在庫（K-087）へつなぐ線は点線、推定の点は白抜きにする。
  * グラフは画面の幅に合わせて自動で折り返す。
  */

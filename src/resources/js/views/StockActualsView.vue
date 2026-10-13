@@ -9,7 +9,7 @@ import type { StockActualsResponse, TrendScope } from "@/types/api";
 
 /**
  * 在庫実績（バックログ B-124）。対象品番のSKUについて、日ごとの在庫数（直近31日）を表・グラフで見る。
- * 全体（6区分の合計）・Amazon・BOSSの切り替え、見せ方と色は在庫推移の画面（K-047・K-074）とそろえる。
+ * 全体（6区分の合計）・Amazon・BOSSの切り替え、見せ方と色は在庫予測の画面（K-047・K-074）とそろえる。
  * 在庫を取得していない日は0とせず、販売実績から推定した在庫を実際の在庫と見分けて示す。推定できない日は「—」で示す（原則2・K-087）。
  * 在庫0は在庫不足と同じ赤い札で示す。選んだ在庫・見せ方は URL に持たせる。
  */
@@ -104,8 +104,8 @@ const rangeNote = computed(() => {
     <div class="flex flex-col gap-5">
         <header class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1.5">
-                <p class="text-xs text-stone-500">在庫試算 / 在庫実績</p>
-                <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫実績</h1>
+                <p class="text-xs text-stone-500">在庫試算 / 在庫推移</p>
+                <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫推移</h1>
                 <p class="max-w-3xl text-[13px] text-stone-600" data-testid="description">
                     ZeroStockViewから取得した、日ごとの在庫数です（直近31日）。{{
                         warehouseNote
@@ -113,7 +113,7 @@ const rangeNote = computed(() => {
                 </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-                <!-- 地（stone-100）の上に置くため、白い面と枠で浮かせる（在庫推移の切り替えとそろえる） -->
+                <!-- 地（stone-100）の上に置くため、白い面と枠で浮かせる（在庫予測の切り替えとそろえる） -->
                 <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫">
                     <button
                         v-for="option in SCOPES"
@@ -145,14 +145,14 @@ const rangeNote = computed(() => {
         </header>
 
         <div v-if="hasError" class="flex flex-col items-center gap-3 rounded-xl border border-stone-200 bg-white px-6 py-16 text-center">
-            <p class="text-sm text-stone-600">在庫実績を表示できませんでした。</p>
+            <p class="text-sm text-stone-600">在庫推移を表示できませんでした。</p>
             <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load">再読み込み</button>
         </div>
 
         <div v-else-if="!result" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
 
         <div v-else-if="!result.meta.selection" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-900">
-            対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに在庫実績が表示されます。
+            対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに在庫推移が表示されます。
         </div>
 
         <section v-else class="overflow-hidden rounded-xl border border-stone-200 bg-white" :aria-busy="isLoading">

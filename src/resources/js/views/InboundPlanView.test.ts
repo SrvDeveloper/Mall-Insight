@@ -217,7 +217,7 @@ describe("InboundPlanView", () => {
         await flushPromises();
 
         expect(setInboundPlanReceived).toHaveBeenCalledWith(1, true);
-        expect(wrapper.text()).toContain("入荷済みにしました。在庫推移には入りません。");
+        expect(wrapper.text()).toContain("入荷済みにしました。在庫予測には入りません。");
         wrapper.unmount();
     });
 

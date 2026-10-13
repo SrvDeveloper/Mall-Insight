@@ -26,7 +26,7 @@ import type { DemandForecastResponse, ItemForecast, MonthlyDemand, SkuForecast }
  * 加重平均した単価で、合計の金額はチャネルの金額の合計になる、K-073）を掛けて出す。単価を出せないSKUは金額の合計に入れない。
  * 選んだ方は URL に持たせる。
  *
- * 見た目は在庫推移の画面（K-047）とそろえる（計算の根拠の帯、切り替えのタブ、絞り込みの札、表の罫線と品番の行）。
+ * 見た目は在庫予測の画面（K-047）とそろえる（計算の根拠の帯、切り替えのタブ、絞り込みの札、表の罫線と品番の行）。
  */
 
 type ForecastView = "total" | "boss" | "amazon";
@@ -40,7 +40,7 @@ const FILTERS: { value: ForecastFilter; label: string }[] = [
     { value: "partial", label: "一部予測不能" },
 ];
 
-/** 表の行の高さ（在庫推移の表とそろえる）。 */
+/** 表の行の高さ（在庫予測の表とそろえる）。 */
 const ROW_HEIGHT = 40;
 
 /** 表示中のチャネル（または合計）での、SKUの予測。 */
@@ -260,7 +260,7 @@ const tooltipChannels = computed(() => (tooltip.content?.channels ?? []).filter(
 
 const longDate = (value: string): string => `${value.slice(0, 4)}年${Number(value.slice(5, 7))}月${Number(value.slice(8, 10))}日`;
 
-/** 計算の根拠の帯（チャネルごとの販売実績・対象品番）。在庫推移の画面の帯とそろえる。 */
+/** 計算の根拠の帯（チャネルごとの販売実績・対象品番）。在庫予測の画面の帯とそろえる。 */
 const facts = computed(() => {
     const meta = result.value?.meta;
     if (!meta) {
@@ -407,7 +407,7 @@ const facts = computed(() => {
                     </label>
                 </div>
 
-                <!-- 表の見方（在庫推移の画面の凡例とそろえる） -->
+                <!-- 表の見方（在庫予測の画面の凡例とそろえる） -->
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600" data-testid="legend">
                     <span class="inline-flex items-center gap-1.5"
                         ><span class="rounded-full bg-amber-100 px-2 py-px text-[11px] font-semibold text-amber-800">予測不能</span>販売実績や日数が足りない（理由を表示）</span
@@ -422,7 +422,7 @@ const facts = computed(() => {
                     {{ filter === "all" && keyword.trim() === "" ? "対象品番にSKUがありません。" : "条件に一致するSKUはありません。" }}
                 </div>
 
-                <!-- 表は画面の高さに収まる枠の中でスクロールさせ、列見出しが上に残るようにする。横はドラッグでも動かせる（在庫推移の表とそろえる） -->
+                <!-- 表は画面の高さに収まる枠の中でスクロールさせ、列見出しが上に残るようにする。横はドラッグでも動かせる（在庫予測の表とそろえる） -->
                 <div
                     v-else
                     ref="scrollBox"
@@ -509,7 +509,7 @@ const facts = computed(() => {
                                     <td class="sticky left-0 z-10 truncate bg-white py-0 pr-4 pl-7 font-mono text-[12.5px] text-stone-700 group-hover:bg-stone-50" :title="entry.row.sku.sku_code">
                                         {{ entry.row.sku.sku_code }}
                                     </td>
-                                    <!-- ツールチップは数字だけでなく欄全体にマウスを乗せたときに出す（在庫推移の表とそろえる） -->
+                                    <!-- ツールチップは数字だけでなく欄全体にマウスを乗せたときに出す（在庫予測の表とそろえる） -->
                                     <td
                                         tabindex="0"
                                         class="cursor-help px-3 text-right whitespace-nowrap hover:bg-stone-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-inset"

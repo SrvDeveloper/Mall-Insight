@@ -12,9 +12,9 @@ import type { ItemTargetPlan, SalesTargetResponse } from "@/types/api";
 /**
  * 販売目標（バックログ B-110、決定記録 K-048・K-049・K-106～K-108）。年度ごとに品番の年間販売目標を登録し、
  * 月別販売比率で月に分け、SKUへ割り振る。割り振りは保存せず、開くたびに最新の目標・比率・販売実績から計算する。
- * 年間販売目標はシステム需要予測の計算に使わない（原則1）。在庫推移の「販売試算」（B-122）の元になる。
+ * 年間販売目標はシステム需要予測の計算に使わない（原則1）。在庫予測の「販売試算」（B-122）の元になる。
  *
- * 見た目は在庫推移の画面（K-047）とそろえる。年度と見せる内容（年間販売目標・月別販売比率）は URL に持たせる。
+ * 見た目は在庫予測の画面（K-047）とそろえる。年度と見せる内容（年間販売目標・月別販売比率）は URL に持たせる。
  */
 
 type Tab = "targets" | "ratios";
@@ -223,7 +223,7 @@ const categoryOptions = computed(() => result.value?.meta.ratio_categories ?? []
                 <p class="text-xs text-stone-500">在庫試算 / 販売目標</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">販売目標</h1>
                 <p class="max-w-3xl text-[13px] text-stone-600">
-                    品番ごとの年間販売目標（現行Excelの年間販売想定数）を登録し、月別販売比率で月に分けてSKUへ割り振ります。需要予測には使いません。在庫推移の「販売試算」に使います。
+                    品番ごとの年間販売目標（現行Excelの年間販売想定数）を登録し、月別販売比率で月に分けてSKUへ割り振ります。需要予測には使いません。在庫予測の「販売試算」に使います。
                 </p>
             </div>
             <div v-if="result" class="inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white p-1" role="group" aria-label="年度">

@@ -280,13 +280,13 @@ const facts = computed(() => {
     <div class="flex flex-col gap-5">
         <header class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1.5">
-                <p class="text-xs text-stone-500">在庫試算 / 在庫推移</p>
-                <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫推移</h1>
+                <p class="text-xs text-stone-500">在庫試算 / 在庫予測</p>
+                <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">在庫予測</h1>
                 <p class="max-w-3xl text-[13px] text-stone-600" data-testid="basis-description">{{ basisOption.description }}</p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
                 <!-- 地（stone-100）の上に置くため、白い面と枠で浮かせる。高さは再計算のボタン（h-10）にそろえる -->
-                <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫推移の需要">
+                <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫予測の需要">
                     <button
                         v-for="option in BASES"
                         :key="option.value"
@@ -320,7 +320,7 @@ const facts = computed(() => {
                         {{ option.label }}
                     </button>
                 </div>
-                <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫推移の在庫">
+                <div class="inline-flex items-center gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px] shadow-xs" role="tablist" aria-label="在庫予測の在庫">
                     <button
                         v-for="option in SCOPES"
                         :key="option.value"
@@ -352,7 +352,7 @@ const facts = computed(() => {
         </header>
 
         <div v-if="hasError" class="flex flex-col items-center gap-3 rounded-xl border border-stone-200 bg-white px-6 py-16 text-center">
-            <p class="text-sm text-stone-600">在庫推移を表示できませんでした。</p>
+            <p class="text-sm text-stone-600">在庫予測を表示できませんでした。</p>
             <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load">再読み込み</button>
         </div>
 
@@ -403,7 +403,7 @@ const facts = computed(() => {
             </p>
 
             <div v-if="!result.meta.selection" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-900">
-                対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに在庫推移が表示されます。
+                対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに在庫予測が表示されます。
             </div>
 
             <section

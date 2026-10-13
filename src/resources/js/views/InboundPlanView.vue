@@ -9,7 +9,7 @@ import type { InboundPlan, InboundPlanPage, Item } from "@/types/api";
  * 入荷予定（バックログ B-007、決定記録 K-043）。品番・月単位で入荷予定を登録し、SKUへの割り振りは分かったときに入れる。
  * 割り振っていない残りは、在庫推移（B-008）で需要予測の比率により仮に割り振る。入荷したら「入荷済み」にし、在庫推移から外す。
  *
- * 見た目は在庫推移の画面（K-047）とそろえる。上にまとめの帯を置き、一覧は入荷予定月ごとにまとめ、割り振りの進み具合を細い帯で示す（SKUごとの内訳は編集の画面で見る）。
+ * 見た目は在庫予測の画面（K-047）とそろえる。上にまとめの帯を置き、一覧は入荷予定月ごとにまとめ、割り振りの進み具合を細い帯で示す（SKUごとの内訳は編集の画面で見る）。
  */
 
 const result = ref<InboundPlanPage | null>(null);
@@ -116,7 +116,7 @@ async function toggleReceived(plan: InboundPlan): Promise<void> {
     try {
         const updated = await setInboundPlanReceived(plan.id, plan.received_at === null);
         message.value = updated.received_at
-            ? `${plan.item_no} の ${formatMonth(plan.arrival_month)} の入荷予定を入荷済みにしました。在庫推移には入りません。`
+            ? `${plan.item_no} の ${formatMonth(plan.arrival_month)} の入荷予定を入荷済みにしました。在庫予測には入りません。`
             : `${plan.item_no} の入荷済みを取り消しました。`;
         void load();
     } catch {
@@ -139,7 +139,7 @@ async function remove(plan: InboundPlan): Promise<void> {
 
 const summary = computed(() => result.value?.meta.summary ?? null);
 
-/** まとめの帯（入荷前の件数・未割り振り・予定月を過ぎたもの・入荷済み）。在庫推移の画面の帯とそろえる。 */
+/** まとめの帯（入荷前の件数・未割り振り・予定月を過ぎたもの・入荷済み）。在庫予測の画面の帯とそろえる。 */
 const facts = computed(() => {
     const value = summary.value;
     if (!value) {
@@ -151,7 +151,7 @@ const facts = computed(() => {
             key: "unallocated",
             label: "SKUに未割り振り",
             value: `${formatNumber(value.unallocated_quantity)}個`,
-            note: value.unallocated_quantity > 0 ? "在庫推移では需要予測の比率で仮に割り振ります" : "すべて割り振り済みです",
+            note: value.unallocated_quantity > 0 ? "在庫予測では需要予測の比率で仮に割り振ります" : "すべて割り振り済みです",
             warn: false,
         },
         {
@@ -161,7 +161,7 @@ const facts = computed(() => {
             note: value.overdue_count > 0 ? "入荷済みにするか、入荷予定月を直してください" : "ありません",
             warn: value.overdue_count > 0,
         },
-        { key: "received", label: "入荷済み", value: `${formatNumber(value.received_count)}件`, note: "在庫推移には入りません", warn: false },
+        { key: "received", label: "入荷済み", value: `${formatNumber(value.received_count)}件`, note: "在庫予測には入りません", warn: false },
     ];
 });
 
@@ -201,7 +201,7 @@ function allocatedPercent(plan: InboundPlan): string {
                 <p class="text-xs text-stone-500">在庫試算 / 入荷予定</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">入荷予定</h1>
                 <p class="max-w-3xl text-[13px] text-stone-600">
-                    品番ごとに、入荷予定月と数量を登録します。SKUへの割り振りは分かったときに入れてください。割り振っていない分は、在庫推移で需要予測の比率により仮に割り振ります。
+                    品番ごとに、入荷予定月と数量を登録します。SKUへの割り振りは分かったときに入れてください。割り振っていない分は、在庫予測で需要予測の比率により仮に割り振ります。
                 </p>
             </div>
             <button
@@ -340,7 +340,7 @@ function allocatedPercent(plan: InboundPlan): string {
                                             v-if="plan.unallocated_quantity > 0"
                                             class="rounded-full px-2 py-px text-[11px] whitespace-nowrap tabular-nums"
                                             :class="plan.received_at ? 'bg-stone-100' : 'bg-amber-50 font-semibold text-amber-800'"
-                                            :title="plan.received_at ? undefined : '在庫推移では需要予測の比率で仮に割り振ります'"
+                                            :title="plan.received_at ? undefined : '在庫予測では需要予測の比率で仮に割り振ります'"
                                             data-testid="unallocated"
                                         >
                                             未割り振り {{ formatNumber(plan.unallocated_quantity) }}
@@ -415,7 +415,7 @@ function allocatedPercent(plan: InboundPlan): string {
                 <header class="flex items-start justify-between gap-3 border-b border-stone-200 px-5 py-4">
                     <div class="flex flex-col gap-0.5">
                         <h2 id="inbound-form-title" class="text-base font-bold text-stone-900">{{ editing.plan ? "入荷予定を編集" : "入荷予定を追加" }}</h2>
-                        <p class="text-xs text-stone-500">割り振っていない分は、在庫推移で需要予測の比率により仮に割り振ります。</p>
+                        <p class="text-xs text-stone-500">割り振っていない分は、在庫予測で需要予測の比率により仮に割り振ります。</p>
                     </div>
                     <button
                         ref="closeButton"

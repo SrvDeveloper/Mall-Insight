@@ -42,8 +42,8 @@ export const navigation: NavGroup[] = [
             { name: "forecast-accuracy", label: "予測精度", path: "/forecast-accuracy" },
             { name: "sales-targets", label: "販売目標", path: "/sales-targets" },
             { name: "inbound-plans", label: "入荷予定", path: "/inbound-plans" },
-            { name: "inventory-trends", label: "在庫推移", path: "/inventory-trends" },
-            { name: "stock-actuals", label: "在庫実績", path: "/stock-actuals" },
+            { name: "inventory-trends", label: "在庫予測", path: "/inventory-trends" },
+            { name: "stock-actuals", label: "在庫推移", path: "/stock-actuals" },
         ],
     },
 ];

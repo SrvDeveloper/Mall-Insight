@@ -12,7 +12,7 @@ import type { ActiveStatus, CrossWalkerSync, Item, Paginated } from "@/types/api
  * 品番・SKU（決定記録 K-017：商品データの状態確認）。CrossWalker からの取得状況と、取得した品番・所属SKUを確認する。
  * 品番に属していないSKU（B-010）は別のタブに表示し、件数はタブに常に出す。
  * 表示中のタブと検索条件は URL のクエリに持たせ、再読み込みしても同じ条件で表示する。
- * 見た目は在庫推移の画面（K-047）とそろえる。品番の行をクリックすると、所属するSKUを開く。
+ * 見た目は在庫予測の画面（K-047）とそろえる。品番の行をクリックすると、所属するSKUを開く。
  */
 
 type StatusFilter = ActiveStatus | "all";

@@ -113,6 +113,7 @@ describe("InventoryTrendView", () => {
     it("shows the basis of the calculation as a strip of facts", async () => {
         const { wrapper } = await mountView();
 
+        expect(wrapper.find("h1").text()).toBe("在庫予測");
         expect(wrapper.find('[data-testid="fact-stock"]').text()).toContain("2026年10月7日");
         expect(wrapper.find('[data-testid="fact-stock"]').text()).toContain("6区分の合計");
         expect(wrapper.find('[data-testid="fact-forecast"]').text()).toContain("BOSS・Amazon");

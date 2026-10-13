@@ -9,7 +9,7 @@ import type { CurrentItemSelection, ItemRank, ItemRanking } from "@/types/api";
  * 対象品番（バックログ B-005）。直近12か月の売上順位（K-032）を見て、在庫推移の対象にする品番を確定する。
  * 毎年4月の見直しが基本で、いつでも変更できる（K-030）。確定できるのは最大100品番（K-031）。確定の履歴はモーダルで確認する。
  *
- * 見た目は在庫推移の画面（K-047）とそろえる。上に今の対象品番の帯、一覧には売上金額の帯と、今の対象からの変更（追加・外す）の札を付ける。
+ * 見た目は在庫予測の画面（K-047）とそろえる。上に今の対象品番の帯、一覧には売上金額の帯と、今の対象からの変更（追加・外す）の札を付ける。
  */
 
 const isHistoryOpen = ref(false);
@@ -231,7 +231,7 @@ const facts = computed(() => {
             <div class="flex flex-col gap-1.5">
                 <p class="text-xs text-stone-500">在庫試算 / 対象品番</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">対象品番</h1>
-                <p class="text-[13px] text-stone-600">需要予測と在庫推移の対象にする品番を、直近12か月の売上順位を見て確定します。毎年4月に見直します。</p>
+                <p class="text-[13px] text-stone-600">需要予測と在庫予測の対象にする品番を、直近12か月の売上順位を見て確定します。毎年4月に見直します。</p>
             </div>
             <button
                 v-if="current?.data"

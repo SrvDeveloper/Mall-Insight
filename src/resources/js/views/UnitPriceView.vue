@@ -9,7 +9,7 @@ import type { ItemUnitPriceResponse, ItemUnitPriceRow } from "@/types/api";
  * 単価（バックログ B-110、決定記録 K-062・K-063）。品番ごとに、全体・Amazon・BOSSの単価（税込）を登録する。
  * 全体の単価はモールを分けない金額（販売目標の売上金額の概算など）に、Amazon・BOSSの単価はモール別の金額に使う。
  * 登録の無い単価は、直近12か月の販売実績の平均単価を使うため、平均単価を並べて見せる。
- * 見た目は在庫推移の画面（K-047）とそろえる。行の「編集」で開くダイアログで、その品番の3つの単価をまとめて直す。
+ * 見た目は在庫予測の画面（K-047）とそろえる。行の「編集」で開くダイアログで、その品番の3つの単価をまとめて直す。
  */
 
 type Filter = "all" | "target" | "registered" | "unregistered";
@@ -69,7 +69,7 @@ const facts = computed(() => {
             key: "target",
             label: "対象品番",
             value: `${targets.filter(isRegistered).length} / ${targets.length}品番に登録`,
-            note: "需要予測・在庫推移・販売目標の対象",
+            note: "需要予測・在庫予測・販売目標の対象",
         },
         {
             key: "period",

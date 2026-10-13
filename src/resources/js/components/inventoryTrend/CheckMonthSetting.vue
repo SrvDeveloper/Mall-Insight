@@ -106,7 +106,7 @@ async function save(): Promise<void> {
                 <button type="button" class="h-7 rounded-md px-2 text-xs text-stone-600 hover:bg-stone-100" :disabled="isSaving" @click="isEditing = false">取消</button>
             </div>
             <span v-if="error" class="text-xs font-medium text-red-700" data-testid="check-month-error">{{ error }}</span>
-            <span v-else class="text-[11px] text-stone-400">全員の在庫推移に使われます</span>
+            <span v-else class="text-[11px] text-stone-400">全員の在庫予測に使われます</span>
         </form>
     </div>
 </template>

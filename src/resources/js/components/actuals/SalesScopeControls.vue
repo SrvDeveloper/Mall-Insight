@@ -3,7 +3,7 @@ import type { TrendScope } from "@/types/api";
 
 /**
  * 品番別売上・SKU別売上の見出しの右に置く、モール（全体・Amazon・BOSS）の切り替えと再読み込み。
- * 地（stone-100）の上に置くため、白い面と枠で浮かせる（在庫推移の切り替えとそろえる）。
+ * 地（stone-100）の上に置くため、白い面と枠で浮かせる（在庫予測の切り替えとそろえる）。
  */
 
 defineProps<{ scope: TrendScope; isLoading: boolean }>();
