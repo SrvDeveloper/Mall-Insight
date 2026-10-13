@@ -153,8 +153,12 @@ describe("StoreSalesView", () => {
         const cell = wrapper.findAll('[data-testid="store-row"]')[0]!.findAll("td[tabindex]")[2]!;
         await cell.trigger("click");
         await flushPromises();
-        // 表の下に出し、押した欄を枠で示す
-        expect(wrapper.find('[data-testid="store-sales-table"] ~ [data-testid="ranking-panel"]').exists()).toBe(true);
+        // 押した欄を枠で示す
+        // 店舗売上の表のセクションとは別のセクションとして出す（K-099）
+        const panel = wrapper.find('[data-testid="ranking-panel"]');
+        expect(panel.exists()).toBe(true);
+        expect(wrapper.find('section[aria-busy] [data-testid="ranking-panel"]').exists()).toBe(false);
+        expect(panel.element.previousElementSibling?.querySelector('[data-testid="store-sales-table"]')).not.toBeNull();
         expect(cell.attributes("data-selected")).toBe("true");
         expect(fetchStoreRanking).toHaveBeenCalledWith("month", "2026-10", "rakuten", "all", "amount");
         const dialog = wrapper.find('[data-testid="ranking-panel"]');

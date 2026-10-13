@@ -10,7 +10,7 @@ import { formatYen } from "@/components/salesTarget/format";
 import type { RankingStockout, SalesUnit, StoreRankingResponse, StoreSales, StoreSalesProducts } from "@/types/api";
 
 /**
- * 店舗売上の月・日の欄を押したときに、表の下に出す売上上位の品番（20件、K-091・K-092・K-096）。店舗の行の欄ならその店舗、合計の行なら全店舗。
+ * 店舗売上の月・日の欄を押したときに、表とは別のセクション（カード）として表の下に出す売上上位の品番（20件、K-091・K-092・K-096・K-099）。店舗の行の欄ならその店舗、合計の行なら全店舗。
  * 金額と販売数のどちらの多い順かを切り替えられる（初めは店舗売上で見ている方）。各行に、その店舗・期間の全体に対する割合を棒と数字で出す。
  * CrossWalkerに未登録のSKUは、品番の順位には入れずに件数と合計を添える。別の欄を押すと読み込み直し、読み込むまでは
  * 前の一覧を薄くして残す（表の高さが変わらないように）。開いたときは一覧が見えるところまで画面を動かす。×で閉じる。
@@ -145,7 +145,7 @@ function stockoutBadges(row: { stockouts: Partial<Record<"boss" | "amazon", Rank
 </script>
 
 <template>
-    <section v-if="target" ref="root" aria-labelledby="ranking-heading" class="scroll-mt-4 border-t border-stone-300 bg-white" data-testid="ranking-panel">
+    <section v-if="target" ref="root" aria-labelledby="ranking-heading" class="scroll-mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white" data-testid="ranking-panel">
         <header class="flex flex-wrap items-start justify-between gap-3 border-b border-stone-200 px-5 py-4">
             <div class="flex flex-col gap-1">
                 <h2 id="ranking-heading" class="flex items-center gap-2 text-base font-bold text-stone-900">

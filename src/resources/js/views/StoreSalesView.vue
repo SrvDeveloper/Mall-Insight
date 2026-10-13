@@ -17,7 +17,7 @@ import type { SalesUnit, StoreSales, StoreSalesProducts, StoreSalesResponse } fr
  * 月ごと（直近12か月＋今月）か日ごと（直近30日）に表・グラフで見る。期間の指定と前月比・前年比のツールチップは品番別売上とそろえる（K-080・K-082）。
  * 商品は全商品（CrossWalkerに未登録のSKUを含む）と対象品番だけを切り替えられる。初めは店舗の売上として金額を出す（K-088）。
  * 販売実績を取り込んでいない月・日は0とせず「—」で示す（原則2）。表では合計の行の (i) を押すとグラフと同じ内訳を出し（K-094）、欄を押すと
- * その店舗・月（日）の売上上位の品番を表の下に出す（K-091・K-092・K-096）。
+ * その店舗・月（日）の売上上位の品番を、表とは別のセクションとして表の下に出す（K-091・K-092・K-096・K-099）。
  * 選んだ商品・月ごとと日ごと・数量と金額・見せ方・期間は URL に持たせる。
  */
 
@@ -209,7 +209,6 @@ const rangeNote = computed(() =>
                 <p v-if="rows.total.cells.some((cell) => cell.excludes)" class="border-t border-stone-200 px-4 py-2.5 text-xs text-stone-500" data-testid="excludes-note">
                     ※ 販売実績を取り込んでいない店舗を除いた合計です
                 </p>
-                <StoreRankingPanel :target="rankingTarget" :unit="unit" :products="products" :measure="measure" @close="rankingTarget = null" />
             </div>
             <div v-else class="flex flex-col gap-4 p-4" data-testid="store-sales-chart">
                 <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="店舗ごとの期間計">
@@ -227,5 +226,8 @@ const rangeNote = computed(() =>
                 <SalesChart :columns="columns" :series="series" :format-value="formats.formatValue" :format-axis="formats.formatAxis" :axis-unit="formats.axisUnit" :unit="unit" :height="340" />
             </div>
         </section>
+
+        <!-- 売上上位は、店舗売上の表とは別のセクションとして表の下に出す（K-099） -->
+        <StoreRankingPanel v-if="result && !needsSelection" :target="rankingTarget" :unit="unit" :products="products" :measure="measure" @close="rankingTarget = null" />
     </div>
 </template>
