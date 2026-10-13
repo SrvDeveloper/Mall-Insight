@@ -14,7 +14,7 @@ enum SalesEventStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Upcoming => 'これから',
+            self::Upcoming => '予定',
             self::Ongoing => '開催中',
             self::Ended => '終了',
         };

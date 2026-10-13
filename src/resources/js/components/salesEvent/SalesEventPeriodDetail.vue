@@ -175,17 +175,17 @@ const statusClass = computed(() =>
                         </p>
                     </div>
                     <div v-if="channel.items.length > 0" class="overflow-x-auto">
-                        <table class="w-full min-w-[36rem] border-separate border-spacing-0 text-sm">
+                        <table class="w-full min-w-xl border-separate border-spacing-0 text-sm">
                             <thead class="text-xs text-stone-500 [&_th]:border-y [&_th]:border-stone-200 [&_th]:bg-stone-50 [&_th]:px-4 [&_th]:py-2 [&_th]:font-medium">
                                 <tr>
                                     <th scope="col" class="text-left">品番</th>
-                                    <th scope="col" class="text-right">普段なら売れた数</th>
-                                    <th scope="col" class="text-right">売れた数</th>
-                                    <th scope="col" class="text-right">普段の何倍</th>
+                                    <th scope="col" class="text-right">通常時</th>
+                                    <th scope="col" class="text-right">開催時</th>
+                                    <th scope="col" class="text-right">変化率</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="item in measuredItems(channel.items)" :key="item.item_no" class="[&>*]:border-b [&>*]:border-stone-100 [&>*]:px-4 [&>*]:py-2" data-testid="measured-row">
+                                <tr v-for="item in measuredItems(channel.items)" :key="item.item_no" class="*:border-b *:border-stone-100 *:px-4 *:py-2" data-testid="measured-row">
                                     <th scope="row" class="text-left font-normal">
                                         <span class="font-mono text-[13px] font-medium text-stone-900">{{ item.item_no }}</span>
                                         <span class="ml-2 text-[11px] text-stone-500">{{ item.brand }}・{{ item.category }}</span>
@@ -257,7 +257,7 @@ const statusClass = computed(() =>
                         </div>
                     </div>
                     <div class="overflow-x-auto">
-                        <table class="w-full min-w-[52rem] border-separate border-spacing-0 text-sm">
+                        <table class="w-full min-w-208 border-separate border-spacing-0 text-sm">
                             <thead class="text-xs text-stone-500 [&_th]:border-y [&_th]:border-stone-200 [&_th]:bg-stone-50 [&_th]:px-4 [&_th]:py-2 [&_th]:font-medium">
                                 <tr>
                                     <th scope="col" class="text-left">品番</th>
@@ -269,7 +269,7 @@ const statusClass = computed(() =>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr v-for="item in candidateItems(channel.items)" :key="item.item_no" class="[&>*]:border-b [&>*]:border-stone-100 [&>*]:px-4 [&>*]:py-1.5" data-testid="candidate-row">
+                                <tr v-for="item in candidateItems(channel.items)" :key="item.item_no" class="*:border-b *:border-stone-100 *:px-4 *:py-1.5" data-testid="candidate-row">
                                     <th scope="row" class="text-left font-normal">
                                         <span class="font-mono text-[13px] font-medium text-stone-900">{{ item.item_no }}</span>
                                         <span class="ml-2 text-[11px] text-stone-500">{{ item.brand }}・{{ item.category }}</span>

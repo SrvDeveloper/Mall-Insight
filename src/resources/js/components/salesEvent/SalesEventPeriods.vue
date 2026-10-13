@@ -196,7 +196,7 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                     </tr>
                     <template v-for="period in periods" :key="period.id">
                         <!-- 編集中の行 -->
-                        <tr v-if="editing?.id === period.id" class="bg-amber-50/40 [&>*]:border-t [&>*]:border-stone-100" data-testid="period-edit-row">
+                        <tr v-if="editing?.id === period.id" class="bg-amber-50/40 *:border-t *:border-stone-100" data-testid="period-edit-row">
                             <td colspan="2" class="px-4 py-2">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <input v-model="editing.startsOn" type="date" :class="dateInputClass" aria-label="初日" data-testid="edit-starts-on" />
@@ -228,7 +228,7 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                         </tr>
                         <tr
                             v-else
-                            class="cursor-pointer [&>*]:border-t [&>*]:border-stone-100"
+                            class="cursor-pointer *:border-t *:border-stone-100"
                             :class="selectedPeriodId === period.id ? 'bg-stone-100' : 'hover:bg-stone-50'"
                             :aria-selected="selectedPeriodId === period.id"
                             data-testid="period-row"

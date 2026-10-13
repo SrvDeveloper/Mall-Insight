@@ -135,7 +135,7 @@ const labelClass = "text-xs font-medium text-stone-700";
                     <input v-model="form.endsOn" type="date" :min="form.startsOn || undefined" :disabled="isSaving || savedEvent !== null" :class="inputClass" data-testid="event-ends-on" />
                     <span v-if="errorOf('period.ends_on')" class="text-xs text-red-700" data-testid="ends-on-error">{{ errorOf("period.ends_on") }}</span>
                 </label>
-                <p class="flex h-10 items-center text-[13px] text-stone-600 tabular-nums sm:mt-[22px]" data-testid="event-days">
+                <p class="flex h-10 items-center text-[13px] text-stone-600 tabular-nums sm:mt-5.5" data-testid="event-days">
                     <template v-if="days !== null && days > 0">
                         <span :class="days > maxDays ? 'font-semibold text-red-700' : ''">{{ days }}日間</span>
                     </template>
