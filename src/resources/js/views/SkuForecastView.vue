@@ -7,6 +7,7 @@ import ForecastPeriodBar from "@/components/forecast/ForecastPeriodBar.vue";
 import SkuForecastBasis from "@/components/forecast/SkuForecastBasis.vue";
 import { forecastChartFormats, formatFigure } from "@/components/forecast/timelineRows";
 import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
+import LoadingState from "@/components/ui/LoadingState.vue";
 
 /**
  * SKU別の需要予測（バックログ B-131、決定記録 K-123）。需要予測の画面で品番を押すと移る画面。画面デザイン案のとおり、上に品番の合計
@@ -101,7 +102,7 @@ const segmentClass = (isSelected: boolean): string => (isSelected ? "bg-white fo
             <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load">再読み込み</button>
         </div>
 
-        <div v-else-if="!result" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500">計算中…</div>
+        <LoadingState v-else-if="!result" message="需要予測を計算しています…" note="SKUごとの予測と根拠を計算するため、数秒かかります。" />
 
         <div v-else-if="!item" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500" data-testid="not-found">
             この品番の需要予測はありません。<RouterLink :to="backLink" class="font-semibold text-stone-900 underline">需要予測</RouterLink>の画面へ戻ってください。
@@ -244,5 +245,6 @@ const segmentClass = (isSelected: boolean): string => (isSelected ? "bg-white fo
                 </div>
             </div>
         </section>
+        <LoadingState v-if="isLoading && result" variant="toast" message="計算し直しています…" />
     </div>
 </template>

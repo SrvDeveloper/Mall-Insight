@@ -285,6 +285,23 @@ describe("SkuForecastView", () => {
         wrapper.unmount();
     });
 
+    it("clears the previous item and shows the loading indicator while calculating another item", async () => {
+        const { wrapper, router } = await mountView();
+        expect(wrapper.find('[data-testid="item-no"]').text()).toBe("fl-01");
+
+        let resolve: (value: ForecastTimelineResponse) => void = () => {};
+        vi.mocked(fetchForecastTimeline).mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+        await router.push("/forecasts/si-13");
+        await flushPromises();
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "month", period: null, itemNo: "si-13" });
+        expect(wrapper.find('[data-testid="loading"]').text()).toContain("需要予測を計算しています…");
+        expect(wrapper.find('[data-testid="sku-code"]').exists()).toBe(false);
+        resolve(itemTimeline());
+        await flushPromises();
+        expect(wrapper.find('[data-testid="loading"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
     it("shows why a channel cannot be forecast and goes back with the selections kept", async () => {
         const { wrapper, router } = await mountView("/forecasts/fl-01?unit=day&measure=amount");
         expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "day", period: null, itemNo: "fl-01" });

@@ -29,6 +29,39 @@ describe("DemandForecastView", () => {
             .mockImplementation(async (query) => timeline(query.unit));
     });
 
+    it("shows a loading indicator while calculating and a small one while calculating again", async () => {
+        let resolve: (value: ReturnType<typeof timeline>) => void = () => {};
+        vi.mocked(fetchForecastTimeline).mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+        const { wrapper } = await mountView();
+        expect(wrapper.find('[data-testid="loading"]').text()).toContain("需要予測を計算しています…");
+        expect(wrapper.find('[data-testid="loading"]').attributes("role")).toBe("status");
+
+        resolve(timeline());
+        await flushPromises();
+        expect(wrapper.find('[data-testid="loading"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="loading-toast"]').exists()).toBe(false);
+
+        // 月ごと・日ごとを切り替えたときは、列の形が変わるため大きく出す
+        vi.mocked(fetchForecastTimeline).mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+        await wrapper.find('[data-testid="unit-day"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-testid="loading"]').exists()).toBe(true);
+        resolve(timeline("day"));
+        await flushPromises();
+
+        // 表示したまま期間を変えたときは、画面の下に小さく出す
+        vi.mocked(fetchForecastTimeline).mockImplementationOnce(() => new Promise((done) => (resolve = done)));
+        await wrapper.find('[data-testid="period-button"]').trigger("click");
+        await wrapper.find('[data-testid="period-d14"]').trigger("click");
+        await flushPromises();
+        expect(wrapper.find('[data-testid="loading-toast"]').text()).toBe("計算し直しています…");
+        expect(wrapper.find('[data-testid="forecast-item-chart"]').exists()).toBe(true);
+        resolve(timeline("day"));
+        await flushPromises();
+        expect(wrapper.find('[data-testid="loading-toast"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
     it("lists the items by forecast and shows the selected item with its variance from the actual sales", async () => {
         const { wrapper } = await mountView();
 

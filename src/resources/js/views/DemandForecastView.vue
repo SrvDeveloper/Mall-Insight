@@ -6,6 +6,7 @@ import ForecastItemChart from "@/components/forecast/ForecastItemChart.vue";
 import ForecastPeriodBar from "@/components/forecast/ForecastPeriodBar.vue";
 import ForecastTable from "@/components/forecast/ForecastTable.vue";
 import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
+import LoadingState from "@/components/ui/LoadingState.vue";
 
 /**
  * 需要予測（バックログ B-006・B-131、決定記録 K-035・K-123）。品番別売上と同じ構成で、対象品番の過去の販売実績と、これからの需要予測を並べる。
@@ -131,7 +132,7 @@ const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-ston
             <button type="button" class="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-semibold text-stone-700 hover:bg-stone-100" @click="load">再読み込み</button>
         </div>
 
-        <div v-else-if="!result" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500">計算中…</div>
+        <LoadingState v-else-if="!result" message="需要予測を計算しています…" note="対象品番の販売実績・在庫から計算するため、数秒かかります。" />
 
         <div v-else-if="!result.meta.selection" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-6 text-center text-sm text-amber-900" data-testid="no-selection">
             対象品番がまだ確定されていません。<RouterLink to="/target-items" class="font-semibold underline">対象品番</RouterLink>の画面で確定すると、ここに需要予測が表示されます。
@@ -279,5 +280,6 @@ const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-ston
                 </template>
             </ForecastItemChart>
         </section>
+        <LoadingState v-if="isLoading && result" variant="toast" message="計算し直しています…" />
     </div>
 </template>
