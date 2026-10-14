@@ -4,7 +4,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import ForecastAccuracyView from "@/views/ForecastAccuracyView.vue";
 import { fetchForecastBacktest, fetchForecastBacktests, runForecastBacktest } from "@/api/forecastBacktests";
 import { ApiError } from "@/api/client";
-import type { BacktestMetrics, ForecastBacktest, ForecastBacktestSummaryResponse } from "@/types/api";
+import type { BacktestErrors, BacktestMetrics, ForecastBacktest, ForecastBacktestSummaryResponse } from "@/types/api";
 
 vi.mock("@/api/forecastBacktests", () => ({ fetchForecastBacktests: vi.fn(), fetchForecastBacktest: vi.fn(), runForecastBacktest: vi.fn() }));
 
@@ -25,10 +25,23 @@ function run(id: number, measuredAt: string): ForecastBacktest {
     };
 }
 
-const m = (wape: number | null, bias: number | null = 0, actual = 100): BacktestMetrics => ({ evaluated: 10, skipped: 2, actual, forecast: actual, abs_error: (wape ?? 0) * actual, wape, bias });
+const m = (wape: number | null, bias: number | null = 0, actual = 100, split: Pick<BacktestMetrics, "event" | "normal"> = { event: null, normal: null }): BacktestMetrics => ({
+    evaluated: 10,
+    skipped: 2,
+    actual,
+    forecast: actual,
+    abs_error: (wape ?? 0) * actual,
+    wape,
+    bias,
+    item_wape: wape === null ? null : wape / 2,
+    ...split,
+});
+
+/** イベントの日と普段の日に分けた値（B-133）。 */
+const errors = (wape: number, bias: number, actual: number): BacktestErrors => ({ actual, forecast: actual * (1 + bias), abs_error: wape * actual, wape, bias, item_wape: wape / 2 });
 
 /** 測っていない方式（イベントの補正より前の記録の、今の方式）。 */
-const none: BacktestMetrics = { evaluated: 0, skipped: 0, actual: 0, forecast: 0, abs_error: 0, wape: null, bias: null };
+const none: BacktestMetrics = { evaluated: 0, skipped: 0, actual: 0, forecast: 0, abs_error: 0, wape: null, bias: null, item_wape: null, event: null, normal: null };
 
 /** withEvents が false なら、イベントの補正より前に測った記録。 */
 function summary(backtest: ForecastBacktest, withEvents = true): ForecastBacktestSummaryResponse {
@@ -36,9 +49,13 @@ function summary(backtest: ForecastBacktest, withEvents = true): ForecastBacktes
     return {
         data: {
             methods: [
-                { method: "seasonal", label: "今の方式（イベント＋季節係数）", ...adjusted(m(0.62, -0.01)) },
-                { method: "event_adjusted", label: "イベントの補正だけ", ...adjusted(m(0.623, -0.02)) },
-                { method: "base_average", label: "基準平均日販（補正なし）", ...m(0.631, 0.007) },
+                { method: "seasonal", label: "今の方式（イベント＋季節係数）", ...adjusted(m(0.62, -0.01, 100, { event: errors(0.7, 0.2, 40), normal: errors(0.6, -0.1, 60) })) },
+                { method: "event_adjusted", label: "イベントの補正だけ", ...adjusted(m(0.623, -0.02, 100, { event: errors(0.7, 0.2, 40), normal: errors(0.6, -0.1, 60) })) },
+                {
+                    method: "base_average",
+                    label: "基準平均日販（補正なし）",
+                    ...m(0.631, 0.007, 100, withEvents ? { event: errors(0.8, -0.45, 40), normal: errors(0.55, 0.3, 60) } : { event: null, normal: null }),
+                },
                 { method: "recent_30", label: "直近30日の平均", ...m(0.678, 0.004) },
                 { method: "last_year", label: "前年同月の実績", ...m(0.827, -0.278) },
             ],
@@ -98,6 +115,28 @@ describe("ForecastAccuracyView", () => {
         expect(rows[1]!.findAll('[data-testid="item-wape"]').map((cell) => cell.attributes("data-best") ?? "")).toEqual(["", "", "", "", "true"]);
         expect(wrapper.find('[data-testid="origin-row"]').text()).toContain("2025/10");
         expect(wrapper.find('[data-testid="old-run"]').exists()).toBe(false);
+    });
+
+    it("shows the error rate of the item totals and splits it into event days and usual days", async () => {
+        const { wrapper } = await mountView();
+
+        expect(wrapper.find('[data-testid="method-seasonal"] [data-testid="method-item-wape"]').text()).toBe("品番の合計で比べると 31.0%");
+        expect(wrapper.find('[data-testid="split-share"]').text()).toBe("販売実績のうちイベントの日の分 40.0%（40個）");
+        const rows = wrapper.findAll('[data-testid="split-row"]');
+        expect(rows).toHaveLength(5);
+        expect(rows[0]!.find('[data-testid="split-event-wape"]').text()).toBe("70.0%品番の合計 35.0%");
+        expect(rows[0]!.find('[data-testid="split-event-bias"]').text()).toBe("+20.0%");
+        expect(rows[2]!.find('[data-testid="split-event-bias"]').text()).toBe("−45.0%");
+        expect(rows[2]!.find('[data-testid="split-normal-wape"]').text()).toBe("55.0%品番の合計 27.5%");
+        // 分けていない方式は「—」
+        expect(rows[3]!.find('[data-testid="split-event-wape"]').text()).toBe("—品番の合計 —");
+    });
+
+    it("asks to measure again when the measurement was not split into event days and usual days", async () => {
+        const { wrapper } = await mountView("/forecast-accuracy?run=1");
+
+        expect(wrapper.find('[data-testid="split-missing"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="split-table"]').exists()).toBe(false);
     });
 
     it("switches the horizon, the channel and the measurement, keeping them in the URL", async () => {

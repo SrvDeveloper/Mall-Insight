@@ -3,6 +3,7 @@
 namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Models\ForecastBacktest;
+use App\Models\ForecastBacktestResult;
 use App\Models\Item;
 use App\Models\ItemSelection;
 use App\Models\SalesEvent;
@@ -109,6 +110,12 @@ class ForecastBacktestControllerTest extends TestCase
         $this->assertEqualsWithDelta(309.36 / 365, $methods['base_average']['bias'], 0.0001);
         $this->assertEqualsWithDelta(310 / 365, $methods['recent_30']['wape'], 0.0001);
         $this->assertSame(0.0, (float) $methods['last_year']['wape']);
+        // 品番が1SKUずつなので、品番の合計で比べても同じ
+        $this->assertEqualsWithDelta($methods['base_average']['wape'], $methods['base_average']['item_wape'], 0.0001);
+        // イベントを登録していなければ、すべて普段の日
+        $this->assertSame(0.0, (float) $methods['base_average']['event']['actual']);
+        $this->assertNull($methods['base_average']['event']['wape']);
+        $this->assertEqualsWithDelta($methods['base_average']['wape'], $methods['base_average']['normal']['wape'], 0.0001);
 
         // 起点ごと
         $origins = collect($response->json('data.origins'))->keyBy('origin');
@@ -122,6 +129,10 @@ class ForecastBacktestControllerTest extends TestCase
         $this->getJson("/api/v1/forecast-backtests/{$id}?horizon=month_9")->assertUnprocessable()->assertJsonValidationErrors('horizon');
 
         $this->getJson('/api/v1/forecast-backtests')->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $id);
+
+        // イベントの日と普段の日に分ける前に測った記録では、分けた値を出さない
+        ForecastBacktestResult::query()->update(['event_actual' => null, 'event_forecast' => null, 'event_abs_error' => null, 'normal_actual' => null, 'normal_forecast' => null, 'normal_abs_error' => null]);
+        $this->getJson("/api/v1/forecast-backtests/{$id}")->assertJsonPath('data.methods.0.event', null)->assertJsonPath('data.methods.0.normal', null);
     }
 
     public function test_the_current_method_leaves_out_event_days_and_multiplies_them_by_the_candidate_known_at_each_origin(): void
@@ -145,6 +156,18 @@ class ForecastBacktestControllerTest extends TestCase
         // 補正しないと、セールの月は少なめ、セールの後の月は多めに外れる
         $this->assertGreaterThan(0.05, $methods['base_average']['wape']);
         $this->assertSame($methods['base_average']['evaluated'], $methods['event_adjusted']['evaluated']);
+
+        // イベントの日と普段の日に分ける。答え合わせの月（2025年10月～2026年9月）のセールは4回・16日で、毎日5個
+        foreach (['seasonal', 'event_adjusted', 'base_average'] as $method) {
+            $this->assertEqualsWithDelta(80.0, $methods[$method]['event']['actual'], 0.001);
+            $this->assertEqualsWithDelta($methods[$method]['actual'] - 80.0, $methods[$method]['normal']['actual'], 0.001);
+        }
+        // イベントの補正は、イベントの日も普段の日も当たる
+        $this->assertSame(0.0, (float) $methods['event_adjusted']['event']['wape']);
+        $this->assertSame(0.0, (float) $methods['event_adjusted']['normal']['wape']);
+        // 補正しないと、イベントの日は少なめ、普段の日は（セールの日を平均に入れるため）多めになる
+        $this->assertLessThan(-0.5, $methods['base_average']['event']['bias']);
+        $this->assertGreaterThan(0.0, $methods['base_average']['normal']['bias']);
     }
 
     public function test_keeps_the_latest_twenty_measurements(): void

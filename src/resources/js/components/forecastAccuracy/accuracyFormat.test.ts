@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bestMethod, biasLabel, evaluatedMonths, formatBias, formatWape, measuredMethods } from "@/components/forecastAccuracy/accuracyFormat";
 import type { BacktestMethod, BacktestMetrics } from "@/types/api";
 
-const metrics = (wape: number | null): BacktestMetrics => ({ evaluated: 1, skipped: 0, actual: 10, forecast: 10, abs_error: 0, wape, bias: 0 });
+const metrics = (wape: number | null): BacktestMetrics => ({ evaluated: 1, skipped: 0, actual: 10, forecast: 10, abs_error: 0, wape, bias: 0, item_wape: wape, event: null, normal: null });
 
 describe("accuracyFormat", () => {
     it("shows the error rate and the bias as percentages, or a dash without sales", () => {

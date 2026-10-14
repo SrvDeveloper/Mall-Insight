@@ -792,14 +792,23 @@ export interface ForecastBacktest {
 }
 
 /** 方式ごとの当たり具合。販売実績の合計が0なら wape・bias は null。 */
-export interface BacktestMetrics {
-    evaluated: number;
-    skipped: number;
+/** 予測と販売実績の差の集計。販売実績の合計が0なら wape・bias・item_wape は null。 */
+export interface BacktestErrors {
     actual: number;
     forecast: number;
     abs_error: number;
     wape: number | null;
     bias: number | null;
+    /** 品番の合計で比べた外れ率（SKUどうしの偶然のぶれが打ち消し合う、K-124） */
+    item_wape: number | null;
+}
+
+export interface BacktestMetrics extends BacktestErrors {
+    evaluated: number;
+    skipped: number;
+    /** イベントの日と普段の日に分けた値（B-133、K-125）。分ける前に測った記録では null */
+    event: BacktestErrors | null;
+    normal: BacktestErrors | null;
 }
 
 /** 測った結果を何か月先とチャネルで絞って集計したもの。 */

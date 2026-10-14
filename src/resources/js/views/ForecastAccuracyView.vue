@@ -14,6 +14,8 @@ import type { BacktestHorizon, ForecastBacktest, ForecastBacktestSummaryResponse
  * 何か月先（1か月目・1～3か月目の合計・判定する月）とチャネル（全体・BOSS・Amazon）を切り替え、方式ごと・品番ごと・起点ごとに見られる。
  * 「測り直す」で今の販売実績で測り直し、結果は測った日時とともに残す（最新20件）。前に測った結果も選んで見られ、予測の方式を変えた前後で比べられる。
  * 選んだ記録・何か月先・チャネルは URL に持たせる。
+ * 方式ごとに、品番の合計で比べた外れ率を添え、イベントの日と普段の日に分けた外れ率・偏りを並べる（B-133、K-124・K-125）。
+ * イベントの補正が、イベントの日を当てているか、普段の日を崩していないかを確かめるため。分ける前に測った記録では「—」とする。
  */
 
 type Channel = "total" | "boss" | "amazon";
@@ -130,6 +132,16 @@ const methods = computed(() => measuredMethods(result.value?.data.methods ?? [])
 const currentMethod = computed(() => methods.value[0]?.value ?? "event_adjusted");
 const methodCards = computed(() => (result.value?.data.methods ?? []).filter((card) => methods.value.some((method) => method.value === card.method)));
 const items = computed(() => result.value?.data.items ?? []);
+
+/** イベントの日と普段の日（分ける前に測った記録では null）。 */
+const split = computed(() => {
+    const current = methodCards.value.find((card) => card.method === currentMethod.value);
+    if (!current?.event || !current.normal) {
+        return null;
+    }
+    const total = current.event.actual + current.normal.actual;
+    return { eventActual: current.event.actual, eventShare: total > 0 ? current.event.actual / total : null };
+});
 const origins = computed(() => result.value?.data.origins ?? []);
 </script>
 
@@ -231,7 +243,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                 </p>
 
                 <div v-if="!result" class="px-6 py-12 text-center text-sm text-stone-500">読み込み中…</div>
-                <div v-else class="grid gap-3 p-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4" :class="isLoading ? 'opacity-50' : ''">
+                <div v-else class="grid gap-3 p-4 transition-opacity sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" :class="isLoading ? 'opacity-50' : ''">
                     <div
                         v-for="card in methodCards"
                         :key="card.method"
@@ -245,6 +257,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                             <span class="text-xs text-stone-500">外れ率（WAPE）</span>
                         </span>
                         <span class="text-xs text-stone-600 tabular-nums" data-testid="method-bias">偏り {{ formatBias(card.bias) }}{{ card.bias === null ? "" : `（${biasLabel(card.bias)}）` }}</span>
+                        <span class="text-xs text-stone-600 tabular-nums" data-testid="method-item-wape">品番の合計で比べると {{ formatWape(card.item_wape) }}</span>
                         <span class="text-[11px] text-stone-400 tabular-nums">比べたSKU {{ formatCount(card.evaluated) }}件・比べられなかったSKU {{ formatCount(card.skipped) }}件</span>
                     </div>
                 </div>
@@ -254,11 +267,60 @@ const origins = computed(() => result.value?.data.origins ?? []);
                         販売実績の合計。小さいほど当たっています。偏りは、予測の合計が販売実績の合計より多い（＋）か少ない（−）かです。
                     </p>
                     <p>
+                        「品番の合計で比べると」は、品番・チャネル・起点ごとにSKUを足してから比べた外れ率です。1か月に数個しか売れないSKUは、平均を当てても偶然のぶれで外れるため、予測の方法の良し悪しはこちらでも確かめてください。
+                    </p>
+                    <p>
                         すべての方式で予測でき、答え合わせの販売実績を取り込んでいるSKUだけを比べています。販売実績は欠品で売れなかった分を補正していません（在庫の記録が2026年9月16日からのため）。
                         イベントの補正は、登録したイベントの日を平均日販から除き、起点より後のイベントの日に、起点より前に終了した同じ名前のイベントから求めた倍率の候補を掛けています（担当者が入れた倍率は使いません）。
                         季節係数は、担当者が今登録している係数をすべての起点で使っています（係数が当たるかを確かめるためで、起点の時点で登録していたかは問いません）。
                     </p>
                 </div>
+            </section>
+
+            <section v-if="result" class="overflow-hidden rounded-xl border border-stone-200 bg-white" aria-labelledby="accuracy-split" data-testid="split-section">
+                <div class="flex flex-wrap items-baseline justify-between gap-2 border-b border-stone-200 px-4 py-3">
+                    <h2 id="accuracy-split" class="text-sm font-semibold text-stone-900">イベントの日と普段の日</h2>
+                    <span v-if="split" class="text-xs text-stone-500 tabular-nums" data-testid="split-share"
+                        >販売実績のうちイベントの日の分 {{ formatWape(split.eventShare) }}（{{ formatCount(split.eventActual) }}個）</span
+                    >
+                </div>
+                <p v-if="!split" class="px-4 py-6 text-center text-sm text-stone-500" data-testid="split-missing">
+                    この記録は、イベントの日と普段の日に分ける前に測ったため、分けた結果がありません。「測り直す」で測ると見られます。
+                </p>
+                <template v-else>
+                    <div class="overflow-x-auto">
+                        <table class="w-full min-w-[40rem] border-separate border-spacing-0 text-sm" data-testid="split-table">
+                            <thead class="text-xs text-stone-500 [&_th]:border-b [&_th]:border-stone-200 [&_th]:px-4 [&_th]:py-2 [&_th]:font-medium">
+                                <tr>
+                                    <th scope="col" class="text-left">方式</th>
+                                    <th scope="col" class="text-right">イベントの日の外れ率</th>
+                                    <th scope="col" class="text-right">偏り</th>
+                                    <th scope="col" class="text-right">普段の日の外れ率</th>
+                                    <th scope="col" class="text-right">偏り</th>
+                                </tr>
+                            </thead>
+                            <tbody class="[&_td]:border-b [&_td]:border-stone-100 [&_td]:px-4 [&_td]:py-2 [&_th]:border-b [&_th]:border-stone-100 [&_th]:px-4 [&_th]:py-2">
+                                <tr v-for="card in methodCards" :key="card.method" :class="card.method === currentMethod ? 'font-semibold' : ''" data-testid="split-row">
+                                    <th scope="row" class="text-left font-normal text-stone-900">{{ card.label }}</th>
+                                    <td class="text-right text-stone-900 tabular-nums" data-testid="split-event-wape">
+                                        {{ formatWape(card.event?.wape ?? null)
+                                        }}<span class="block text-[11px] font-normal text-stone-500">品番の合計 {{ formatWape(card.event?.item_wape ?? null) }}</span>
+                                    </td>
+                                    <td class="text-right text-stone-600 tabular-nums" data-testid="split-event-bias">{{ formatBias(card.event?.bias ?? null) }}</td>
+                                    <td class="text-right text-stone-900 tabular-nums" data-testid="split-normal-wape">
+                                        {{ formatWape(card.normal?.wape ?? null)
+                                        }}<span class="block text-[11px] font-normal text-stone-500">品番の合計 {{ formatWape(card.normal?.item_wape ?? null) }}</span>
+                                    </td>
+                                    <td class="text-right text-stone-600 tabular-nums" data-testid="split-normal-bias">{{ formatBias(card.normal?.bias ?? null) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="border-t border-stone-200 px-4 py-2.5 text-[11px] text-stone-500">
+                        イベントの日は、そのチャネルで平均日販から除く登録したイベントの日です（楽天のイベントは BOSS
+                        の日になります）。予測は、月の普段の予測を日数で日に配り、イベントの日にイベントで増やした数を足して分けています。イベントの補正が良くなったかは、イベントの日の外れ率・偏りと、普段の日の外れ率が悪くなっていないかで確かめてください。
+                    </p>
+                </template>
             </section>
 
             <section v-if="result" class="overflow-hidden rounded-xl border border-stone-200 bg-white" aria-labelledby="accuracy-items">
