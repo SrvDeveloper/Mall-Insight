@@ -163,7 +163,7 @@ class ForecastTimelineControllerTest extends TestCase
         $this->getJson('/api/v1/demand-forecasts/timeline?item_no=fl-01')
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.skus.0.detail.channels.0.windows.0.label', '直近30日')
+            ->assertJsonPath('data.0.skus.0.detail.channels.0.malls.0.windows.0.label', '直近30日')
             ->assertJsonPath('data.0.skus.0.detail.monthly.1.events.0.name', '楽天スーパーセール');
     }
 }

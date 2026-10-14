@@ -2,13 +2,15 @@
 
 namespace App\Services\Forecast;
 
+use App\Enums\Channel;
+
 /**
- * ある日時点の予測に使うイベント（B-129、K-112）。チャネルごとの平均日販から除く日と、品番・チャネルごとの、これからのイベントの倍率。
+ * ある日時点の予測に使うイベント（B-129、K-112）。モールごとの平均日販から除く日（B-134、K-126）と、品番・チャネルごとの、これからのイベントの倍率。
  */
 final readonly class EventPlan
 {
     /**
-     * @param  array<string, array<string, true>>  $excludedDates  チャネルの値 => [Y-m-d => true]
+     * @param  array<string, array<string, true>>  $excludedDates  モールの値 => [Y-m-d => true]
      * @param  array<string, array<string, list<EventUplift>>>  $uplifts  チャネルの値 => 品番 => これからのイベント
      */
     public function __construct(
@@ -17,11 +19,13 @@ final readonly class EventPlan
     ) {}
 
     /**
-     * @return array<string, true>
+     * チャネルのモールごとの、平均日販から除く日。
+     *
+     * @return array<string, array<string, true>> モールの値 => [Y-m-d => true]
      */
-    public function excludedDatesOn(string $channel): array
+    public function excludedDatesOn(Channel $channel): array
     {
-        return $this->excludedDates[$channel] ?? [];
+        return EventUpliftEstimator::datesOn($this->excludedDates, $channel);
     }
 
     /**

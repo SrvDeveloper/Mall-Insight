@@ -79,7 +79,7 @@ class SeasonalFactorReport
      */
     public function levels(Collection $items, CarbonImmutable $today): array
     {
-        return $this->estimator->levels($items, $this->forecaster->channelSalesRanges($today), $this->events->excludedDates($this->events->periods()), $today);
+        return $this->estimator->levels($items, $this->forecaster->channelSalesRanges($today), $this->events->channelEventDates($this->events->periods()), $today);
     }
 
     /**

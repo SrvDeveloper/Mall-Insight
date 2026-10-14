@@ -15,8 +15,30 @@ function detail(): Omit<SkuForecast, "unit_prices"> {
         quantity: index === 2 ? 140 : 120,
         event_quantity: index === 2 ? 20 : 0,
         seasonal_factor: null,
-        events: index === 2 ? [{ period_id: 7, event_id: 3, name: "楽天スーパーセール", channel: "boss" as const, days: 4, multiplier: 2, is_candidate: true, quantity: 20 }] : [],
+        events:
+            index === 2
+                ? [{ period_id: 7, event_id: 3, name: "楽天スーパーセール", channel: "boss" as const, days: 4, multiplier: 2, is_candidate: true, quantity: 20 }]
+                : index === 0
+                  ? [{ period_id: 7, event_id: 3, name: "楽天スーパーセール", channel: "boss" as const, days: 2, multiplier: 1.5, is_candidate: true, quantity: 0 }]
+                  : [],
     }));
+    const window = {
+        length: 30,
+        offset: 0,
+        label: "直近30日",
+        from: "2026-09-12",
+        to: "2026-10-11",
+        sales_days: 27,
+        stockout_days: 3,
+        event_days: 0,
+        seasonal_factor: null,
+        sales_quantity: 108,
+        average: 4,
+        base_weight: 0.5,
+        weight: 0.5,
+        is_excluded: false,
+    };
+    const noSales = { base_average: null, unpredictable_reason: "no_sales" as const, unpredictable_reason_label: "販売実績がありません", windows: [{ ...window, sales_quantity: 0, average: 0 }] };
     return {
         sku_id: 1,
         sku_code: "fl-01-1",
@@ -33,27 +55,25 @@ function detail(): Omit<SkuForecast, "unit_prices"> {
                 base_average: 4,
                 unpredictable_reason: null,
                 unpredictable_reason_label: null,
-                windows: [
-                    {
-                        length: 30,
-                        offset: 0,
-                        label: "直近30日",
-                        from: "2026-09-12",
-                        to: "2026-10-11",
-                        sales_days: 27,
-                        stockout_days: 3,
-                        event_days: 0,
-                        seasonal_factor: null,
-                        sales_quantity: 108,
-                        average: 4,
-                        base_weight: 0.5,
-                        weight: 0.5,
-                        is_excluded: false,
-                    },
+                // BOSS は楽天市場だけで売れている
+                windows: [],
+                malls: [
+                    { mall: "rakuten", mall_label: "楽天市場", base_average: 4, unpredictable_reason: null, unpredictable_reason_label: null, windows: [window] },
+                    { mall: "yahoo", mall_label: "Yahoo!ショッピング", ...noSales },
+                    { mall: "au_pay", mall_label: "au PAY マーケット", ...noSales },
                 ],
                 monthly,
             },
-            { channel: "amazon", channel_label: "Amazon", base_average: null, unpredictable_reason: "insufficient_days", unpredictable_reason_label: "販売日数が足りない", windows: [], monthly: null },
+            {
+                channel: "amazon",
+                channel_label: "Amazon",
+                base_average: null,
+                unpredictable_reason: "insufficient_days",
+                unpredictable_reason_label: "販売日数が足りない",
+                windows: [],
+                malls: [{ mall: "amazon", mall_label: "Amazon", base_average: null, unpredictable_reason: "insufficient_days", unpredictable_reason_label: "販売日数が足りない", windows: [] }],
+                monthly: null,
+            },
         ],
     };
 }
@@ -98,6 +118,11 @@ describe("SkuForecastView", () => {
         // 表示しているモール（BOSS）の根拠だけを出す
         expect(wrapper.find('[data-testid="basis-boss"] [data-testid="basis-average"]').text()).toBe("4.00 個/日");
         expect(wrapper.find('[data-testid="basis-amazon"]').exists()).toBe(false);
+        // BOSS はモールごとに期間を出し、売れていないモールは期間を出さない
+        expect(wrapper.find('[data-testid="basis-mall-rakuten"] [data-testid="basis-mall-average"]').text()).toBe("4.00");
+        expect(wrapper.findAll('[data-testid="basis-mall-rakuten"] [data-testid="basis-window"]')).toHaveLength(1);
+        expect(wrapper.find('[data-testid="basis-mall-yahoo"] [data-testid="basis-mall-note"]').text()).toBe("売れていない（0として足す）");
+        expect(wrapper.findAll('[data-testid="basis-mall-yahoo"] [data-testid="basis-window"]')).toHaveLength(0);
         expect(wrapper.findAll('[data-testid="breakdown-total"]').map((cell) => cell.text())).toEqual(["120", "120", "140"]);
         expect(wrapper.findAll('[data-testid="breakdown-event"]')[2]!.text()).toBe("+20（楽天スー）");
         wrapper.unmount();
@@ -119,7 +144,8 @@ describe("SkuForecastView", () => {
         expect(wrapper.findAll('[data-testid="breakdown-total"]').map((cell) => cell.text())).toEqual(["120", "180", "180", "120"]);
         const event = wrapper.findAll('[data-testid="breakdown-event"]')[1]!;
         expect(event.text()).toBe("+60（楽天スー）");
-        expect(event.attributes("title")).toBe("楽天スーパーセール　BOSS ×1.50");
+        // 倍率は月ごとの内訳のイベントの倍率（BOSS は倍率をイベントのモールの分にだけ掛けるため、予測÷普段の予測とは限らない）
+        expect(event.attributes("title")).toBe("楽天スーパーセール BOSS ×1.50");
 
         // ツールチップは、予測を普段の予測とイベントで増やした数に分け、1個未満の予測も0個と見せない
         await wrapper.findAll('[data-testid="chart-band"]')[4]!.trigger("mouseenter");

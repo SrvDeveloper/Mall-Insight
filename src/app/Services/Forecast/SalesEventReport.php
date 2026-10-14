@@ -3,6 +3,7 @@
 namespace App\Services\Forecast;
 
 use App\Enums\Channel;
+use App\Enums\Mall;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
 use App\Models\ItemSelection;
@@ -107,6 +108,8 @@ class SalesEventReport
     private function candidateChannel(SalesEventPeriod $event, Channel $channel, EventCandidate $candidate, DemandForecast $forecast, CarbonImmutable $today): array
     {
         $remainingDates = array_values(array_filter($event->dates(), fn (string $date): bool => $date >= $today->toDateString()));
+        // 期間の普段の予測は、イベントのモールの基準平均日販から求める（倍率はそのモールの分にだけ掛けるため、B-134・K-126）
+        $malls = array_flip(array_map(fn (Mall $mall): string => $mall->value, $event->mallsOn($channel)));
         $rows = [];
         foreach ($forecast->items as $entry) {
             /** @var Item $item */
@@ -118,7 +121,7 @@ class SalesEventReport
                     if ($channelForecast->channel !== $channel || ! $channelForecast->isPredictable()) {
                         continue;
                     }
-                    $baseAverage = ($baseAverage ?? 0.0) + $channelForecast->baseAverage;
+                    $baseAverage = ($baseAverage ?? 0.0) + array_sum(array_intersect_key($channelForecast->mallBases(), $malls));
                     foreach ($channelForecast->monthly as $month) {
                         foreach ($month->events as $monthEvent) {
                             if ($monthEvent->periodId === $event->id) {

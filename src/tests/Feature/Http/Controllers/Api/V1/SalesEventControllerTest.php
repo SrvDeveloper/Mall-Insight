@@ -54,17 +54,17 @@ class SalesEventControllerTest extends TestCase
     }
 
     /**
-     * 楽天市場の販売実績を1日ずつ入れる。
+     * BOSS のモール（初期値は楽天市場）の販売実績を1日ずつ入れる。
      *
      * @param  callable(string): int  $quantity  日付（Y-m-d） => 販売数
      */
-    private function sellDaily(Sku $sku, string $from, string $to, callable $quantity): void
+    private function sellDaily(Sku $sku, string $from, string $to, callable $quantity, Mall $mall = Mall::Rakuten): void
     {
         $rows = [];
         for ($day = CarbonImmutable::parse($from); $day->lte(CarbonImmutable::parse($to)); $day = $day->addDay()) {
             $count = $quantity($day->toDateString());
             if ($count > 0) {
-                $rows[] = ['source' => 'boss', 'source_order_id' => "{$sku->id}-{$day->toDateString()}", 'sales_date' => $day->toDateString(), 'mall' => 'rakuten', 'sku_id' => $sku->id, 'warehouse' => 'boss_own', 'quantity' => $count, 'amount' => 1000 * $count];
+                $rows[] = ['source' => 'boss', 'source_order_id' => "{$sku->id}-{$mall->value}-{$day->toDateString()}", 'sales_date' => $day->toDateString(), 'mall' => $mall->value, 'sku_id' => $sku->id, 'warehouse' => 'boss_own', 'quantity' => $count, 'amount' => 1000 * $count];
             }
         }
         foreach (array_chunk($rows, 500) as $chunk) {
@@ -177,7 +177,7 @@ class SalesEventControllerTest extends TestCase
         // イベントの日を除くと、平均日販はセールの無い日の 2個・1個。直近30日（09-07〜10-06）は 09-07 がイベントの日
         $popular = $response->json('data.0.skus.0.channels.0');
         $this->assertEqualsWithDelta(2.0, $popular['base_average'], 0.0001);
-        $this->assertSame(['sales_days' => 29, 'stockout_days' => 0, 'event_days' => 1, 'sales_quantity' => 58], array_intersect_key($popular['windows'][0], array_flip(['sales_days', 'stockout_days', 'event_days', 'sales_quantity'])));
+        $this->assertSame(['sales_days' => 29, 'stockout_days' => 0, 'event_days' => 1, 'sales_quantity' => 58], array_intersect_key($popular['malls'][0]['windows'][0], array_flip(['sales_days', 'stockout_days', 'event_days', 'sales_quantity'])));
         // 12月：2個×31日に、2個×（6倍－1）×4日を足す。fl-01 は過去2回の期間で普段なら16個のところ96個売れた（6倍）
         $december = collect($popular['monthly'])->firstWhere('month', '2026-12');
         $this->assertEqualsWithDelta(62 + 40, $december['quantity'], 0.01);
@@ -202,6 +202,42 @@ class SalesEventControllerTest extends TestCase
         $other = SalesEvent::factory()->create(['name' => 'お買い物マラソン']);
         $marathon = $this->period('2026-12-20', '2026-12-22', $other);
         $this->getJson("/api/v1/sales-event-periods/{$marathon->id}")->assertJsonPath('data.channels.0.overall', null)->assertJsonPath('data.channels.0.items.0.multiplier', null);
+    }
+
+    public function test_leaves_out_and_multiplies_only_the_sales_of_the_malls_the_event_is_held_on(): void
+    {
+        // 楽天市場は普段1日2個、楽天スーパーセール（6月・9月の4〜7日）は1日12個。Yahoo!ショッピングはセールの日も1日1個
+        [$sku] = $this->targetSkus(['fl-01']);
+        $isSale = fn (string $date): bool => $this->isOn($date, '2026-06-04', '2026-06-07') || $this->isOn($date, '2026-09-04', '2026-09-07');
+        $this->sellDaily($sku, '2026-04-01', '2026-10-06', fn (string $date): int => $isSale($date) ? 12 : 2);
+        $this->sellDaily($sku, '2026-04-01', '2026-10-06', fn (): int => 1, Mall::Yahoo);
+        $this->sale = SalesEvent::factory()->create();
+        $this->period('2026-06-04', '2026-06-07');
+        $this->period('2026-09-04', '2026-09-07');
+        $upcoming = $this->period('2026-12-04', '2026-12-07');
+
+        $boss = $this->getJson('/api/v1/demand-forecasts')->assertOk()->json('data.0.skus.0.channels.0');
+
+        // 楽天市場だけセールの日を除く。Yahoo!ショッピングのセールの日の販売実績は普段の売れ方として使う
+        $this->assertEqualsWithDelta(3.0, $boss['base_average'], 0.0001);
+        $malls = collect($boss['malls'])->keyBy('mall');
+        $this->assertSame(['rakuten', 'yahoo', 'au_pay'], array_column($boss['malls'], 'mall'));
+        $this->assertEqualsWithDelta(2.0, $malls['rakuten']['base_average'], 0.0001);
+        $this->assertSame(['event_days' => 1, 'sales_quantity' => 58], array_intersect_key($malls['rakuten']['windows'][0], array_flip(['event_days', 'sales_quantity'])));
+        $this->assertEqualsWithDelta(1.0, $malls['yahoo']['base_average'], 0.0001);
+        $this->assertSame(['event_days' => 0, 'sales_quantity' => 30], array_intersect_key($malls['yahoo']['windows'][0], array_flip(['event_days', 'sales_quantity'])));
+        // 売れていない au PAY マーケットは0として足す
+        $this->assertSame(['base_average' => null, 'unpredictable_reason' => 'no_sales'], array_intersect_key($malls['au_pay'], array_flip(['base_average', 'unpredictable_reason'])));
+        $this->assertSame([], $boss['windows']);
+
+        // 倍率は楽天市場の分で測る（普段なら16個のところ96個で6倍）。12月は 3個×31日に、楽天市場の 2個×（6倍－1）×4日だけを足す
+        $december = collect($boss['monthly'])->firstWhere('month', '2026-12');
+        $this->assertEqualsWithDelta(93 + 40, $december['quantity'], 0.01);
+        $this->assertEqualsWithDelta(6.0, $december['events'][0]['multiplier'], 0.0001);
+
+        // 期間の画面の普段の予測も、楽天市場の分（2個×4日）
+        $items = $this->getJson("/api/v1/sales-event-periods/{$upcoming->id}")->assertOk()->json('data.channels.0.items');
+        $this->assertSame(['multiplier' => 6, 'usual' => 8, 'extra' => 40], array_intersect_key($items[0], array_flip(['multiplier', 'usual', 'extra'])));
     }
 
     public function test_uses_the_multiplier_the_staff_entered_for_the_period_instead_of_the_candidate(): void

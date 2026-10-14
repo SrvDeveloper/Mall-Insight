@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\Channel;
+use App\Enums\Mall;
 use App\Enums\SalesEventStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\SalesEventPeriodFactory;
@@ -96,6 +97,16 @@ class SalesEventPeriod extends Model
     public function isOn(Channel $channel): bool
     {
         return in_array($channel, $this->channels(), true);
+    }
+
+    /**
+     * イベントのモールのうち、そのチャネルのもの。倍率はこのモールの平均日販にだけ掛ける（B-134、K-126）。
+     *
+     * @return list<Mall>
+     */
+    public function mallsOn(Channel $channel): array
+    {
+        return array_values(array_filter($this->salesEvent?->malls->all() ?? [], fn (Mall $mall): bool => $mall->channel() === $channel));
     }
 
     /**

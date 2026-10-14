@@ -228,6 +228,16 @@ export interface MonthlyDemand {
     events: MonthlyEventDemand[];
 }
 
+/** SKU1件・モール1つの基準平均日販（B-134、K-126）。チャネルの基準平均日販は、モールの基準平均日販の合計。 */
+export interface MallForecast {
+    mall: "rakuten" | "yahoo" | "au_pay" | "amazon";
+    mall_label: string;
+    base_average: number | null;
+    unpredictable_reason: "insufficient_days" | "stockout" | "no_sales" | null;
+    unpredictable_reason_label: string | null;
+    windows: AverageWindow[];
+}
+
 /** SKU1件・チャネル1つの需要予測（K-038）。予測不能のときは base_average・monthly が null で、理由を持つ。 */
 export interface ChannelForecast {
     channel: "boss" | "amazon";
@@ -235,7 +245,9 @@ export interface ChannelForecast {
     base_average: number | null;
     unpredictable_reason: "insufficient_days" | "stockout" | "no_sales" | null;
     unpredictable_reason_label: string | null;
+    /** モールが1つのチャネル（Amazon）の期間。BOSS は空で、期間はモールごとに malls に持つ */
     windows: AverageWindow[];
+    malls: MallForecast[];
     monthly: MonthlyDemand[] | null;
 }
 

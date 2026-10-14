@@ -20,6 +20,17 @@ enum Channel: string
     }
 
     /**
+     * このチャネルで売るモール。BOSS は楽天市場・Yahoo!ショッピング・au PAY マーケット、Amazon は Amazon。
+     * 需要予測はモールごとに平均日販を求めて足す（B-134、K-126）。
+     *
+     * @return list<Mall>
+     */
+    public function malls(): array
+    {
+        return array_values(array_filter(Mall::cases(), fn (Mall $mall): bool => $mall->channel() === $this));
+    }
+
+    /**
      * このチャネルの販売に使う在庫の区分。販売実績の出荷倉庫も、この区分のどれかになる。
      *
      * @return list<Warehouse>

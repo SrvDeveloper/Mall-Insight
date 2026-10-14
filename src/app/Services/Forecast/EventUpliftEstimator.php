@@ -3,6 +3,7 @@
 namespace App\Services\Forecast;
 
 use App\Enums\Channel;
+use App\Enums\Mall;
 use App\Models\Item;
 use App\Models\SalesEventPeriod;
 use App\Models\Sku;
@@ -13,9 +14,10 @@ use Illuminate\Support\Facades\Cache;
 /**
  * イベント（B-129、決定記録 K-112・K-114）の期間の、平均日販から除く日と倍率を決める。以下の「イベント」は、イベントの1回の期間を指す。
  *
- * - 平均日販から除く日：登録したすべてのイベントの日。イベントのモールのチャネル（楽天市場・Yahoo!ショッピング・au PAY マーケットは BOSS）だけで除く。
- * - 終わったイベントの倍率：売れた数÷普段なら売れた数（EventMeasurement）。普段なら売れた数は、イベントの初日時点の基準平均日販×イベントの日数
- *   （季節係数を登録した品番は、日ごとにその月の係数を掛ける、B-106）。
+ * - 平均日販から除く日：登録したすべてのイベントの日。イベントのモールだけで除く（B-134、K-126。楽天市場のイベントの日も、BOSS の
+ *   Yahoo!ショッピング・au PAY マーケットの販売実績は平均日販に使う）。
+ * - 終わったイベントの倍率：売れた数÷普段なら売れた数（EventMeasurement）。どちらもイベントのモールの分だけを数える。普段なら売れた数は、
+ *   イベントの初日時点のイベントのモールの基準平均日販×イベントの日数（季節係数を登録した品番は、日ごとにその月の係数を掛ける、B-106）。
  *   販売実績をイベントの初日から最終日まで取り込んでいるチャネルだけで測る。
  * - これからの期間の倍率の候補（EventCandidate）：同じイベントの、終わった過去の期間の新しい方から3回分を合わせて求める（K-114）。
  *   品番ごとに、売れた数の合計÷普段なら売れた数の合計とし、普段なら売れた数の合計が10個未満の品番は対象品番の全体の倍率を使う。
@@ -32,8 +34,8 @@ class EventUpliftEstimator
     /** 終わった期間を測った結果をキャッシュに残す日数（測るのに使うものが変われば、キーが変わって測り直す）。 */
     private const CACHE_DAYS = 30;
 
-    /** 測り方を変えたら上げる（古いキャッシュを使わないため）。 */
-    private const CACHE_VERSION = 1;
+    /** 測り方を変えたら上げる（古いキャッシュを使わないため）。2：イベントのモールの分だけを測る（B-134）。 */
+    private const CACHE_VERSION = 2;
 
     /**
      * 登録したすべてのイベントの期間（初日の順）。イベント（名前・モール）と担当者が入れた倍率を読み込んでおく。
@@ -46,23 +48,51 @@ class EventUpliftEstimator
     }
 
     /**
-     * チャネルごとの、平均日販から除く日。
+     * モールごとの、平均日販から除く日（B-134、K-126）。
      *
      * @param  Collection<int, SalesEventPeriod>  $events
-     * @return array<string, array<string, true>> チャネルの値 => [Y-m-d => true]
+     * @return array<string, array<string, true>> モールの値 => [Y-m-d => true]
      */
     public function excludedDates(Collection $events): array
     {
         $dates = [];
         foreach ($events as $event) {
-            foreach ($event->channels() as $channel) {
+            foreach ($event->salesEvent?->malls ?? [] as $mall) {
                 foreach ($event->dates() as $date) {
-                    $dates[$channel->value][$date] = true;
+                    $dates[$mall->value][$date] = true;
                 }
             }
         }
 
         return $dates;
+    }
+
+    /**
+     * チャネルごとの、いずれかのモールでイベントのある日。季節係数の初期値（K-113）と、予測精度のイベントの日と普段の日の分け方（K-125）に使う。
+     *
+     * @param  Collection<int, SalesEventPeriod>  $events
+     * @return array<string, array<string, true>> チャネルの値 => [Y-m-d => true]
+     */
+    public function channelEventDates(Collection $events): array
+    {
+        $dates = [];
+        foreach ($this->excludedDates($events) as $mall => $mallDates) {
+            $channel = Mall::from($mall)->channel()->value;
+            $dates[$channel] = ($dates[$channel] ?? []) + $mallDates;
+        }
+
+        return $dates;
+    }
+
+    /**
+     * モールごとの日のうち、チャネルのモールの分。
+     *
+     * @param  array<string, array<string, true>>  $dates  モールの値 => [Y-m-d => true]
+     * @return array<string, array<string, true>>
+     */
+    public static function datesOn(array $dates, Channel $channel): array
+    {
+        return array_intersect_key($dates, array_flip(array_map(fn (Mall $mall): string => $mall->value, $channel->malls())));
     }
 
     /**
@@ -90,8 +120,8 @@ class EventUpliftEstimator
                 foreach ($items as $item) {
                     $override = $event->multipliers->first(fn ($multiplier): bool => $multiplier->item_no === $item->item_no && $multiplier->channel === $channel);
                     $uplifts[$channel->value][$item->item_no][] = $override !== null
-                        ? new EventUplift($event, $override->multiplier, false, $dates)
-                        : new EventUplift($event, $candidate->forItem($item->item_no), true, $dates);
+                        ? new EventUplift($event, $override->multiplier, false, $dates, $event->mallsOn($channel))
+                        : new EventUplift($event, $candidate->forItem($item->item_no), true, $dates, $event->mallsOn($channel));
                 }
             }
         }
@@ -142,7 +172,7 @@ class EventUpliftEstimator
     /**
      * 終わったイベントが、チャネルごとに普段の何倍売れたか。販売実績をイベントの期間すべて取り込んでいないチャネルは測らない。
      *
-     * @param  array<string, array<string, true>>  $excluded  チャネルごとの、平均日販から除く日
+     * @param  array<string, array<string, true>>  $excluded  モールごとの、平均日販から除く日
      * @param  Collection<int, SalesEventPeriod>  $targets
      * @param  Collection<int, Item>  $items
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channelRanges
@@ -163,7 +193,7 @@ class EventUpliftEstimator
             if ($measurable->isEmpty() || $skus->isEmpty()) {
                 continue;
             }
-            $excludedDates = $excluded[$channel->value] ?? [];
+            $excludedDates = self::datesOn($excluded, $channel);
 
             // 測った結果は、測るのに使ったもの（期間・除く日・SKU・季節係数・その期間の販売実績と在庫）が同じ間は変わらないため、キャッシュから使う
             $versions ??= DataVersions::current();
@@ -191,6 +221,7 @@ class EventUpliftEstimator
             foreach ($missing as $event) {
                 $plan = $forecaster->windowPlan($range['from'], $range['to'], $event->starts_on);
                 $dates = $event->dates();
+                $malls = array_map(fn (Mall $mall): string => $mall->value, $event->mallsOn($channel));
                 $byItem = [];
                 $skuCount = 0;
                 foreach ($skus as [$itemNo, $sku]) {
@@ -201,7 +232,8 @@ class EventUpliftEstimator
                     if (! $base->isPredictable()) {
                         continue;
                     }
-                    // 普段なら売れた数＝基準平均日販×その日の月の季節係数（登録していなければ1）を、欠品していない日について足す
+                    // イベントのモールの分だけ：普段なら売れた数＝基準平均日販×その日の月の季節係数（登録していなければ1）を、欠品していない日について足す
+                    $mallBase = array_sum(array_intersect_key($base->mallBases(), array_flip($malls)));
                     $days = 0.0;
                     $actual = 0;
                     foreach ($dates as $date) {
@@ -209,10 +241,12 @@ class EventUpliftEstimator
                             continue;
                         }
                         $days += $factors === null ? 1.0 : $factors[(int) substr($date, 5, 2)];
-                        $actual += $skuSales[$date] ?? 0;
+                        foreach ($malls as $mall) {
+                            $actual += $skuSales[$mall][$date] ?? 0;
+                        }
                     }
                     $current = $byItem[$itemNo] ?? ['expected' => 0.0, 'actual' => 0];
-                    $byItem[$itemNo] = ['expected' => $current['expected'] + $base->baseAverage * $days, 'actual' => $current['actual'] + $actual];
+                    $byItem[$itemNo] = ['expected' => $current['expected'] + $mallBase * $days, 'actual' => $current['actual'] + $actual];
                     $skuCount++;
                 }
                 $values = ['items' => $byItem, 'expected' => array_sum(array_column($byItem, 'expected')), 'actual' => array_sum(array_column($byItem, 'actual')), 'sku_count' => $skuCount];
@@ -238,7 +272,7 @@ class EventUpliftEstimator
      *
      * @param  Collection<int, array{0: string, 1: Sku}>  $skus
      * @param  array<string, array<int, float>>  $seasonal
-     * @param  array<string, true>  $excludedDates
+     * @param  array<string, array<string, true>>  $excludedDates  モールの値 => [Y-m-d => true]
      */
     private function cacheKey(SalesEventPeriod $event, Channel $channel, CarbonImmutable $salesDataFrom, Collection $skus, array $seasonal, array $excludedDates, DataVersions $versions): string
     {
@@ -246,14 +280,20 @@ class EventUpliftEstimator
         $endsOn = $event->ends_on->toDateString();
         $fromMonth = substr($windowFrom, 0, 7);
         $toMonth = substr($endsOn, 0, 7);
-        $excludedInWindow = array_values(array_filter(array_keys($excludedDates), fn (string $date): bool => $date >= $windowFrom && $date <= $endsOn));
-        sort($excludedInWindow);
+        $excludedInWindow = [];
+        foreach ($excludedDates as $mall => $dates) {
+            $inWindow = array_values(array_filter(array_keys($dates), fn (string $date): bool => $date >= $windowFrom && $date <= $endsOn));
+            sort($inWindow);
+            $excludedInWindow[$mall] = $inWindow;
+        }
+        ksort($excludedInWindow);
 
         return 'event-measurement:'.md5((string) json_encode([
             self::CACHE_VERSION,
             $channel->value,
             $event->starts_on->toDateString(),
             $endsOn,
+            $event->salesEvent?->malls->map(fn (Mall $mall): string => $mall->value)->all(),
             max($salesDataFrom->toDateString(), $windowFrom),
             $skus->map(fn (array $entry): array => [$entry[0], $entry[1]->id, $seasonal[$entry[0]] ?? null])->all(),
             $excludedInWindow,
@@ -282,7 +322,7 @@ class EventUpliftEstimator
             $candidate = $this->candidate($event, $channel, $events, $measurements, $origin);
             $dates = array_values(array_filter($event->dates(), fn (string $date): bool => $date >= $origin->toDateString()));
             foreach ($items as $item) {
-                $uplifts[$item->item_no][] = new EventUplift($event, $candidate->forItem($item->item_no), true, $dates);
+                $uplifts[$item->item_no][] = new EventUplift($event, $candidate->forItem($item->item_no), true, $dates, $event->mallsOn($channel));
             }
         }
 

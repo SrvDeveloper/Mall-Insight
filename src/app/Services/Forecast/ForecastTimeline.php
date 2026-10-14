@@ -15,9 +15,9 @@ use Carbon\CarbonImmutable;
  * 今月（今日）から先は需要予測を並べる。
  *
  * - 月ごと：過去12か月・今月・これからの11か月。今月の販売実績は前日までで、今月の予測は1か月分（K-052）。
- * - 日ごと：$from～$to の日。今日の販売実績はまだ無い（前日までを取り込む）。予測は基準平均日販×その月の季節係数×イベントの倍率。
+ * - 日ごと：$from～$to の日。今日の販売実績はまだ無い（前日までを取り込む）。予測はモールごとの基準平均日販×その月の季節係数×イベントの倍率の合計。
  * - 予測し直した数（ForecastReplayer）：月ごとは、その月の $offset か月前の1日を起点にした、その月の予測。日ごとは、その日を含む月の
- *   $offset か月前の1日を起点にした基準平均日販に、その月の季節係数と、その日に重なるイベントの倍率を掛けた1日分。
+ *   $offset か月前の1日を起点にしたモールごとの基準平均日販に、その月の季節係数と、そのモールでその日に重なるイベントの倍率を掛けて足した1日分（B-134）。
  * - イベントで増やした数（event）：今月（今日）から先の予測のうち、イベントの倍率で増やした分。日ごとは予測－基準平均日販×季節係数、
  *   月ごとは月別の予測のイベントで増やした数。予測を「普段の予測＋イベントで増やした数」に分けて見せるため（原則4）。
  * - チャネルの販売実績を取り込んでいない月・日の販売実績は null（原則2）。欠品は、在庫の記録が無い日は分からないため null。
@@ -91,7 +91,7 @@ class ForecastTimeline
             foreach ($forecast->items as $entry) {
                 $item = $entry['item'];
                 $seasonal = $forecast->seasonalFactors[$item->item_no] ?? null;
-                $multipliers = DemandForecaster::eventMultipliers(array_map(fn (EventUplift $uplift): array => ['dates' => $uplift->dates, 'multiplier' => $uplift->multiplier], $forecast->eventPlan->upliftsFor($channel->value, $item->item_no)), $today->toDateString());
+                $multipliers = DemandForecaster::eventMultipliers(array_map(fn (EventUplift $uplift): array => $uplift->toArray(), $forecast->eventPlan->upliftsFor($channel->value, $item->item_no)), $today->toDateString());
                 foreach ($entry['skus'] as $skuForecast) {
                     $sku = $skuForecast->sku;
                     if (! DemandForecaster::sellsOn($sku, $channel)) {
@@ -120,9 +120,9 @@ class ForecastTimeline
                         $row['replayed'][] = null;
                         if ($unit === SalesUnit::Day) {
                             $isPredictable = $channelForecast?->isPredictable() ?? false;
-                            $quantity = $isPredictable ? DemandForecaster::dailyQuantity($channelForecast->baseAverage, $seasonal, $multipliers, $column['key']) : null;
+                            $quantity = $isPredictable ? DemandForecaster::dailyQuantity($channelForecast->mallBases(), $seasonal, $multipliers, $column['key']) : null;
                             $row['forecast'][] = $quantity === null ? null : round($quantity, 4);
-                            $row['event'][] = $quantity === null ? null : round($quantity - DemandForecaster::dailyQuantity($channelForecast->baseAverage, $seasonal, [], $column['key']), 4);
+                            $row['event'][] = $quantity === null ? null : round($quantity - DemandForecaster::dailyQuantity($channelForecast->mallBases(), $seasonal, [], $column['key']), 4);
                         } else {
                             $month = $channelForecast?->monthly[$futureIndex] ?? null;
                             $row['forecast'][] = $month === null ? null : round($month->quantity, 2);
@@ -166,12 +166,12 @@ class ForecastTimeline
     }
 
     /**
-     * 予測し直した数。月ごとは起点からその月の位置の月別の予測、日ごとは基準平均日販×季節係数×イベントの倍率。予測できなければ null。
+     * 予測し直した数。月ごとは起点からその月の位置の月別の予測、日ごとはモールごとの基準平均日販×季節係数×イベントの倍率の合計。予測できなければ null。
      *
-     * @param  array{skus: array<int, array{base: float|null, monthly: list<float>|null}>, uplifts: array<string, list<array{dates: list<string>, multiplier: float}>>}|null  $values
+     * @param  array{skus: array<int, array{base: float|null, bases: array<string, float>, monthly: list<float>|null}>, uplifts: array<string, list<array{dates: list<string>, multiplier: float, malls: list<string>}>>}|null  $values
      * @param  array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}  $column
      * @param  array<int, float>|null  $seasonal
-     * @param  array<string, float>  $multipliers  起点時点の、日ごとのイベントの倍率
+     * @param  array<string, array<string, float>>  $multipliers  起点時点の、モールごと・日ごとのイベントの倍率
      */
     private function replayedValue(?array $values, int $skuId, array $column, int $offset, ?array $seasonal, array $multipliers, SalesUnit $unit): ?float
     {
@@ -185,7 +185,7 @@ class ForecastTimeline
             return $quantity === null ? null : round($quantity, 2);
         }
 
-        return round(DemandForecaster::dailyQuantity($sku['base'], $seasonal, $multipliers, $column['key']), 4);
+        return round(DemandForecaster::dailyQuantity($sku['bases'], $seasonal, $multipliers, $column['key']), 4);
     }
 
     /**

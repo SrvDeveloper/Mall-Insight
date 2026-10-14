@@ -3,12 +3,10 @@
 namespace App\Services\Forecast;
 
 use App\Enums\Channel;
-use App\Enums\Warehouse;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
 use App\Models\ItemSelection;
 use App\Models\SalesEventPeriod;
-use App\Models\SalesLine;
 use App\Services\Actuals\StockoutHistory;
 use App\Services\InventoryTrend\TrendSettings;
 use Carbon\CarbonImmutable;
@@ -119,6 +117,7 @@ class ForecastBacktester
         // イベント：平均日販から除く日と、終わったイベントごとの倍率（起点ごとの候補は、起点より前に終わったものから求める）
         $events = $this->eventUplifts->periods();
         $excludedDates = $this->eventUplifts->excludedDates($events);
+        $channelEventDates = $this->eventUplifts->channelEventDates($events);
         $today = $lastMonthEnd->addDay();
         $measurements = $this->eventUplifts->measure($this->forecaster, $excludedDates, $events->filter(fn ($event): bool => $event->hasEndedBefore($today)), collect($items), $channelRanges);
 
@@ -129,8 +128,10 @@ class ForecastBacktester
         $sums = [];
         foreach ($channelRanges as $range) {
             $channel = $range['channel'];
-            $channelExcluded = $excludedDates[$channel->value] ?? [];
-            $daily = $this->dailySales($skuIds, $channel, $loadFrom, $lastMonthEnd);
+            // 平均日販はモールごとにそのモールのイベントの日を除いて求め（B-134、K-126）、イベントの日と普段の日はチャネルで分ける（K-125）
+            $mallExcluded = EventUpliftEstimator::datesOn($excludedDates, $channel);
+            $channelExcluded = $channelEventDates[$channel->value] ?? [];
+            $mallDaily = $this->forecaster->channelDailySales($skuIds, $channel, $loadFrom, $lastMonthEnd);
             $stockoutDates = [];
             foreach ($this->stockouts->dailyStates($skuIds, $loadFrom, $lastOrigin->subDay(), $channel) as $skuId => $states) {
                 foreach ($states as $date => $isOutOfStock) {
@@ -155,13 +156,14 @@ class ForecastBacktester
                     if (! DemandForecaster::sellsOn($sku, $channel)) {
                         continue;
                     }
-                    $sales = $daily[$sku->id] ?? [];
+                    $mallSales = $mallDaily[$sku->id] ?? [];
+                    $sales = DemandForecaster::sumMalls($mallSales);
                     $monthly = $this->monthlyTotals($sales);
                     foreach ($contexts as $context) {
                         if ($context['horizons'] === []) {
                             continue;
                         }
-                        $predictions = $this->predict($channel, $context, $sales, $monthly, $stockoutDates[$sku->id] ?? [], $channelExcluded, $context['uplifts'][$item->item_no] ?? [], $context['seasonal_uplifts'][$item->item_no] ?? [], $seasonal[$item->item_no] ?? null);
+                        $predictions = $this->predict($channel, $context, $mallSales, $sales, $monthly, $stockoutDates[$sku->id] ?? [], $mallExcluded, $context['uplifts'][$item->item_no] ?? [], $context['seasonal_uplifts'][$item->item_no] ?? [], $seasonal[$item->item_no] ?? null);
                         foreach ($context['horizons'] as $horizon => $spec) {
                             $actual = $spec['actual_months'] === null ? null : (float) array_sum(array_map(fn (string $month): int => $monthly[$month] ?? 0, $spec['actual_months']));
                             $eventActual = (float) array_sum(array_map(fn (string $date): int => $sales[$date] ?? 0, $spec['event_dates']));
@@ -282,23 +284,24 @@ class ForecastBacktester
      * 起点時点の、方式ごとの月別の予測（起点の月から判定する月まで）。予測できない方式・月は null。
      *
      * @param  array{origin: CarbonImmutable, plan: array<string, mixed>|null, recent_dates: list<string>|null, month_days: list<int>, last_year_months: list<string|null>}  $context
-     * @param  array<string, int>  $sales  [Y-m-d => 販売数量]
+     * @param  array<string, array<string, int>>  $mallSales  [モールの値 => [Y-m-d => 販売数量]]
+     * @param  array<string, int>  $sales  [Y-m-d => 販売数量]（モールの合計）
      * @param  array<string, int>  $monthly  [Y-m => 販売数量]
      * @param  array<string, true>  $stockoutDates
-     * @param  array<string, true>  $eventDates  平均日販から除くイベントの日
+     * @param  array<string, array<string, true>>  $eventDates  平均日販から除くイベントの日 [モールの値 => [Y-m-d => true]]
      * @param  list<EventUplift>  $uplifts  起点以降のイベントの倍率（その品番の分）
      * @param  list<EventUplift>  $seasonalUplifts  季節係数を掛けた普段の数と比べて求めた、起点以降のイベントの倍率
      * @param  array<int, float>|null  $seasonal  登録した季節係数
      * @return array<string, list<array{quantity: float, event: float}|null>> 方式 => 月の位置（起点の月が0） => 予測とそのうちイベントで増やした数
      */
-    private function predict(Channel $channel, array $context, array $sales, array $monthly, array $stockoutDates, array $eventDates, array $uplifts, array $seasonalUplifts, ?array $seasonal): array
+    private function predict(Channel $channel, array $context, array $mallSales, array $sales, array $monthly, array $stockoutDates, array $eventDates, array $uplifts, array $seasonalUplifts, ?array $seasonal): array
     {
         $none = array_fill(0, count($context['month_days']), null);
 
         // 今の方式（イベント＋季節係数。季節係数を登録していない品番は、イベントの補正だけと同じ）
         $seasonalMonthly = $none;
         if ($context['plan'] !== null) {
-            $adjusted = $this->forecaster->forecastChannelWith($channel, $context['plan'], $sales, $stockoutDates, $context['origin'], $eventDates, $seasonalUplifts, $seasonal);
+            $adjusted = $this->forecaster->forecastChannelWith($channel, $context['plan'], $mallSales, $stockoutDates, $context['origin'], $eventDates, $seasonalUplifts, $seasonal);
             if ($adjusted->isPredictable()) {
                 $seasonalMonthly = array_map(fn (int $index): array => ['quantity' => $adjusted->monthly[$index]->quantity, 'event' => $adjusted->monthly[$index]->eventQuantity()], array_keys($context['month_days']));
             }
@@ -308,11 +311,11 @@ class ForecastBacktester
         $eventMonthly = $none;
         $baseMonthly = $none;
         if ($context['plan'] !== null) {
-            $adjusted = $this->forecaster->forecastChannelWith($channel, $context['plan'], $sales, $stockoutDates, $context['origin'], $eventDates, $uplifts);
+            $adjusted = $this->forecaster->forecastChannelWith($channel, $context['plan'], $mallSales, $stockoutDates, $context['origin'], $eventDates, $uplifts);
             if ($adjusted->isPredictable()) {
                 $eventMonthly = array_map(fn (int $index): array => ['quantity' => $adjusted->monthly[$index]->quantity, 'event' => $adjusted->monthly[$index]->eventQuantity()], array_keys($context['month_days']));
             }
-            $base = $this->forecaster->forecastChannelWith($channel, $context['plan'], $sales, $stockoutDates, $context['origin']);
+            $base = $this->forecaster->forecastChannelWith($channel, $context['plan'], $mallSales, $stockoutDates, $context['origin']);
             if ($base->isPredictable()) {
                 $baseMonthly = array_map(fn (int $days): array => ['quantity' => $base->baseAverage * $days, 'event' => 0.0], $context['month_days']);
             }
@@ -364,31 +367,6 @@ class ForecastBacktester
         }
 
         return [$event, $normal];
-    }
-
-    /**
-     * @param  list<int>  $skuIds
-     * @return array<int, array<string, int>> [SKU ID => [Y-m-d => 販売数量]]
-     */
-    private function dailySales(array $skuIds, Channel $channel, CarbonImmutable $from, CarbonImmutable $to): array
-    {
-        $sales = [];
-        foreach (array_chunk($skuIds, 500) as $chunk) {
-            $rows = SalesLine::query()
-                ->selectRaw('sku_id, sales_date, sum(quantity) as quantity')
-                ->whereIn('sku_id', $chunk)
-                ->whereIn('warehouse', array_map(fn (Warehouse $warehouse): string => $warehouse->value, $channel->warehouses()))
-                ->where('sales_date', '>=', $from->toDateString())
-                ->where('sales_date', '<', $to->addDay()->toDateString())
-                ->groupBy('sku_id', 'sales_date')
-                ->toBase()
-                ->get();
-            foreach ($rows as $row) {
-                $sales[(int) $row->sku_id][substr((string) $row->sales_date, 0, 10)] = (int) $row->quantity;
-            }
-        }
-
-        return $sales;
     }
 
     /**

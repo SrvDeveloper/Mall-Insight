@@ -54,15 +54,15 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('meta.selection.item_count', 1)
             ->assertJsonPath('data.0.item_no', 'fl-01')
             ->assertJsonPath('data.0.skus.0.sku_code', 'fl-01-1-10')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0', ['length' => 30, 'offset' => 0, 'label' => '直近30日', 'from' => '2026-09-01', 'to' => '2026-09-30', 'sales_days' => 30, 'stockout_days' => 0, 'event_days' => 0, 'seasonal_factor' => null, 'sales_quantity' => 30, 'average' => 1, 'base_weight' => 0.5, 'weight' => 0.5, 'is_excluded' => false])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.label', '31〜90日前')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.from', '2026-07-03')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.to', '2026-08-31')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.sales_quantity', 120)
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.label', '91〜180日前')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.from', '2026-04-04')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.to', '2026-07-02')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.2.sales_quantity', 180)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0', ['length' => 30, 'offset' => 0, 'label' => '直近30日', 'from' => '2026-09-01', 'to' => '2026-09-30', 'sales_days' => 30, 'stockout_days' => 0, 'event_days' => 0, 'seasonal_factor' => null, 'sales_quantity' => 30, 'average' => 1, 'base_weight' => 0.5, 'weight' => 0.5, 'is_excluded' => false])
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.1.label', '31〜90日前')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.1.from', '2026-07-03')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.1.to', '2026-08-31')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.1.sales_quantity', 120)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.2.label', '91〜180日前')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.2.from', '2026-04-04')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.2.to', '2026-07-02')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.2.sales_quantity', 180)
             // 30÷30×0.5 + 120÷60×0.3 + 180÷90×0.2 = 0.5 + 0.6 + 0.4
             ->assertJsonPath('data.0.skus.0.base_average', 1.5)
             ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', null)
@@ -95,10 +95,10 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.channels.0.windows.*.sales_days', [30, 40, 0])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.from', ['2026-09-07', '2026-07-29', null])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.is_excluded', [false, false, true])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.weight', [0.625, 0.375, 0])
+        $response->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.sales_days', [30, 40, 0])
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.from', ['2026-09-07', '2026-07-29', null])
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.is_excluded', [false, false, true])
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.weight', [0.625, 0.375, 0])
             // 60÷30×0.625 + 40÷40×0.375 = 1.25 + 0.375
             ->assertJsonPath('data.0.skus.0.base_average', 1.625);
     }
@@ -112,8 +112,8 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.channels.0.windows.*.sales_days', [30, 10, 0])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.weight', [1, 0, 0])
+        $response->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.sales_days', [30, 10, 0])
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.weight', [1, 0, 0])
             ->assertJsonPath('data.0.skus.0.base_average', 1);
     }
 
@@ -135,11 +135,11 @@ class DemandForecastControllerTest extends TestCase
         $response = $this->getJson('/api/v1/demand-forecasts');
 
         // 欠品日は 09-18〜20 の3日。販売数は欠品日の4点を除いた27点、販売できた日数は27日
-        $response->assertJsonPath('data.0.skus.0.channels.0.windows.0.stockout_days', 3)
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.sales_days', 27)
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.sales_quantity', 27)
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.average', 1)
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.1.stockout_days', 0);
+        $response->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.stockout_days', 3)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.sales_days', 27)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.sales_quantity', 27)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.average', 1)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.1.stockout_days', 0);
     }
 
     public function test_excludes_a_window_with_stockouts_on_half_of_its_days_and_is_unpredictable_when_none_remain(): void
@@ -157,13 +157,13 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.channels.0.windows.0.stockout_days', 15)
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.is_excluded', true)
+        $response->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.stockout_days', 15)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.is_excluded', true)
             ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', 'stockout')
             ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason_label', '欠品していた日が多く、平均日販を出せません')
             ->assertJsonPath('data.0.skus.0.unpredictable_reason_label', 'BOSS：欠品していた日が多く、平均日販を出せません')
-            ->assertJsonPath('data.0.skus.1.channels.0.windows.0.stockout_days', 1)
-            ->assertJsonPath('data.0.skus.1.channels.0.windows.0.sales_days', 29)
+            ->assertJsonPath('data.0.skus.1.channels.0.malls.0.windows.0.stockout_days', 1)
+            ->assertJsonPath('data.0.skus.1.channels.0.malls.0.windows.0.sales_days', 29)
             ->assertJsonPath('data.0.skus.1.channels.0.unpredictable_reason', null);
     }
 
@@ -187,7 +187,7 @@ class DemandForecastControllerTest extends TestCase
         $response->assertJsonPath('meta.channels.1.sales_data_from', '2026-04-01')
             ->assertJsonPath('meta.channels.1.sales_data_to', '2026-10-05')
             ->assertJsonPath('data.0.skus.0.channels.*.channel', ['boss', 'amazon'])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.stockout_days', 0)
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.stockout_days', 0)
             // BOSS は 30÷30×0.5 + 0 + 0
             ->assertJsonPath('data.0.skus.0.channels.0.base_average', 0.5)
             // Amazon の直近30日は 09-06〜10-05。欠品は 09-26〜30 の5日、販売できた日は25日
@@ -261,8 +261,8 @@ class DemandForecastControllerTest extends TestCase
         $response = $this->getJson('/api/v1/demand-forecasts');
 
         $response->assertJsonPath('meta.channels.0.sales_data_to', '2026-10-06')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.to', '2026-10-06')
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.0.sales_quantity', 30);
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.to', '2026-10-06')
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.0.sales_quantity', 30);
     }
 
     public function test_is_unpredictable_with_fewer_than_14_days_of_sales_data(): void
@@ -273,8 +273,8 @@ class DemandForecastControllerTest extends TestCase
 
         $response = $this->getJson('/api/v1/demand-forecasts');
 
-        $response->assertJsonPath('data.0.skus.0.channels.0.windows.*.is_excluded', [true, true, true])
-            ->assertJsonPath('data.0.skus.0.channels.0.windows.*.weight', [0, 0, 0])
+        $response->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.is_excluded', [true, true, true])
+            ->assertJsonPath('data.0.skus.0.channels.0.malls.0.windows.*.weight', [0, 0, 0])
             ->assertJsonPath('data.0.skus.0.base_average', null)
             ->assertJsonPath('data.0.skus.0.monthly', null)
             ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', 'insufficient_days')

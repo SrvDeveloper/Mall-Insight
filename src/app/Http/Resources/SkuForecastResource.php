@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Services\Forecast\AverageWindow;
 use App\Services\Forecast\ChannelForecast;
+use App\Services\Forecast\MallForecast;
 use App\Services\Forecast\MonthlyDemand;
 use App\Services\Forecast\MonthlyEventDemand;
 use App\Services\Forecast\SkuForecast;
@@ -12,6 +13,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * SKU1件の需要予測（チャネルの合計）と、チャネルごとの予測・根拠（期間別の販売数量・販売できた日数・欠品日数・イベントの日数・平均日販・重み）。
+ * 根拠の期間はモールごとに malls に出す（B-134、K-126。BOSS は楽天市場・Yahoo!ショッピング・au PAY マーケット）。windows は、モールが1つの
+ * チャネル（Amazon）ではそのモールの期間、BOSS では空。
  * 月別の予測には、イベント（B-129）の日に倍率で増やした数と、その内訳を添える（K-112）。季節係数を登録した品番（B-106）は、
  * 月の季節係数と、期間ごとの季節係数の平均（平均日販は季節の影響を除いた値）を添える。
  * 平均日販・重みは小数4桁、数量は小数2桁で返し、整数への丸めは表示するときに行う。
@@ -42,25 +45,42 @@ class SkuForecastResource extends JsonResource
                 'base_average' => $this->roundAverage($channel->baseAverage),
                 'unpredictable_reason' => $channel->unpredictableReason?->value,
                 'unpredictable_reason_label' => $channel->unpredictableReason?->label(),
-                'windows' => array_map(fn (AverageWindow $window): array => [
-                    'length' => $window->length,
-                    'offset' => $window->offset,
-                    'label' => $window->label(),
-                    'from' => $window->from?->toDateString(),
-                    'to' => $window->to?->toDateString(),
-                    'sales_days' => $window->salesDays,
-                    'stockout_days' => $window->stockoutDays,
-                    'event_days' => $window->eventDays,
-                    'seasonal_factor' => $window->seasonalFactor === null ? null : round($window->seasonalFactor, 4),
-                    'sales_quantity' => $window->salesQuantity,
-                    'average' => $this->roundAverage($window->average),
-                    'base_weight' => $window->baseWeight,
-                    'weight' => round($window->weight, 4),
-                    'is_excluded' => $window->isExcluded(),
-                ], $channel->windows),
+                'windows' => $this->windows($channel->windows),
+                'malls' => array_map(fn (MallForecast $mall): array => [
+                    'mall' => $mall->mall->value,
+                    'mall_label' => $mall->mall->label(),
+                    'base_average' => $this->roundAverage($mall->baseAverage),
+                    'unpredictable_reason' => $mall->unpredictableReason?->value,
+                    'unpredictable_reason_label' => $mall->unpredictableReason?->label(),
+                    'windows' => $this->windows($mall->windows),
+                ], $channel->malls),
                 'monthly' => $this->monthly($channel->monthly),
             ], $this->channels),
         ];
+    }
+
+    /**
+     * @param  list<AverageWindow>  $windows
+     * @return list<array<string, mixed>>
+     */
+    private function windows(array $windows): array
+    {
+        return array_map(fn (AverageWindow $window): array => [
+            'length' => $window->length,
+            'offset' => $window->offset,
+            'label' => $window->label(),
+            'from' => $window->from?->toDateString(),
+            'to' => $window->to?->toDateString(),
+            'sales_days' => $window->salesDays,
+            'stockout_days' => $window->stockoutDays,
+            'event_days' => $window->eventDays,
+            'seasonal_factor' => $window->seasonalFactor === null ? null : round($window->seasonalFactor, 4),
+            'sales_quantity' => $window->salesQuantity,
+            'average' => $this->roundAverage($window->average),
+            'base_weight' => $window->baseWeight,
+            'weight' => round($window->weight, 4),
+            'is_excluded' => $window->isExcluded(),
+        ], $windows);
     }
 
     private function roundAverage(?float $value): ?float

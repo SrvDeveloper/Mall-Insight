@@ -4,11 +4,12 @@ import { RouterLink } from "vue-router";
 import { MALL_SERIES } from "@/components/actuals/actualRows";
 import { formatFigure, scopeChannels, type ForecastScope, type TimelineLabel } from "@/components/forecast/timelineRows";
 import { formatQuantity } from "@/components/inventoryTrend/trendRows";
-import type { ForecastTimelineColumn, ForecastTimelineResponse, ForecastTimelineSku, SalesUnit, SkuForecast } from "@/types/api";
+import type { AverageWindow, ChannelForecast, ForecastTimelineColumn, ForecastTimelineResponse, ForecastTimelineSku, SalesUnit, SkuForecast } from "@/types/api";
 
 /**
  * SKU別の需要予測（B-131、K-123）の、予測の根拠。画面デザイン案のとおり、チャネルごとの基準平均日販の根拠（重ならずに遡る3つの期間の販売数・
  * 販売日数・欠品日数・イベントの日数・平均日販・重み、K-036・K-037・K-112）と、月ごとの予測の内訳（普段の予測・季節係数・イベントで増やした数）を出す。
+ * BOSS は、基準平均日販をモール（楽天市場・Yahoo!ショッピング・au PAY マーケット）ごとに求めて足すため、期間もモールごとに出す（B-134、K-126）。
  * 日ごとのときは、月ごとの代わりに今日から先の日ごとの予測の内訳（普段の予測・季節係数・イベントで増やした数）を出す。
  * 予測できないチャネルは理由を出す。表示しているモールのチャネルだけを出し、内訳は合計する。
  */
@@ -27,6 +28,18 @@ const props = defineProps<{
 const isDay = computed(() => props.unit === "day");
 
 const channels = computed(() => props.detail.channels.filter((channel) => scopeChannels(props.scope).includes(channel.channel)));
+
+/** チャネルの期間を、モールごとにまとめる（モールが1つのチャネルは見出しを出さない）。 */
+const groupsOf = (channel: ChannelForecast): { key: string; label: string | null; average: number | null; note: string | null; windows: AverageWindow[] }[] =>
+    channel.malls.length > 1
+        ? channel.malls.map((mall) => ({
+              key: mall.mall,
+              label: mall.mall_label,
+              average: mall.base_average,
+              note: mall.unpredictable_reason === "no_sales" ? "売れていない（0として足す）" : mall.unpredictable_reason_label,
+              windows: mall.unpredictable_reason === "no_sales" ? [] : mall.windows,
+          }))
+        : [{ key: channel.channel, label: null, average: null, note: null, windows: channel.windows }];
 const colorOf = (channel: "boss" | "amazon"): string => MALL_SERIES.find((mall) => mall.key === channel)!.color;
 const formatAverage = (value: number | null): string => (value === null ? "—" : value.toFixed(2));
 const shortRange = (from: string | null, to: string | null): string =>
@@ -91,8 +104,13 @@ const days = computed<BreakdownColumn[]>(() => {
             const event = props.timeline[channel.channel]?.event[index] ?? 0;
             total += forecast;
             eventQuantity += event;
-            if (event > 0 && forecast - event > 0) {
-                multipliers.push(`${channel.channel_label} ×${(forecast / (forecast - event)).toFixed(2)}`);
+            // 倍率は月ごとの内訳から取る（BOSS は倍率をイベントのモールの分にだけ掛けるため、予測÷普段の予測とは合わない）
+            const monthEvents = channel.monthly?.find((month) => month.month === column.key.slice(0, 7))?.events ?? [];
+            for (const event of props.events[index] ?? []) {
+                const multiplier = monthEvents.find((item) => item.period_id === event.id)?.multiplier;
+                if (multiplier !== undefined) {
+                    multipliers.push(`${event.name} ${channel.channel_label} ×${multiplier.toFixed(2)}`);
+                }
             }
         }
         const events = [...new Set((props.events[index] ?? []).map((event) => event.name))];
@@ -104,7 +122,7 @@ const days = computed<BreakdownColumn[]>(() => {
             usual: formatDay(total - eventQuantity),
             seasonal: predictable.value[0]?.monthly?.find((month) => month.month === column.key.slice(0, 7))?.seasonal_factor ?? null,
             eventText: eventText(eventQuantity, events, formatDay),
-            eventTitle: [events.join("・"), ...multipliers].filter((text) => text !== "").join("　"),
+            eventTitle: (multipliers.length > 0 ? multipliers : events).join("　"),
             hasEvent: eventQuantity > 0,
             total: formatDay(total),
         });
@@ -142,8 +160,15 @@ const hasSeasonal = computed(() => breakdown.value.some((column) => column.seaso
                         <th scope="col">重み</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <tr v-for="window in channel.windows" :key="window.length" :class="window.is_excluded ? 'opacity-50' : ''" data-testid="basis-window">
+                <tbody v-for="group in groupsOf(channel)" :key="group.key" :data-testid="`basis-mall-${group.key}`">
+                    <tr v-if="group.label" class="bg-stone-50/60">
+                        <th scope="rowgroup" colspan="5" class="text-left font-semibold text-stone-800">
+                            {{ group.label }}<span v-if="group.note" class="ml-2 text-[11px] font-normal text-stone-500" data-testid="basis-mall-note">{{ group.note }}</span>
+                        </th>
+                        <td class="text-right font-semibold" data-testid="basis-mall-average">{{ formatAverage(group.average) }}</td>
+                        <td />
+                    </tr>
+                    <tr v-for="window in group.windows" :key="window.length" :class="window.is_excluded ? 'opacity-50' : ''" data-testid="basis-window">
                         <th scope="row" class="text-left font-normal text-stone-700">
                             {{ window.label }}<span class="block text-[10px] text-stone-400">{{ shortRange(window.from, window.to) }}</span>
                         </th>
@@ -156,7 +181,11 @@ const hasSeasonal = computed(() => breakdown.value.some((column) => column.seaso
                     </tr>
                 </tbody>
             </table>
-            <p class="m-0 px-3 py-2 text-[11px] text-stone-500">販売数・販売日数は、欠品の日とイベントの日を除いた数です。</p>
+            <p class="m-0 px-3 py-2 text-[11px] text-stone-500">
+                販売数・販売日数は、欠品の日とイベントの日を除いた数です。<template v-if="channel.malls.length > 1"
+                    >基準平均日販はモールごとに求めて足します。イベントの日は、そのイベントのモールでだけ除き、倍率もそのモールの分にだけ掛けます。</template
+                >
+            </p>
         </div>
     </div>
 

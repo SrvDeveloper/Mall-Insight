@@ -26,8 +26,8 @@ class ForecastReplayer
     /** 結果をキャッシュに残す日数。 */
     private const CACHE_DAYS = 30;
 
-    /** 計算の方法を変えたら上げる（古いキャッシュを使わないため）。 */
-    private const CACHE_VERSION = 1;
+    /** 計算の方法を変えたら上げる（古いキャッシュを使わないため）。2：モールごとに平均日販を求め、倍率をイベントのモールにだけ掛ける（B-134）。 */
+    private const CACHE_VERSION = 2;
 
     public function __construct(private DemandForecaster $forecaster, private EventUpliftEstimator $eventUplifts) {}
 
@@ -35,8 +35,8 @@ class ForecastReplayer
      * @param  list<Item>  $items  有効なSKUを読み込んだ品番
      * @param  list<array{channel: Channel, from: ?CarbonImmutable, to: ?CarbonImmutable}>  $channelRanges  今日時点の販売実績の期間
      * @param  list<CarbonImmutable>  $origins  起点（月の1日、今日より前）
-     * @return array<string, array<string, array{skus: array<int, array{base: float|null, monthly: list<float>|null}>, uplifts: array<string, list<array{dates: list<string>, multiplier: float}>>}>>
-     *                                                                                                                                                                                                起点（Y-m-d） => チャネルの値 => SKU ID => 基準平均日販と起点の月からの月別の予測（予測できなければ null）、品番 => 倍率を掛けるイベントの日
+     * @return array<string, array<string, array{skus: array<int, array{base: float|null, bases: array<string, float>, monthly: list<float>|null}>, uplifts: array<string, list<array{dates: list<string>, multiplier: float, malls: list<string>}>>}>>
+     *                                                                                                                                                                                                                                                  起点（Y-m-d） => チャネルの値 => SKU ID => 基準平均日販・モールごとの基準平均日販と起点の月からの月別の予測（予測できなければ null）、品番 => 倍率を掛けるイベントの日とモール
      */
     public function replay(array $items, array $channelRanges, array $origins, CarbonImmutable $today): array
     {
@@ -97,7 +97,7 @@ class ForecastReplayer
 
             // 起点ごとの候補は、起点より前に終わったイベントの期間を測った結果から求める（測った結果はキャッシュから使う）
             $measurements ??= $this->eventUplifts->measure($this->forecaster, $this->eventUplifts->excludedDates($events), $events->filter(fn (SalesEventPeriod $event): bool => $event->hasEndedBefore($today)), collect($items), $channelRanges, $seasonal);
-            $excludedDates = $this->eventUplifts->excludedDates($events)[$channel->value] ?? [];
+            $excludedDates = EventUpliftEstimator::datesOn($this->eventUplifts->excludedDates($events), $channel);
 
             // 平均日販の期間（最初の起点の180日前から）の販売実績・欠品を、1回で読む
             $windowDays = array_sum(array_keys(DemandForecaster::WINDOW_WEIGHTS));
@@ -121,19 +121,19 @@ class ForecastReplayer
                 $values = ['skus' => [], 'uplifts' => []];
                 foreach ($skus as [$item, $sku]) {
                     if ($plan === null) {
-                        $values['skus'][$sku->id] = ['base' => null, 'monthly' => null];
+                        $values['skus'][$sku->id] = ['base' => null, 'bases' => [], 'monthly' => null];
 
                         continue;
                     }
                     $forecast = $this->forecaster->forecastChannelWith($channel, $plan, $sales[$sku->id] ?? [], $stockouts[$sku->id] ?? [], $origin, $excludedDates, $uplifts[$item->item_no] ?? [], $seasonal[$item->item_no] ?? null);
                     $values['skus'][$sku->id] = $forecast->isPredictable()
-                        ? ['base' => $forecast->baseAverage, 'monthly' => array_map(fn (MonthlyDemand $month): float => $month->quantity, array_slice($forecast->monthly ?? [], 0, self::MONTHS))]
-                        : ['base' => null, 'monthly' => null];
+                        ? ['base' => $forecast->baseAverage, 'bases' => $forecast->mallBases(), 'monthly' => array_map(fn (MonthlyDemand $month): float => $month->quantity, array_slice($forecast->monthly ?? [], 0, self::MONTHS))]
+                        : ['base' => null, 'bases' => [], 'monthly' => null];
                 }
                 foreach ($uplifts as $itemNo => $itemUplifts) {
                     foreach ($itemUplifts as $uplift) {
                         if ($uplift->multiplier !== null) {
-                            $values['uplifts'][$itemNo][] = ['dates' => $uplift->dates, 'multiplier' => $uplift->multiplier];
+                            $values['uplifts'][$itemNo][] = $uplift->toArray();
                         }
                     }
                 }

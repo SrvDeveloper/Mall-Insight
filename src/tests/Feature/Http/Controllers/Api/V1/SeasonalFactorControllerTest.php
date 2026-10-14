@@ -62,8 +62,8 @@ class SeasonalFactorControllerTest extends TestCase
 
         $channel = $response->json('data.0.skus.0.channels.0');
         // 直近30日（09-07〜10-06）：9月24日×4個＋10月6日×2個＝108個 ÷（24日×2＋6日×1）＝2個。季節係数の平均は 54÷30＝1.8
-        $this->assertEqualsWithDelta(2.0, $channel['windows'][0]['average'], 0.0001);
-        $this->assertEqualsWithDelta(1.8, $channel['windows'][0]['seasonal_factor'], 0.0001);
+        $this->assertEqualsWithDelta(2.0, $channel['malls'][0]['windows'][0]['average'], 0.0001);
+        $this->assertEqualsWithDelta(1.8, $channel['malls'][0]['windows'][0]['seasonal_factor'], 0.0001);
         $this->assertEqualsWithDelta(2.0, $channel['base_average'], 0.0001);
         $months = collect($channel['monthly'])->keyBy('month');
         $this->assertEqualsWithDelta(62, $months['2026-10']['quantity'], 0.01);
