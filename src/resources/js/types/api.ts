@@ -423,9 +423,6 @@ export interface ForecastTimelineResponse {
     data: ForecastTimelineItem[];
     meta: DemandForecastResponse["meta"] & {
         unit: SalesUnit;
-        /** 予測し直す起点（何か月前の1日か） */
-        offset: number;
-        offsets: number[];
         max_future_days: number;
         columns: ForecastTimelineColumn[];
     };

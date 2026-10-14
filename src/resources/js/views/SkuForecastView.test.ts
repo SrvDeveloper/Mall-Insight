@@ -238,7 +238,7 @@ describe("SkuForecastView", () => {
     it("shows the item totals, the SKU chart and the basis of the forecast", async () => {
         const { wrapper } = await mountView("/forecasts/fl-01?scope=boss");
 
-        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", offset: 0, period: null, itemNo: "fl-01" });
+        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", period: null, itemNo: "fl-01" });
         expect(wrapper.find('[data-testid="item-no"]').text()).toBe("fl-01");
         expect(wrapper.find('[data-testid="sku-stat-forecast"]').text()).toBe("1,440個");
         expect(wrapper.find('[data-testid="sku-stat-share"]').text()).toBe("BOSS 100%");
@@ -286,8 +286,8 @@ describe("SkuForecastView", () => {
     });
 
     it("shows why a channel cannot be forecast and goes back with the selections kept", async () => {
-        const { wrapper, router } = await mountView("/forecasts/fl-01?unit=day&offset=3");
-        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "day", offset: 3, period: null, itemNo: "fl-01" });
+        const { wrapper, router } = await mountView("/forecasts/fl-01?unit=day&measure=amount");
+        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "day", period: null, itemNo: "fl-01" });
 
         const response = itemTimeline();
         response.data[0]!.skus[0]!.unpredictable_reason_label = "Amazon：販売日数が足りない";

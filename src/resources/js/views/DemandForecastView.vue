@@ -12,7 +12,7 @@ import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
  * 過去の月・日には、その時点に戻って今の計算方法で予測し直した数を重ね、販売実績との差異を確かめられる（予測精度 B-130 と同じ計算）。
  *
  * - 月ごと（過去12か月・今月・これからの11か月）と日ごと（初期値は過去30日・今日・これからの30日）を切り替える。
- * - 全体・Amazon・BOSS、数量と金額（B-123）、グラフと表、予測し直す起点（その月の初め・3か月前・6か月前）、絞り込みを選べる。選んだものは URL に持たせる。
+ * - 全体・Amazon・BOSS、数量と金額（B-123）、グラフと表、絞り込みを選べる。差異は、その月の初めに予測し直した数と比べる（K-135）。選んだものは URL に持たせる。
  * - 差異は、月ごとは30%以上、日ごとは50%以上を強調する。日ごとは欠品した日を差異に数えない。
  * - 品番を押すと、SKU別の需要予測の画面に移る（選んでいるモールなどを引き継ぐ）。
  * - 予測は保存せず、開くたびに最新の販売実績から計算する（K-035）。予測し直した数は、使ったデータが変わらない間はキャッシュから使う。
@@ -21,7 +21,7 @@ import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
 type ForecastFilter = "all" | "large" | "unpredictable";
 
 const route = useRoute();
-const { scope, unit, measure, offset, updateQuery, selectUnit, result, isLoading, hasError, periodError, load, threshold, items: allItems, labels, events } = useForecastTimeline(ref(null));
+const { scope, unit, measure, updateQuery, selectUnit, result, isLoading, hasError, periodError, load, threshold, items: allItems, labels, events } = useForecastTimeline(ref(null));
 
 const filter = computed<ForecastFilter>(() => (route.query.filter === "large" || route.query.filter === "unpredictable" ? route.query.filter : "all"));
 const selectedItemNo = computed(() => (typeof route.query.item === "string" ? route.query.item : null));
@@ -232,7 +232,7 @@ const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-ston
                 </label>
             </div>
 
-            <ForecastPeriodBar :meta="result.meta" :offset="offset" :threshold="threshold" :period-error="periodError" :view="view" @update="updateQuery" />
+            <ForecastPeriodBar :meta="result.meta" :threshold="threshold" :period-error="periodError" :view="view" @update="updateQuery" />
 
             <div v-if="visibleItems.length === 0" class="px-6 py-16 text-center text-sm text-stone-500" data-testid="empty">
                 {{ allItems.length === 0 ? "対象品番がありません。" : "条件に一致する品番はありません。" }}

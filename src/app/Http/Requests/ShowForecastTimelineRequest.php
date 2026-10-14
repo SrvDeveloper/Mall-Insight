@@ -3,7 +3,6 @@
 namespace App\Http\Requests;
 
 use App\Services\Actuals\SalesUnit;
-use App\Services\Forecast\ForecastTimeline;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -11,7 +10,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * 需要予測の画面（B-131、K-123）の並び。月ごとか日ごとか、予測し直す起点（何か月前の1日か）、日ごとの期間、品番（SKU別の画面）。
+ * 需要予測の画面（B-131、K-123）の並び。月ごとか日ごとか、日ごとの期間、品番（SKU別の画面）。
  */
 class ShowForecastTimelineRequest extends FormRequest
 {
@@ -33,7 +32,6 @@ class ShowForecastTimelineRequest extends FormRequest
     {
         return [
             'unit' => ['nullable', Rule::enum(SalesUnit::class)],
-            'offset' => ['nullable', 'integer', Rule::in(ForecastTimeline::OFFSETS)],
             'from' => ['nullable', 'date_format:Y-m-d'],
             'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
             'item_no' => ['nullable', 'string', 'max:255'],
@@ -63,11 +61,6 @@ class ShowForecastTimelineRequest extends FormRequest
     public function unit(): SalesUnit
     {
         return SalesUnit::tryFrom((string) $this->input('unit')) ?? SalesUnit::Month;
-    }
-
-    public function offset(): int
-    {
-        return (int) $this->input('offset', 0);
     }
 
     /**

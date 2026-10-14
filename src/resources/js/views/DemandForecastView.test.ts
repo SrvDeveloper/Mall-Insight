@@ -32,7 +32,7 @@ describe("DemandForecastView", () => {
     it("lists the items by forecast and shows the selected item with its variance from the actual sales", async () => {
         const { wrapper } = await mountView();
 
-        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", offset: 0, period: null, itemNo: null });
+        expect(fetchForecastTimeline).toHaveBeenCalledWith({ unit: "month", period: null, itemNo: null });
         expect(wrapper.find("h1").text()).toBe("需要予測");
         const ranks = wrapper.findAll('[data-testid^="rank-"][aria-pressed]');
         expect(ranks.map((rank) => rank.find(".font-mono").text())).toEqual(["fl-01", "si-13"]);
@@ -107,7 +107,7 @@ describe("DemandForecastView", () => {
         wrapper.unmount();
     });
 
-    it("switches the mall, the measure, the forecast to compare and the filter in the URL", async () => {
+    it("switches the mall, the measure and the filter in the URL", async () => {
         const { wrapper, router } = await mountView();
 
         await wrapper.find('[data-testid="scope-amazon"]').trigger("click");
@@ -119,10 +119,8 @@ describe("DemandForecastView", () => {
         await flushPromises();
         expect(wrapper.find('[data-testid="stat-forecast"]').text()).toBe("720千円");
 
-        await wrapper.find('[data-testid="offset-3"]').trigger("click");
-        await flushPromises();
-        expect(router.currentRoute.value.query.offset).toBe("3");
-        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "month", offset: 3, period: null, itemNo: null });
+        // 差異を測る予測（起点）は選ばない（K-135）
+        expect(wrapper.find('[data-testid^="offset-"]').exists()).toBe(false);
 
         await wrapper.find('[data-testid="scope-total"]').trigger("click");
         await flushPromises();
@@ -144,7 +142,7 @@ describe("DemandForecastView", () => {
         await wrapper.find('[data-testid="unit-day"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query.unit).toBe("day");
-        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: null, itemNo: null });
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", period: null, itemNo: null });
         expect(wrapper.find('[data-testid="period-picker"]').exists()).toBe(true);
         expect(wrapper.find('[data-testid="filter-large"]').text()).toContain("50%以上");
         expect(wrapper.findAll('[data-testid="event-band"]')).toHaveLength(1);
@@ -167,7 +165,7 @@ describe("DemandForecastView", () => {
         await wrapper.find('[data-testid="period-d14"]').trigger("click");
         await flushPromises();
         expect(router.currentRoute.value.query).toMatchObject({ unit: "day", from: "2026-09-29", to: "2026-10-27" });
-        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", offset: 0, period: { from: "2026-09-29", to: "2026-10-27" }, itemNo: null });
+        expect(fetchForecastTimeline).toHaveBeenLastCalledWith({ unit: "day", period: { from: "2026-09-29", to: "2026-10-27" }, itemNo: null });
         wrapper.unmount();
     });
 

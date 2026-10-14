@@ -16,8 +16,9 @@ use Carbon\CarbonImmutable;
  *
  * - 月ごと：過去12か月・今月・これからの11か月。今月の販売実績は前日までで、今月の予測は1か月分（K-052）。
  * - 日ごと：$from～$to の日。今日の販売実績はまだ無い（前日までを取り込む）。予測はモールごとの基準平均日販×その月の季節係数×イベントの倍率の合計。
- * - 予測し直した数（ForecastReplayer）：月ごとは、その月の $offset か月前の1日を起点にした、その月の予測。日ごとは、その日を含む月の
- *   $offset か月前の1日を起点にしたモールごとの基準平均日販に、その月の季節係数と、そのモールでその日に重なるイベントの倍率を掛けて足した1日分（B-134）。
+ * - 予測し直した数（ForecastReplayer）：月ごとは、その月の1日を起点にした、その月の予測。日ごとは、その日を含む月の1日を起点にした
+ *   モールごとの基準平均日販に、その月の季節係数と、そのモールでその日に重なるイベントの倍率を掛けて足した1日分（B-134）。
+ *   起点はその月の1日に固める（3か月前・6か月前の予測の当たり具合は予測精度の画面で測る、K-135）。
  * - イベントで増やした数（event）：今月（今日）から先の予測のうち、イベントの倍率で増やした分。日ごとは予測－基準平均日販×季節係数、
  *   月ごとは月別の予測のイベントで増やした数。予測を「普段の予測＋イベントで増やした数」に分けて見せるため（原則4）。
  * - 補正で増減した数（adjustment）：手動での補正（B-109、K-132）の倍率で増減した分。日ごとはその日の月の倍率を掛ける。
@@ -33,16 +34,13 @@ class ForecastTimeline
     /** 月ごとに出す、今月から先の月の数（今月を含む）。 */
     public const FUTURE_MONTHS = 12;
 
-    /** 選べる、予測し直す起点（何か月前の1日か）。 */
-    public const OFFSETS = [0, 3, 6];
-
     public function __construct(private DemandForecaster $forecaster, private ForecastReplayer $replayer, private StockoutHistory $stockouts) {}
 
     /**
      * @param  list<string>|null  $itemNos  null なら対象品番
      * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{base_average: float|null, actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, stockout_known: list<int|null>, replayed: list<float|null>, forecast: list<float|null>, event: list<float|null>, adjustment: list<float|null>}>>}
      */
-    public function build(CarbonImmutable $now, SalesUnit $unit, int $offset, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, ?array $itemNos = null): array
+    public function build(CarbonImmutable $now, SalesUnit $unit, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, ?array $itemNos = null): array
     {
         $today = $now->startOfDay();
         $forecast = $this->forecaster->forecast($now, $itemNos);
@@ -57,7 +55,7 @@ class ForecastTimeline
         $covered = [];
         foreach ($columns as $index => $column) {
             if ($column['kind'] === 'past') {
-                $origin = $column['start']->startOfMonth()->subMonthsNoOverflow($offset);
+                $origin = $column['start']->startOfMonth();
                 $origins[$origin->toDateString()] = $origin;
                 $originKeys[$index] = $origin->toDateString();
             }
@@ -120,7 +118,7 @@ class ForecastTimeline
 
                         if ($column['kind'] === 'past') {
                             $origin = $originKeys[$index];
-                            $row['replayed'][] = $this->replayedValue($replayed[$origin][$channel->value] ?? null, $sku->id, $column, $offset, $seasonal, $replayMultipliers[$origin][$channel->value][$item->item_no] ?? [], $unit);
+                            $row['replayed'][] = $this->replayedValue($replayed[$origin][$channel->value] ?? null, $sku->id, $column, $seasonal, $replayMultipliers[$origin][$channel->value][$item->item_no] ?? [], $unit);
                             $row['forecast'][] = null;
                             $row['event'][] = null;
                             $row['adjustment'][] = null;
@@ -179,21 +177,21 @@ class ForecastTimeline
     }
 
     /**
-     * 予測し直した数。月ごとは起点からその月の位置の月別の予測、日ごとはモールごとの基準平均日販×季節係数×イベントの倍率の合計。予測できなければ null。
+     * 予測し直した数。月ごとはその月の1日を起点にした、その月の予測、日ごとはモールごとの基準平均日販×季節係数×イベントの倍率の合計。予測できなければ null。
      *
      * @param  array{skus: array<int, array{base: float|null, bases: array<string, float>, monthly: list<float>|null}>, uplifts: array<string, list<array{dates: list<string>, multiplier: float, malls: list<string>}>>}|null  $values
      * @param  array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}  $column
      * @param  array<int, float>|null  $seasonal
      * @param  array<string, array<string, float>>  $multipliers  起点時点の、モールごと・日ごとのイベントの倍率
      */
-    private function replayedValue(?array $values, int $skuId, array $column, int $offset, ?array $seasonal, array $multipliers, SalesUnit $unit): ?float
+    private function replayedValue(?array $values, int $skuId, array $column, ?array $seasonal, array $multipliers, SalesUnit $unit): ?float
     {
         $sku = $values['skus'][$skuId] ?? null;
         if ($sku === null || $sku['base'] === null) {
             return null;
         }
         if ($unit === SalesUnit::Month) {
-            $quantity = $sku['monthly'][$offset] ?? null;
+            $quantity = $sku['monthly'][0] ?? null;
 
             return $quantity === null ? null : round($quantity, 2);
         }

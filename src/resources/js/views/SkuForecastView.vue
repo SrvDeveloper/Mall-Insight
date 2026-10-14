@@ -12,12 +12,12 @@ import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
  * SKU別の需要予測（バックログ B-131、決定記録 K-123）。需要予測の画面で品番を押すと移る画面。画面デザイン案のとおり、上に品番の合計
  * （予測の合計・モールの割合・差異・SKUの数）、左にSKUの一覧（予測の多い順）、右に選んだSKUのグラフと、予測の根拠（チャネルごとの
  * 基準平均日販の根拠・月ごとの予測の内訳）を出す。予測できないSKUは理由を出す。品番の手動での予測補正（B-109、K-132）もこの画面で入れる。
- * モール・月ごとと日ごと・数量と金額・予測し直す起点・日ごとの期間は需要予測の画面と同じく URL に持たせ、戻るときも引き継ぐ。選んだSKU（sku）も URL に持たせる。
+ * モール・月ごとと日ごと・数量と金額・日ごとの期間は需要予測の画面と同じく URL に持たせ、戻るときも引き継ぐ。選んだSKU（sku）も URL に持たせる。
  */
 
 const route = useRoute();
 const itemNo = computed(() => String(route.params.itemNo));
-const { scope, unit, measure, offset, updateQuery, selectUnit, result, isLoading, hasError, periodError, load, threshold, items, labels, events } = useForecastTimeline(itemNo);
+const { scope, unit, measure, updateQuery, selectUnit, result, isLoading, hasError, periodError, load, threshold, items, labels, events } = useForecastTimeline(itemNo);
 
 const item = computed(() => items.value.find((entry) => entry.itemNo === itemNo.value) ?? null);
 const formats = computed(() => forecastChartFormats(measure.value, unit.value));
@@ -145,7 +145,7 @@ const segmentClass = (isSelected: boolean): string => (isSelected ? "bg-white fo
                     </button>
                 </div>
             </div>
-            <ForecastPeriodBar :meta="result.meta" :offset="offset" :threshold="threshold" :period-error="periodError" @update="updateQuery" />
+            <ForecastPeriodBar :meta="result.meta" :threshold="threshold" :period-error="periodError" @update="updateQuery" />
 
             <div class="grid grid-cols-2 border-b border-stone-200 xl:grid-cols-4">
                 <div class="border-r border-stone-100 px-4 py-3.5">

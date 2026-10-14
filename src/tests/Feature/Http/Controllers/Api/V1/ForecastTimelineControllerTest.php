@@ -97,7 +97,7 @@ class ForecastTimelineControllerTest extends TestCase
         $json = $this->getJson('/api/v1/demand-forecasts/timeline')
             ->assertOk()
             ->assertJsonPath('meta.unit', 'month')
-            ->assertJsonPath('meta.offset', 0)
+            ->assertJsonMissingPath('meta.offset')
             ->assertJsonPath('meta.columns.0', ['key' => '2025-10', 'kind' => 'past', 'days' => 31])
             ->assertJsonPath('meta.columns.12', ['key' => '2026-10', 'kind' => 'current', 'days' => 31])
             ->assertJsonPath('meta.columns.23.key', '2027-09')
@@ -159,18 +159,15 @@ class ForecastTimelineControllerTest extends TestCase
         $this->assertSame(10.0, $this->at($daily, $this->boss($daily)['event'], ['2026-11-04'])['2026-11-04']);
     }
 
-    public function test_makes_the_forecast_again_months_before_and_redoes_it_when_the_sales_used_change(): void
+    public function test_makes_the_forecast_again_when_the_sales_used_change(): void
     {
-        // 3か月前の1日に戻る：4月は1月1日（販売実績が無く予測できない）、9月は6月1日（まだ終わったセールが無いため倍率を掛けない）
-        $json = $this->getJson('/api/v1/demand-forecasts/timeline?offset=3')->assertOk()->assertJsonPath('meta.offset', 3)->json();
-        $this->assertSame(['2026-04' => null, '2026-09' => 60.0], $this->at($json, $this->boss($json)['replayed'], ['2026-04', '2026-09']));
+        $json = $this->getJson('/api/v1/demand-forecasts/timeline')->assertOk()->json();
+        $this->assertSame(100.0, $this->at($json, $this->boss($json)['replayed'], ['2026-09'])['2026-09']);
 
-        // 起点より前の販売実績が変わったら予測し直す（5月の販売実績が増えると、6月1日に戻った平均日販が増える）
-        $this->sellDaily('2026-05-15', '2026-05-15', fn (): int => 60);
-        $json = $this->getJson('/api/v1/demand-forecasts/timeline?offset=3')->json();
-        $this->assertGreaterThan(60.0, $this->at($json, $this->boss($json)['replayed'], ['2026-09'])['2026-09']);
-
-        $this->getJson('/api/v1/demand-forecasts/timeline?offset=2')->assertUnprocessable()->assertJsonValidationErrors('offset');
+        // 起点（9月1日）より前の販売実績が変わったら予測し直す（8月の販売実績が増えると、9月1日に戻った平均日販が増える）
+        $this->sellDaily('2026-08-15', '2026-08-15', fn (): int => 60);
+        $json = $this->getJson('/api/v1/demand-forecasts/timeline')->json();
+        $this->assertGreaterThan(100.0, $this->at($json, $this->boss($json)['replayed'], ['2026-09'])['2026-09']);
     }
 
     public function test_lines_up_days_with_the_daily_forecast_and_the_daily_share_of_the_forecast_made_again(): void

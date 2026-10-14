@@ -24,10 +24,9 @@ class ForecastTimelineController extends Controller
     {
         $now = CarbonImmutable::now();
         $unit = $request->unit();
-        $offset = $request->offset();
         [$from, $to] = $unit === SalesUnit::Day ? $request->period() : [null, null];
         $itemNo = $request->itemNo();
-        $result = $timeline->build($now, $unit, $offset, $from, $to, $itemNo === null ? null : [$itemNo]);
+        $result = $timeline->build($now, $unit, $from, $to, $itemNo === null ? null : [$itemNo]);
         $forecast = $result['forecast'];
         $prices = UnitPriceCatalog::build(collect($forecast->items)->map(fn (array $entry): Item => $entry['item']), $now);
 
@@ -52,8 +51,6 @@ class ForecastTimelineController extends Controller
             'meta' => [
                 ...DemandForecastController::meta($forecast),
                 'unit' => $unit->value,
-                'offset' => $offset,
-                'offsets' => ForecastTimeline::OFFSETS,
                 'max_future_days' => ShowForecastTimelineRequest::MAX_FUTURE_DAYS,
                 'columns' => array_map(fn (array $column): array => ['key' => $column['key'], 'kind' => $column['kind'], 'days' => $column['days']], $result['columns']),
             ],

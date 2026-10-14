@@ -3,19 +3,14 @@ import { computed, onBeforeUnmount, ref, useTemplateRef } from "vue";
 import type { ForecastTimelineResponse } from "@/types/api";
 
 /**
- * 需要予測の画面と SKU別の需要予測（B-131、K-123）の、期間・差異を測る予測（予測し直す起点）・計算日時の帯と、凡例の帯。画面デザイン案のとおりに描く。
+ * 需要予測の画面と SKU別の需要予測（B-131、K-123）の、期間・計算日時の帯と、凡例の帯。画面デザイン案のとおりに描く。
+ * 差異は、その月の初めに予測し直した数と比べる（起点は選ばない、K-135）。
  * 日ごとの期間は、欄を押すとよく使う期間と開始・終了を選ぶ欄を出す（過去は販売実績のある日まで、これからは90日先まで）。
  * 凡例は、グラフ（view: graph）と表（view: table）で出すものを変える。
  */
 
-const props = withDefaults(defineProps<{ meta: ForecastTimelineResponse["meta"]; offset: number; threshold: number; periodError: string | null; view?: "graph" | "table" }>(), { view: "graph" });
+const props = withDefaults(defineProps<{ meta: ForecastTimelineResponse["meta"]; threshold: number; periodError: string | null; view?: "graph" | "table" }>(), { view: "graph" });
 const emit = defineEmits<{ update: [changes: Record<string, string | undefined>] }>();
-
-const OFFSETS = [
-    { value: 0, label: "その月の初め" },
-    { value: 3, label: "3か月前" },
-    { value: 6, label: "6か月前" },
-];
 
 const isDay = computed(() => props.meta.unit === "day");
 
@@ -92,7 +87,6 @@ const salesToText = computed(() => {
     const dates = props.meta.channels.map((channel) => channel.sales_data_to).filter((date): date is string => date !== null);
     return dates.length === 0 ? "販売実績はまだありません" : `販売実績 ${slashDate(dates.sort().at(-1)!)} まで`;
 });
-const offsetLabel = computed(() => OFFSETS.find((option) => option.value === props.offset)?.label ?? "");
 </script>
 
 <template>
@@ -165,24 +159,6 @@ const offsetLabel = computed(() => OFFSETS.find((option) => option.value === pro
             </div>
             <span v-if="periodError" class="text-xs text-red-700" role="alert" data-testid="period-error">{{ periodError }}</span>
         </div>
-
-        <span class="inline-flex items-center gap-2">
-            差異を測る予測
-            <span class="inline-flex gap-0.5 rounded-[9px] bg-stone-100 p-[3px]" role="group" aria-label="差異を測る予測">
-                <button
-                    v-for="option in OFFSETS"
-                    :key="option.value"
-                    type="button"
-                    class="inline-flex h-8 cursor-pointer items-center rounded-[7px] px-3 text-[13px]"
-                    :class="offset === option.value ? 'bg-white font-semibold text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.08)]' : 'text-stone-600'"
-                    :aria-pressed="offset === option.value"
-                    :data-testid="`offset-${option.value}`"
-                    @click="emit('update', { offset: option.value === 0 ? undefined : String(option.value) })"
-                >
-                    {{ option.label }}
-                </button>
-            </span>
-        </span>
         <span class="text-stone-500 tabular-nums" data-testid="calculated-at">計算 {{ calculatedText }}・{{ salesToText }}</span>
     </div>
 
@@ -203,7 +179,6 @@ const offsetLabel = computed(() => OFFSETS.find((option) => option.value === pro
         <span class="text-stone-400">差異＝（予測し直した数 − 実績）÷ 実績。差異が{{ threshold * 100 }}%以上の{{ isDay ? "日" : "月" }}を強調します</span>
     </div>
     <div v-else class="flex flex-wrap items-center gap-x-[18px] gap-y-1.5 border-b border-stone-200 px-4 py-2.5 text-xs text-stone-600" data-testid="legend">
-        <span>差異を測る予測：{{ offsetLabel }}</span>
         <span class="inline-flex items-center gap-1.5"
             ><span aria-hidden="true" class="size-3 rounded-[3px] border border-amber-300 bg-amber-50" />差異が{{ threshold * 100 }}%以上の{{ isDay ? "日" : "月" }}</span
         >

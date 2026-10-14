@@ -107,8 +107,6 @@ export function timeline(unit: SalesUnit = "month"): ForecastTimelineResponse {
             ],
             seasonal_item_nos: [],
             unit,
-            offset: 0,
-            offsets: [0, 3, 6],
             max_future_days: 90,
             columns,
         },

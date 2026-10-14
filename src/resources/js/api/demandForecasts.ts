@@ -9,8 +9,6 @@ export async function fetchItemForecast(itemNo: string): Promise<SkuForecast[]> 
 
 export interface ForecastTimelineQuery {
     unit: SalesUnit;
-    /** 予測し直す起点（何か月前の1日か） */
-    offset: number;
     /** 日ごとの期間（YYYY-MM-DD）。指定しなければ過去30日・これからの30日 */
     period?: { from: string; to: string } | null;
     /** SKU別の需要予測（その品番だけ、予測の根拠を添える） */
@@ -22,7 +20,6 @@ export async function fetchForecastTimeline(query: ForecastTimelineQuery): Promi
     const { data } = await apiClient.get<ForecastTimelineResponse>("/demand-forecasts/timeline", {
         params: {
             unit: query.unit,
-            offset: query.offset,
             from: query.unit === "day" ? query.period?.from : undefined,
             to: query.unit === "day" ? query.period?.to : undefined,
             item_no: query.itemNo ?? undefined,
