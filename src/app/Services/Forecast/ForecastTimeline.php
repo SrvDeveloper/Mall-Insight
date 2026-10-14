@@ -18,6 +18,8 @@ use Carbon\CarbonImmutable;
  * - 日ごと：$from～$to の日。今日の販売実績はまだ無い（前日までを取り込む）。予測は基準平均日販×その月の季節係数×イベントの倍率。
  * - 予測し直した数（ForecastReplayer）：月ごとは、その月の $offset か月前の1日を起点にした、その月の予測。日ごとは、その日を含む月の
  *   $offset か月前の1日を起点にした基準平均日販に、その月の季節係数と、その日に重なるイベントの倍率を掛けた1日分。
+ * - イベントで増やした数（event）：今月（今日）から先の予測のうち、イベントの倍率で増やした分。日ごとは予測－基準平均日販×季節係数、
+ *   月ごとは月別の予測のイベントで増やした数。予測を「普段の予測＋イベントで増やした数」に分けて見せるため（原則4）。
  * - チャネルの販売実績を取り込んでいない月・日の販売実績は null（原則2）。欠品は、在庫の記録が無い日は分からないため null。
  */
 class ForecastTimeline
@@ -35,7 +37,7 @@ class ForecastTimeline
 
     /**
      * @param  list<string>|null  $itemNos  null なら対象品番
-     * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{base_average: float|null, actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, replayed: list<float|null>, forecast: list<float|null>}>>}
+     * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{base_average: float|null, actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, replayed: list<float|null>, forecast: list<float|null>, event: list<float|null>}>>}
      */
     public function build(CarbonImmutable $now, SalesUnit $unit, int $offset, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, ?array $itemNos = null): array
     {
@@ -96,7 +98,7 @@ class ForecastTimeline
                         continue;
                     }
                     $channelForecast = collect($skuForecast->channels)->first(fn (ChannelForecast $candidate): bool => $candidate->channel === $channel);
-                    $row = ['base_average' => $channelForecast?->baseAverage === null ? null : round($channelForecast->baseAverage, 4), 'actual' => [], 'actual_amount' => [], 'stockout' => [], 'replayed' => [], 'forecast' => []];
+                    $row = ['base_average' => $channelForecast?->baseAverage === null ? null : round($channelForecast->baseAverage, 4), 'actual' => [], 'actual_amount' => [], 'stockout' => [], 'replayed' => [], 'forecast' => [], 'event' => []];
                     $futureIndex = 0;
                     $skuSold = $sold[$sku->id][$channel->value] ?? [];
                     $skuStockouts = $stockouts[$sku->id] ?? [];
@@ -111,15 +113,20 @@ class ForecastTimeline
                             $origin = $originKeys[$index];
                             $row['replayed'][] = $this->replayedValue($replayed[$origin][$channel->value] ?? null, $sku->id, $column, $offset, $seasonal, $replayMultipliers[$origin][$channel->value][$item->item_no] ?? [], $unit);
                             $row['forecast'][] = null;
+                            $row['event'][] = null;
 
                             continue;
                         }
                         $row['replayed'][] = null;
                         if ($unit === SalesUnit::Day) {
-                            $row['forecast'][] = $channelForecast?->isPredictable() ? round(DemandForecaster::dailyQuantity($channelForecast->baseAverage, $seasonal, $multipliers, $column['key']), 4) : null;
+                            $isPredictable = $channelForecast?->isPredictable() ?? false;
+                            $quantity = $isPredictable ? DemandForecaster::dailyQuantity($channelForecast->baseAverage, $seasonal, $multipliers, $column['key']) : null;
+                            $row['forecast'][] = $quantity === null ? null : round($quantity, 4);
+                            $row['event'][] = $quantity === null ? null : round($quantity - DemandForecaster::dailyQuantity($channelForecast->baseAverage, $seasonal, [], $column['key']), 4);
                         } else {
                             $month = $channelForecast?->monthly[$futureIndex] ?? null;
                             $row['forecast'][] = $month === null ? null : round($month->quantity, 2);
+                            $row['event'][] = $month === null ? null : round($month->eventQuantity(), 2);
                             $futureIndex++;
                         }
                     }

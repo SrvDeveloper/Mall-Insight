@@ -4,7 +4,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import SkuForecastView from "@/views/SkuForecastView.vue";
 import { fetchForecastTimeline } from "@/api/demandForecasts";
 import { timeline } from "@/views/forecastTimeline.fixture";
-import type { ForecastTimelineResponse, SkuForecast } from "@/types/api";
+import type { ForecastTimelineResponse, SalesUnit, SkuForecast } from "@/types/api";
 
 vi.mock("@/api/demandForecasts", () => ({ fetchForecastTimeline: vi.fn() }));
 
@@ -58,8 +58,8 @@ function detail(): Omit<SkuForecast, "unit_prices"> {
     };
 }
 
-function itemTimeline(): ForecastTimelineResponse {
-    const response = timeline();
+function itemTimeline(unit: SalesUnit = "month"): ForecastTimelineResponse {
+    const response = timeline(unit);
     response.data = [response.data[1]!];
     response.data[0]!.skus[0]!.detail = detail();
     return response;
@@ -100,6 +100,31 @@ describe("SkuForecastView", () => {
         expect(wrapper.find('[data-testid="basis-amazon"]').exists()).toBe(false);
         expect(wrapper.findAll('[data-testid="breakdown-total"]').map((cell) => cell.text())).toEqual(["120", "120", "140"]);
         expect(wrapper.findAll('[data-testid="breakdown-event"]')[2]!.text()).toBe("+20（楽天スー）");
+        wrapper.unmount();
+    });
+
+    it("shows the daily breakdown and how much the events added to the forecast", async () => {
+        // 楽天スーパーセール（10/14・15）の日は、BOSSの普段の予測120個に60個を足す
+        const response = itemTimeline("day");
+        const boss = response.data[0]!.skus[0]!.channels.boss!;
+        boss.forecast = [null, null, null, 120, 180, 180, 120];
+        boss.event = [null, null, null, 0, 60, 60, 0];
+        response.data[0]!.skus[0]!.channels.amazon!.forecast = [null, null, null, 0.4, 0.4, 0.4, 0.4];
+        vi.mocked(fetchForecastTimeline).mockResolvedValue(response);
+        const { wrapper } = await mountView("/forecasts/fl-01?unit=day");
+
+        expect(wrapper.find('[data-testid="monthly-breakdown"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="daily-breakdown"] h3').text()).toBe("日ごとの予測の内訳");
+        // 今日から先の日だけ。Amazon は予測できないため入れない
+        expect(wrapper.findAll('[data-testid="breakdown-total"]').map((cell) => cell.text())).toEqual(["120", "180", "180", "120"]);
+        const event = wrapper.findAll('[data-testid="breakdown-event"]')[1]!;
+        expect(event.text()).toBe("+60（楽天スー）");
+        expect(event.attributes("title")).toBe("楽天スーパーセール　BOSS ×1.50");
+
+        // ツールチップは、予測を普段の予測とイベントで増やした数に分け、1個未満の予測も0個と見せない
+        await wrapper.findAll('[data-testid="chart-band"]')[4]!.trigger("mouseenter");
+        const rows = wrapper.findAll('[data-testid="chart-tooltip"] p').map((row) => row.text());
+        expect(rows).toEqual(expect.arrayContaining(["BOSS の予測180個", "普段の予測120個", "イベントで増やした数+60個", "Amazon の予測0.4個"]));
         wrapper.unmount();
     });
 

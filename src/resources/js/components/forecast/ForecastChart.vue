@@ -9,7 +9,8 @@ import type { ForecastTimelineColumn, ForecastTimelineResponse, SalesUnit } from
  * 月・日ごとに、過去は販売実績、今月（今日）から先は需要予測を、モールごとの積み上げ棒で出す。需要予測は斜線で、今月は前日までの
  * 販売実績の上に残りの予測を積む（今月の予測は1か月分、K-052）。過去の月・日には予測し直した数を横線で重ね、今日の位置に点線を引く。
  * 日ごとは、上にイベントの期間の帯を出し、土日と欠品した日の地を変え、見出しは今日と毎週月曜（今日の前後3日の月曜は出さない）に出す。
- * 月・日にマウスを乗せる（またはフォーカスする）と、その月・日の内訳をグラフの上に出す。
+ * 月・日にマウスを乗せる（またはフォーカスする）と、その月・日の内訳をグラフの上に出す。イベントで増やした予測は、普段の予測と
+ * イベントで増やした数に分けて出す（原則4）。
  */
 
 const props = defineProps<{
@@ -177,7 +178,7 @@ const tooltip = computed(() => {
     }
     const index = hovered.value;
     const column = props.columns[index]!;
-    const rows: { label: string; value: string; tone: "normal" | "warning" | "stockout" }[] = [];
+    const rows: { label: string; value: string; tone: "normal" | "warning" | "stockout" | "sub" }[] = [];
     for (const channel of CHANNELS) {
         const series = props.figures.channels[channel];
         if (!series) {
@@ -192,6 +193,11 @@ const tooltip = computed(() => {
             }
             const forecast = series.forecast[index];
             rows.push({ label: `${labelOf(channel)} の予測`, value: forecast === null || forecast === undefined ? "予測できません" : props.formatValue(forecast), tone: "normal" });
+            const event = series.event[index];
+            if (forecast !== null && forecast !== undefined && event !== null && event !== undefined && event > 0) {
+                rows.push({ label: "普段の予測", value: props.formatValue(forecast - event), tone: "sub" });
+                rows.push({ label: "イベントで増やした数", value: `+${props.formatValue(event)}`, tone: "sub" });
+            }
         }
     }
     if (column.kind === "past") {
@@ -238,9 +244,15 @@ const tooltip = computed(() => {
             data-testid="chart-tooltip"
         >
             <p class="mb-1.5 text-xs font-semibold text-stone-900">{{ tooltip.title }}</p>
-            <p v-for="(row, index) in tooltip.rows" :key="index" class="flex justify-between gap-4 text-xs text-stone-600 tabular-nums">
+            <p
+                v-for="(row, index) in tooltip.rows"
+                :key="index"
+                class="flex justify-between gap-4 tabular-nums"
+                :class="row.tone === 'sub' ? 'pl-3 text-[11px] text-stone-500' : 'text-xs text-stone-600'"
+            >
                 <span>{{ row.label }}</span>
-                <strong :class="row.tone === 'warning' ? 'text-amber-700' : row.tone === 'stockout' ? 'text-amber-800' : 'text-stone-900'">{{ row.value }}</strong>
+                <span v-if="row.tone === 'sub'" class="text-stone-700">{{ row.value }}</span>
+                <strong v-else :class="row.tone === 'warning' ? 'text-amber-700' : row.tone === 'stockout' ? 'text-amber-800' : 'text-stone-900'">{{ row.value }}</strong>
             </p>
         </div>
 

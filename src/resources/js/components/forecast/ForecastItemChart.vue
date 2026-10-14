@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { chartFormats } from "@/components/actuals/actualRows";
 import ForecastChart from "@/components/forecast/ForecastChart.vue";
 import ForecastFigureTable from "@/components/forecast/ForecastFigureTable.vue";
-import { formatFigure, type ForecastMeasure, type TimelineItem, type TimelineLabel } from "@/components/forecast/timelineRows";
+import { forecastChartFormats, formatFigure, type ForecastMeasure, type TimelineItem, type TimelineLabel } from "@/components/forecast/timelineRows";
 import type { ForecastTimelineColumn, ForecastTimelineResponse, SalesUnit } from "@/types/api";
 
 /**
@@ -27,7 +26,7 @@ const emit = defineEmits<{ select: [itemNo: string] }>();
 
 const total = computed(() => props.items.reduce((sum, item) => sum + item.figures.forecastTotal, 0));
 const selected = computed(() => props.items.find((item) => item.itemNo === props.selectedItemNo) ?? props.items[0] ?? null);
-const formats = computed(() => chartFormats(props.measure));
+const formats = computed(() => forecastChartFormats(props.measure, props.unit));
 const isDay = computed(() => props.unit === "day");
 const futureCount = computed(() => props.columns.filter((column) => column.kind !== "past").length);
 const pastCount = computed(() => props.columns.filter((column) => column.kind === "past").length);

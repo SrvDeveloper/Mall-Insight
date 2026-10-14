@@ -303,6 +303,8 @@ export interface ForecastTimelineChannel {
     replayed: (number | null)[];
     /** 今月（今日）から先の需要予測 */
     forecast: (number | null)[];
+    /** 今月（今日）から先の需要予測のうち、イベントで増やした数 */
+    event: (number | null)[];
 }
 
 export interface ForecastTimelineSku {

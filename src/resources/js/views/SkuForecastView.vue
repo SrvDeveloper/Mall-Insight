@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { chartFormats } from "@/components/actuals/actualRows";
 import ForecastChart from "@/components/forecast/ForecastChart.vue";
 import ForecastPeriodBar from "@/components/forecast/ForecastPeriodBar.vue";
 import SkuForecastBasis from "@/components/forecast/SkuForecastBasis.vue";
-import { formatFigure } from "@/components/forecast/timelineRows";
+import { forecastChartFormats, formatFigure } from "@/components/forecast/timelineRows";
 import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
 
 /**
@@ -20,7 +19,7 @@ const itemNo = computed(() => String(route.params.itemNo));
 const { scope, unit, measure, offset, updateQuery, selectUnit, result, isLoading, hasError, periodError, load, threshold, items, labels, events } = useForecastTimeline(itemNo);
 
 const item = computed(() => items.value.find((entry) => entry.itemNo === itemNo.value) ?? null);
-const formats = computed(() => chartFormats(measure.value));
+const formats = computed(() => forecastChartFormats(measure.value, unit.value));
 const isDay = computed(() => unit.value === "day");
 const unitLabel = computed(() => (measure.value === "amount" ? "千円" : "個"));
 const pastCount = computed(() => result.value?.meta.columns.filter((column) => column.kind === "past").length ?? 0);
@@ -222,7 +221,16 @@ const segmentClass = (isSelected: boolean): string => (isSelected ? "bg-white fo
                         :axis-width="48"
                     />
 
-                    <SkuForecastBasis v-if="selectedSku.sku.detail" :detail="selectedSku.sku.detail" :scope="scope" />
+                    <SkuForecastBasis
+                        v-if="selectedSku.sku.detail"
+                        :detail="selectedSku.sku.detail"
+                        :scope="scope"
+                        :unit="result.meta.unit"
+                        :columns="result.meta.columns"
+                        :labels="labels"
+                        :events="events"
+                        :timeline="selectedSku.sku.channels"
+                    />
                 </div>
             </div>
         </section>

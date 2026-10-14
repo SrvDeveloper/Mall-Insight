@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnEvents, formatFigure, formatVariance, timelineFigures, timelineItems, timelineLabels } from "@/components/forecast/timelineRows";
+import { columnEvents, forecastChartFormats, formatFigure, formatVariance, timelineFigures, timelineItems, timelineLabels } from "@/components/forecast/timelineRows";
 import { channel, dayColumns, monthColumns, sku, timeline } from "@/views/forecastTimeline.fixture";
 
 describe("timelineRows", () => {
@@ -46,6 +46,15 @@ describe("timelineRows", () => {
         expect(amounts.variance[1]).toBe(0);
     });
 
+    it("keeps how much of the forecast the events added for each channel", () => {
+        const columns = dayColumns();
+        const boss = channel(columns, { actual: 1, replayed: 1, forecast: 2 }, { event: [null, null, null, 0, 1.5, 1.5, 0] });
+        const skus = [sku("a", { boss }, { unit_prices: { total: 500, boss: 500, amazon: null } }), sku("b", { boss })];
+
+        expect(timelineFigures(skus, columns, "total", "quantity", "day").channels.boss!.event).toEqual([null, null, null, 0, 3, 3, 0]);
+        expect(timelineFigures(skus, columns, "total", "amount", "day").channels.boss!.event[4]).toBe(2250);
+    });
+
     it("labels months and days and finds the events of each column", () => {
         expect(timelineLabels(monthColumns(), "month").slice(0, 4)).toEqual([
             { label: "10月", sub: "2025", weekend: false, title: "2025年10月" },
@@ -69,5 +78,11 @@ describe("timelineRows", () => {
         expect(formatVariance(0.123)).toBe("+12%");
         expect(formatVariance(-0.08)).toBe("−8%");
         expect(formatVariance(null)).toBe("");
+
+        // グラフは、日ごとの1個未満の予測を0個と見せない。縦軸の目盛りも丸めない
+        expect(forecastChartFormats("quantity", "day").formatValue(0.44)).toBe("0.4個");
+        expect(forecastChartFormats("quantity", "month").formatValue(0.44)).toBe("0個");
+        expect(forecastChartFormats("quantity", "day").formatAxis(0.25)).toBe("0.25");
+        expect(forecastChartFormats("amount", "day").formatValue(1234)).toBe("1,234円");
     });
 });

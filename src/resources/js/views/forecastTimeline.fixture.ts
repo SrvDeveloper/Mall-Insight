@@ -33,6 +33,7 @@ export function channel(
         stockout: columns.map((column) => (column.kind === "future" ? null : 0)),
         replayed: columns.map((column) => (column.kind === "past" ? values.replayed : null)),
         forecast: columns.map((column) => (column.kind === "past" ? null : values.forecast)),
+        event: columns.map((column) => (column.kind === "past" ? null : 0)),
         ...overrides,
     };
 }

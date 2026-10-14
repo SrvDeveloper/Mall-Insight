@@ -1,3 +1,4 @@
+import { chartFormats } from "@/components/actuals/actualRows";
 import type { ForecastTimelineColumn, ForecastTimelineResponse, ForecastTimelineSku, SalesUnit } from "@/types/api";
 
 /**
@@ -23,8 +24,8 @@ export const scopeChannels = (scope: ForecastScope): ForecastChannel[] => (scope
 
 /** 表示しているモールでまとめた、月・日ごとの値（columns の順）。 */
 export interface TimelineFigures {
-    /** チャネルごとの販売実績と需要予測（積み上げに使う）。そのチャネルで売っているSKUが無ければ持たない */
-    channels: Partial<Record<ForecastChannel, { actual: (number | null)[]; forecast: (number | null)[] }>>;
+    /** チャネルごとの販売実績と需要予測（積み上げに使う）と、需要予測のうちイベントで増やした数。そのチャネルで売っているSKUが無ければ持たない */
+    channels: Partial<Record<ForecastChannel, { actual: (number | null)[]; forecast: (number | null)[]; event: (number | null)[] }>>;
     actual: (number | null)[];
     /** 予測し直した数（予測できたSKU・チャネルの合計） */
     replayed: (number | null)[];
@@ -82,7 +83,7 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
         if (values.length === 0) {
             continue;
         }
-        const series = { actual: empty(), forecast: empty() };
+        const series = { actual: empty(), forecast: empty(), event: empty() };
         for (const sku of values) {
             const data = sku.channels[channel]!;
             if (data.base_average !== null) {
@@ -106,6 +107,10 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
                 if (forecast !== null && forecast !== undefined) {
                     add(series.forecast, index, forecast * price);
                     add(figures.forecast, index, forecast * price);
+                }
+                const event = data.event[index];
+                if (event !== null && event !== undefined) {
+                    add(series.event, index, event * price);
                 }
                 const replayed = data.replayed[index];
                 if (replayed !== null && replayed !== undefined) {
@@ -229,4 +234,17 @@ export function formatFigure(value: number | null | undefined, measure: Forecast
         return integerFormat.format(Math.round(value / 1000));
     }
     return unit === "day" && Math.abs(value) < 10 && Math.round(value) !== value ? decimalFormat.format(value) : integerFormat.format(Math.round(value));
+}
+
+const axisFormat = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 });
+
+/**
+ * グラフの数の書き方。数量は表と同じく、日ごとの10個未満は小数1桁にする（1日0.4個の予測を「0個」と見せないため）。
+ * 縦軸の目盛りも、1個未満の刻み（0.25個など）を丸めずに出す。金額は品番別売上のグラフと同じ。
+ */
+export function forecastChartFormats(measure: ForecastMeasure, unit: SalesUnit): ReturnType<typeof chartFormats> {
+    if (measure === "amount") {
+        return chartFormats(measure);
+    }
+    return { formatValue: (value) => `${formatFigure(value, measure, unit)}個`, formatAxis: (value) => axisFormat.format(value), axisUnit: "個" };
 }

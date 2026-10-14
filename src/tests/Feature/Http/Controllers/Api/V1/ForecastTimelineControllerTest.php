@@ -108,6 +108,8 @@ class ForecastTimelineControllerTest extends TestCase
         $this->assertSame(['2026-02' => null, '2026-04' => 60.0, '2026-09' => 100.0, '2026-10' => null, '2026-11' => null], $this->at($json, $boss['replayed'], $months));
         // 今月は1か月分、11月はセールの4日間に6倍を掛ける
         $this->assertSame(['2026-02' => null, '2026-04' => null, '2026-09' => null, '2026-10' => 62.0, '2026-11' => 100.0], $this->at($json, $boss['forecast'], $months));
+        // そのうちイベントで増やした数：11月のセールの4日間に2×5
+        $this->assertSame(['2026-09' => null, '2026-10' => 0.0, '2026-11' => 40.0], $this->at($json, $boss['event'], ['2026-09', '2026-10', '2026-11']));
         // 欠品した日数。在庫の記録が無い月は分からない
         $this->assertSame(['2026-08' => null, '2026-09' => 3.0, '2026-10' => 0.0], $this->at($json, $boss['stockout'], ['2026-08', '2026-09', '2026-10']));
 
@@ -147,6 +149,8 @@ class ForecastTimelineControllerTest extends TestCase
         $this->assertSame(['2026-09-07' => 12.0, '2026-09-10' => 2.0, '2026-10-06' => 2.0, '2026-10-07' => null, '2026-11-03' => null, '2026-11-04' => null], $this->at($json, $boss['replayed'], $days));
         // 今日から先は日ごとの予測。11月のセールの日は6倍
         $this->assertSame(['2026-09-07' => null, '2026-09-10' => null, '2026-10-06' => null, '2026-10-07' => 2.0, '2026-11-03' => 2.0, '2026-11-04' => 12.0], $this->at($json, $boss['forecast'], $days));
+        // そのうちイベントで増やした数（セールの日は普段の2個に10個を足す）
+        $this->assertSame(['2026-10-06' => null, '2026-11-03' => 0.0, '2026-11-04' => 10.0], $this->at($json, $boss['event'], ['2026-10-06', '2026-11-03', '2026-11-04']));
 
         $this->getJson('/api/v1/demand-forecasts/timeline?unit=day&from=2026-10-01&to=2027-01-10')->assertUnprocessable()->assertJsonPath('errors.to.0', '日ごとの予測は、今日から90日先までです。');
         $this->getJson('/api/v1/demand-forecasts/timeline?unit=day&from=2026-10-10&to=2026-10-01')->assertUnprocessable()->assertJsonValidationErrors('to');
