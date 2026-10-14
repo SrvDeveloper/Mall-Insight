@@ -90,6 +90,20 @@ const description = computed(() => {
         : `${targetLabel.value}の、過去12か月の販売実績と、これからの12か月の需要予測です。過去の月には、その月の初めに今の計算方法で予測し直した数を重ね、実績との差異を確かめられます。品番を押すと、SKUごとの予測と計算の根拠を見られます。`;
 });
 
+/** 表示しているモールのチャネルで、手動での補正（B-109、K-132）を掛けている品番と、その説明。 */
+const adjustments = computed(() => {
+    const texts: Record<string, string> = {};
+    for (const adjustment of result.value?.meta.adjustments ?? []) {
+        if (scope.value !== "total" && adjustment.channel !== scope.value) {
+            continue;
+        }
+        const period = `${adjustment.starts_on.slice(0, 4)}/${Number(adjustment.starts_on.slice(5, 7))}〜${adjustment.ends_on === null ? "" : `${adjustment.ends_on.slice(0, 4)}/${Number(adjustment.ends_on.slice(5, 7))}`}`;
+        const text = `${adjustment.channel_label} ${period} ${adjustment.rate_percent}%`;
+        texts[adjustment.item_no] = texts[adjustment.item_no] ? `${texts[adjustment.item_no]}、${text}` : text;
+    }
+    return texts;
+});
+
 /** 品番の SKU別の需要予測（選んでいるモールなどを引き継ぎ、絞り込み・見せ方・選んだ品番は持っていかない）。 */
 const skuForecastLink = (itemNo: string): RouteLocationRaw => ({
     name: "sku-forecasts",
@@ -248,6 +262,7 @@ const darkSegmentClass = (isSelected: boolean): string => (isSelected ? "bg-ston
                 :threshold="threshold"
                 :selected-item-no="selectedItemNo"
                 :sales-to-label="salesToLabel"
+                :adjustments="adjustments"
                 @select="updateQuery({ item: $event })"
             >
                 <template #actions="{ itemNo }">

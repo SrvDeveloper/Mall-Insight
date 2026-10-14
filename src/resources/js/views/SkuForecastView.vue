@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterLink, useRoute } from "vue-router";
+import ForecastAdjustmentPanel from "@/components/forecast/ForecastAdjustmentPanel.vue";
 import ForecastChart from "@/components/forecast/ForecastChart.vue";
 import ForecastPeriodBar from "@/components/forecast/ForecastPeriodBar.vue";
 import SkuForecastBasis from "@/components/forecast/SkuForecastBasis.vue";
@@ -10,7 +11,7 @@ import { useForecastTimeline } from "@/components/forecast/useForecastTimeline";
 /**
  * SKU別の需要予測（バックログ B-131、決定記録 K-123）。需要予測の画面で品番を押すと移る画面。画面デザイン案のとおり、上に品番の合計
  * （予測の合計・モールの割合・差異・SKUの数）、左にSKUの一覧（予測の多い順）、右に選んだSKUのグラフと、予測の根拠（チャネルごとの
- * 基準平均日販の根拠・月ごとの予測の内訳）を出す。予測できないSKUは理由を出す。
+ * 基準平均日販の根拠・月ごとの予測の内訳）を出す。予測できないSKUは理由を出す。品番の手動での予測補正（B-109、K-132）もこの画面で入れる。
  * モール・月ごとと日ごと・数量と金額・予測し直す起点・日ごとの期間は需要予測の画面と同じく URL に持たせ、戻るときも引き継ぐ。選んだSKU（sku）も URL に持たせる。
  */
 
@@ -44,6 +45,13 @@ const share = computed(() => {
         .filter((channel) => figures.channels[channel])
         .map((channel) => ({ channel, label: channel === "boss" ? "BOSS" : "Amazon", color: channel === "boss" ? "#2a78d6" : "#eb6834", rate: all > 0 ? totals[channel] / all : 0 }));
 });
+
+/** 補正を入れられるチャネル（販売実績を取り込んでいて、その品番のSKUを売っているチャネル）。 */
+const adjustableChannels = computed(() =>
+    (result.value?.meta.channels ?? [])
+        .filter((channel) => channel.sales_data_to !== null && (item.value?.skus ?? []).some((entry) => entry.sku.channels[channel.channel] !== undefined))
+        .map((channel) => ({ channel: channel.channel, label: channel.label })),
+);
 
 /** 需要予測の画面へ戻る（選んでいるモールなどを引き継ぎ、SKUは持っていかない。品番は選んだままにする）。 */
 const backLink = computed(() => ({ name: "forecasts", query: { ...route.query, sku: undefined, item: itemNo.value } }));
@@ -166,6 +174,8 @@ const segmentClass = (isSelected: boolean): string => (isSelected ? "bg-white fo
                     </p>
                 </div>
             </div>
+
+            <ForecastAdjustmentPanel :item-no="itemNo" :channels="adjustableChannels" :forecast-from="result.meta.forecast_from" @changed="load" />
 
             <div class="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
                 <ol class="m-0 max-h-[980px] list-none overflow-y-auto border-stone-200 py-2 max-lg:border-b lg:border-r" aria-label="SKU（予測の多い順）">

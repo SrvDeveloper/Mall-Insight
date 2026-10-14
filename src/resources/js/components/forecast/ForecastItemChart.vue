@@ -8,7 +8,7 @@ import type { ForecastTimelineColumn, ForecastTimelineResponse, SalesUnit } from
 /**
  * 需要予測の画面のグラフ（B-131、K-123）。画面デザイン案のとおり、品番別売上のグラフ（K-079）と同じく左に品番の一覧（予測の多い順、
  * 全体に対する割合と差異（外れ率）付き）、右に選んだ品番の数字（予測の合計・基準平均日販・外れ率・偏り）とグラフ、グラフの下に
- * 月・日ごとの販売実績・予測・差異・イベントを出す。選んだ品番は呼び出し側が URL に持たせる。
+ * 月・日ごとの販売実績・予測・差異・イベントを出す。選んだ品番は呼び出し側が URL に持たせる。手動での補正（B-109）を掛けている品番には「補正」の札を付ける。
  */
 
 const props = defineProps<{
@@ -21,6 +21,8 @@ const props = defineProps<{
     threshold: number;
     selectedItemNo: string | null;
     salesToLabel: string;
+    /** 手動での補正（B-109）を掛けている品番 => 補正の説明（「Amazon 2026/11〜 120%」） */
+    adjustments?: Record<string, string>;
 }>();
 const emit = defineEmits<{ select: [itemNo: string] }>();
 
@@ -79,6 +81,13 @@ const stats = computed(() => {
                     <span class="flex min-w-0 flex-1 flex-col gap-1">
                         <span class="flex items-center gap-1.5">
                             <span class="font-mono text-sm font-medium text-stone-900">{{ item.itemNo }}</span>
+                            <span
+                                v-if="adjustments?.[item.itemNo]"
+                                class="rounded border border-stone-300 bg-white px-[5px] text-[10px] font-semibold whitespace-nowrap text-stone-700"
+                                :title="`予測の補正：${adjustments[item.itemNo]}`"
+                                data-testid="rank-adjusted"
+                                >補正</span
+                            >
                             <span
                                 v-if="item.unpredictableCount > 0"
                                 class="rounded border border-amber-200 bg-amber-50 px-[5px] text-[10px] font-semibold whitespace-nowrap text-amber-800"

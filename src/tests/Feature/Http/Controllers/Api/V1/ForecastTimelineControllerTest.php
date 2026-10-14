@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Http\Controllers\Api\V1;
 
+use App\Enums\Channel;
+use App\Models\ForecastAdjustment;
 use App\Models\Inventory;
 use App\Models\Item;
 use App\Models\ItemSelection;
@@ -121,6 +123,40 @@ class ForecastTimelineControllerTest extends TestCase
         // Amazon の販売実績を取り込んでいなければ、販売実績も予測し直した数も「—」
         $amazon = collect($json['data'][0]['skus'])->firstWhere('sku_code', 'fl-01-2')['channels']['amazon'];
         $this->assertSame([null, null], [$this->at($json, $amazon['actual'], ['2026-09'])['2026-09'], $this->at($json, $amazon['replayed'], ['2026-09'])['2026-09']]);
+    }
+
+    public function test_multiplies_the_forecast_by_the_manual_adjustment_but_not_the_forecast_made_again(): void
+    {
+        // BOSS の11月〜12月の予測を1.5倍にする。取り消した補正と、ほかの品番の補正は掛けない
+        ForecastAdjustment::factory()->adjusting('fl-01', Channel::Boss, '2026-11', '2026-12', 150)->create();
+        ForecastAdjustment::factory()->adjusting('fl-01', Channel::Boss, '2026-10', '2026-10', 300)->create(['cancelled_at' => now()]);
+        ForecastAdjustment::factory()->adjusting('si-13', Channel::Boss, '2026-10', null, 300)->create();
+
+        $json = $this->getJson('/api/v1/demand-forecasts/timeline?item_no=fl-01')
+            ->assertOk()
+            ->assertJsonCount(1, 'meta.adjustments')
+            ->assertJsonPath('meta.adjustments.0.rate_percent', 150)
+            ->json();
+        $boss = $this->boss($json);
+        $months = ['2026-09', '2026-10', '2026-11', '2027-01'];
+
+        // 11月はセールで増やした100個の1.5倍。予測＝普段の予測60＋イベント40＋補正50
+        $this->assertSame(['2026-09' => null, '2026-10' => 62.0, '2026-11' => 150.0, '2027-01' => 62.0], $this->at($json, $boss['forecast'], $months));
+        $this->assertSame(['2026-09' => null, '2026-10' => 0.0, '2026-11' => 50.0, '2027-01' => 0.0], $this->at($json, $boss['adjustment'], $months));
+        $this->assertSame(40.0, $this->at($json, $boss['event'], ['2026-11'])['2026-11']);
+        // 予測し直した数（過去の月）には補正を掛けない
+        $this->assertSame(100.0, $this->at($json, $boss['replayed'], ['2026-09'])['2026-09']);
+        // SKUの根拠の月別の予測にも、倍率と補正で増減した数を出す
+        $detail = collect($json['data'][0]['skus'])->firstWhere('sku_code', 'fl-01-1')['detail'];
+        $november = $detail['channels'][0]['monthly'][1];
+        $this->assertSame(['2026-11', 150, 1.5, 50], [$november['month'], $november['quantity'], $november['adjustment_rate'], $november['adjustment_quantity']]);
+
+        // 日ごとは、その日の月の倍率を掛ける。セールの日（11/4）は普段の2個＋イベント10個の1.5倍
+        $daily = $this->getJson('/api/v1/demand-forecasts/timeline?unit=day&from=2026-10-31&to=2026-11-04')->json();
+        $days = ['2026-10-31', '2026-11-03', '2026-11-04'];
+        $this->assertSame(['2026-10-31' => 2.0, '2026-11-03' => 3.0, '2026-11-04' => 18.0], $this->at($daily, $this->boss($daily)['forecast'], $days));
+        $this->assertSame(['2026-10-31' => 0.0, '2026-11-03' => 1.0, '2026-11-04' => 6.0], $this->at($daily, $this->boss($daily)['adjustment'], $days));
+        $this->assertSame(10.0, $this->at($daily, $this->boss($daily)['event'], ['2026-11-04'])['2026-11-04']);
     }
 
     public function test_makes_the_forecast_again_months_before_and_redoes_it_when_the_sales_used_change(): void

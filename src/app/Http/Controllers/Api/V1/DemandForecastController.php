@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\Channel;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\ForecastAdjustmentResource;
 use App\Http\Resources\SkuForecastResource;
+use App\Models\ForecastAdjustment;
 use App\Models\Item;
 use App\Models\SalesEventPeriod;
 use App\Services\Forecast\DemandForecast;
@@ -86,6 +88,11 @@ class DemandForecastController extends Controller
             ])->values()->all(),
             // 季節係数を登録した品番（B-106、K-113）
             'seasonal_item_nos' => array_keys($forecast->seasonalFactors),
+            // 掛けている（これから掛ける）手動での補正（B-109、K-132）
+            'adjustments' => array_values(array_map(
+                fn (ForecastAdjustment $adjustment): array => ForecastAdjustmentResource::make($adjustment)->resolve(),
+                array_merge(...array_values(array_map(fn (array $channels): array => array_merge(...array_values($channels)), $forecast->adjustments))),
+            )),
         ];
     }
 }

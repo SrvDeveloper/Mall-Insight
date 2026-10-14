@@ -3,7 +3,9 @@
 namespace Tests\Feature\Http\Controllers\Api\V1;
 
 use App\Enums\ChangeSource;
+use App\Enums\Channel;
 use App\Enums\RatioCategoryCode;
+use App\Models\ForecastAdjustment;
 use App\Models\InboundPlan;
 use App\Models\Inventory;
 use App\Models\InventoryTrendSetting;
@@ -386,6 +388,27 @@ class InventoryTrendControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.opening_stock', 215)
             ->assertJsonPath('data.0.skus.0.average_daily', 1.5)
             ->assertJsonPath('data.0.skus.0.months.1.provisional_inbound', 999);
+    }
+
+    public function test_uses_the_forecast_after_the_manual_adjustment_of_the_channel(): void
+    {
+        // fl-01-1-10 は BOSS 1.0・Amazon 0.5 の基準平均日販。Amazon だけ、10月〜11月の予測を2倍にする
+        $this->sell(Sku::factory()->create(['item_id' => null]), '2025-10-01', 1, 'amazon_fba');
+        $sku = $this->sku('fl-01-1-10', 1.0);
+        $this->sell($sku, '2026-10-06', 30, 'amazon_fba');
+        $this->stock($sku, ['amazon_fba' => 60, 'boss_own' => 35]);
+        ForecastAdjustment::factory()->adjusting('fl-01', Channel::Amazon, '2026-10', '2026-11', 200)->create();
+
+        // 10月は残り25日分 0.5×2×25＝25 → 35、11月 30 → 5、12月は補正なしの 15.5 で 10.5 足りない
+        $this->getJson('/api/v1/inventory-trends?scope=amazon')
+            ->assertJsonPath('data.0.skus.0.months.*.ending_stock', [35, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            ->assertJsonPath('data.0.skus.0.months.2.shortfall', 10.5);
+        // BOSS は補正しない
+        $this->getJson('/api/v1/inventory-trends?scope=boss')->assertJsonPath('data.0.skus.0.months.0.ending_stock', 10);
+        // 全体は、10月 BOSS 25＋Amazon 25 → 45、11月 BOSS 30＋Amazon 30 で 15 足りない
+        $this->getJson('/api/v1/inventory-trends')
+            ->assertJsonPath('data.0.skus.0.months.0.ending_stock', 45)
+            ->assertJsonPath('data.0.skus.0.months.1.shortfall', 15);
     }
 
     public function test_explains_skus_that_are_not_sold_or_cannot_be_forecast_on_the_mall(): void

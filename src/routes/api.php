@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\ActualController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CrossWalkerSyncController;
 use App\Http\Controllers\Api\V1\DemandForecastController;
+use App\Http\Controllers\Api\V1\ForecastAdjustmentController;
 use App\Http\Controllers\Api\V1\ForecastBacktestController;
 use App\Http\Controllers\Api\V1\ForecastTimelineController;
 use App\Http\Controllers\Api\V1\InboundPlanController;
@@ -42,6 +43,9 @@ Route::prefix('v1')->name('api.v1.')->group(function () {
         Route::post('/item-selections', [ItemSelectionController::class, 'store'])->name('item-selections.store');
         Route::get('/demand-forecasts', [DemandForecastController::class, 'index'])->name('demand-forecasts.index');
         Route::get('/demand-forecasts/timeline', [ForecastTimelineController::class, 'index'])->name('demand-forecasts.timeline');
+        Route::get('/forecast-adjustments', [ForecastAdjustmentController::class, 'index'])->name('forecast-adjustments.index');
+        Route::post('/forecast-adjustments', [ForecastAdjustmentController::class, 'store'])->name('forecast-adjustments.store');
+        Route::post('/forecast-adjustments/{forecastAdjustment}/cancel', [ForecastAdjustmentController::class, 'cancel'])->name('forecast-adjustments.cancel');
         Route::apiResource('sales-events', SalesEventController::class)->parameters(['sales-events' => 'salesEvent']);
         Route::post('/sales-events/{salesEvent}/periods', [SalesEventPeriodController::class, 'store'])->name('sales-events.periods.store');
         Route::apiResource('sales-event-periods', SalesEventPeriodController::class)->only(['show', 'update', 'destroy'])->parameters(['sales-event-periods' => 'salesEventPeriod']);

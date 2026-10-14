@@ -3,10 +3,32 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import SkuForecastView from "@/views/SkuForecastView.vue";
 import { fetchForecastTimeline } from "@/api/demandForecasts";
+import { cancelForecastAdjustment, fetchForecastAdjustments, saveForecastAdjustment } from "@/api/forecastAdjustments";
+import { ApiError } from "@/api/client";
 import { timeline } from "@/views/forecastTimeline.fixture";
-import type { ForecastTimelineResponse, SalesUnit, SkuForecast } from "@/types/api";
+import type { ForecastAdjustment, ForecastTimelineResponse, SalesUnit, SkuForecast } from "@/types/api";
 
 vi.mock("@/api/demandForecasts", () => ({ fetchForecastTimeline: vi.fn() }));
+vi.mock("@/api/forecastAdjustments", () => ({ fetchForecastAdjustments: vi.fn(), saveForecastAdjustment: vi.fn(), cancelForecastAdjustment: vi.fn() }));
+
+function adjustment(overrides: Partial<ForecastAdjustment> = {}): ForecastAdjustment {
+    return {
+        id: 1,
+        item_no: "fl-01",
+        channel: "amazon",
+        channel_label: "Amazon",
+        starts_on: "2026-11",
+        ends_on: "2027-01",
+        rate_percent: 120,
+        reason: "Amazon の広告を強める",
+        status: "scheduled",
+        created_at: "2026-10-13T10:00:00+09:00",
+        created_by: "担当者",
+        cancelled_at: null,
+        cancelled_by: null,
+        ...overrides,
+    };
+}
 
 function detail(): Omit<SkuForecast, "unit_prices"> {
     const monthly = ["2026-10", "2026-11", "2026-12"].map((month, index) => ({
@@ -15,6 +37,8 @@ function detail(): Omit<SkuForecast, "unit_prices"> {
         quantity: index === 2 ? 140 : 120,
         event_quantity: index === 2 ? 20 : 0,
         seasonal_factor: null,
+        adjustment_rate: null,
+        adjustment_quantity: 0,
         events:
             index === 2
                 ? [{ period_id: 7, event_id: 3, name: "楽天スーパーセール", channel: "boss" as const, days: 4, multiplier: 2, is_candidate: true, quantity: 20 }]
@@ -102,6 +126,113 @@ async function mountView(path = "/forecasts/fl-01") {
 describe("SkuForecastView", () => {
     beforeEach(() => {
         vi.mocked(fetchForecastTimeline).mockReset().mockResolvedValue(itemTimeline());
+        vi.mocked(fetchForecastAdjustments)
+            .mockReset()
+            .mockResolvedValue({ data: [], meta: { min_percent: 0, max_percent: 500 } });
+        vi.mocked(saveForecastAdjustment).mockReset();
+        vi.mocked(cancelForecastAdjustment).mockReset();
+    });
+
+    it("registers an adjustment of the item and reloads the forecast", async () => {
+        const { wrapper } = await mountView();
+        expect(fetchForecastAdjustments).toHaveBeenCalledWith("fl-01");
+        expect(wrapper.find('[data-testid="adjustment-empty"]').text()).toBe("補正はありません。");
+
+        await wrapper.find('[data-testid="adjustment-add"]').trigger("click");
+        // 月は予測の12か月（今月から）
+        expect(wrapper.findAll('[data-testid="adjustment-starts-on"] option').map((option) => option.attributes("value"))).toHaveLength(12);
+        await wrapper.find('[data-testid="adjustment-channel-amazon"]').trigger("click");
+        await wrapper.find('[data-testid="adjustment-starts-on"]').setValue("2026-11");
+        await wrapper.find('[data-testid="adjustment-ends-on"]').setValue("2027-01");
+        await wrapper.find('[data-testid="adjustment-rate"]').setValue(120);
+        expect(wrapper.find('[data-testid="adjustment-rate-hint"]').text()).toBe("予測を20%増やします（予測 × 1.2）。");
+        await wrapper.find('[data-testid="adjustment-reason"]').setValue("Amazon の広告を強める");
+
+        // 入力エラーは欄の下に出す
+        vi.mocked(saveForecastAdjustment).mockRejectedValueOnce(new ApiError("入力内容を確認してください。", 422, { starts_on: ["このチャネルの別の補正（2026/12〜、150%）と月が重なっています。"] }));
+        await wrapper.find('[data-testid="adjustment-form"]').trigger("submit");
+        await flushPromises();
+        expect(wrapper.find('[data-testid="adjustment-errors"]').text()).toContain("月が重なっています");
+
+        vi.mocked(saveForecastAdjustment).mockResolvedValueOnce(adjustment());
+        vi.mocked(fetchForecastAdjustments).mockResolvedValue({ data: [adjustment()], meta: { min_percent: 0, max_percent: 500 } });
+        const loads = vi.mocked(fetchForecastTimeline).mock.calls.length;
+        await wrapper.find('[data-testid="adjustment-form"]').trigger("submit");
+        await flushPromises();
+        expect(saveForecastAdjustment).toHaveBeenLastCalledWith({
+            item_no: "fl-01",
+            channel: "amazon",
+            starts_on: "2026-11",
+            ends_on: "2027-01",
+            rate_percent: 120,
+            reason: "Amazon の広告を強める",
+            replaces: null,
+        });
+        expect(fetchForecastTimeline).toHaveBeenCalledTimes(loads + 1);
+        expect(wrapper.find('[data-testid="adjustment-form"]').exists()).toBe(false);
+        const row = wrapper.find('[data-testid="adjustment-row"]');
+        expect(row.text()).toContain("Amazon");
+        expect(row.text()).toContain("2026/11〜2027/1");
+        expect(row.find('[data-testid="adjustment-status"]').text()).toBe("これから");
+        expect(row.find('[data-testid="adjustment-rate-cell"]').text()).toBe("120%");
+        wrapper.unmount();
+    });
+
+    it("changes an adjustment by replacing it, cancels one and shows the past adjustments", async () => {
+        vi.mocked(fetchForecastAdjustments).mockResolvedValue({
+            data: [
+                adjustment({ status: "active", starts_on: "2026-10", ends_on: null }),
+                adjustment({ id: 2, channel: "boss", channel_label: "BOSS", status: "cancelled", cancelled_at: "2026-10-12T10:00:00+09:00", cancelled_by: "担当者" }),
+            ],
+            meta: { min_percent: 0, max_percent: 500 },
+        });
+        const { wrapper } = await mountView();
+        expect(wrapper.findAll('[data-testid="adjustment-row"]')).toHaveLength(1);
+        expect(wrapper.find('[data-testid="adjustment-row"]').text()).toContain("2026/10〜（取り消すまで）");
+
+        // 変えるときは、同じチャネルで前の補正を置き換える
+        await wrapper.find('[data-testid="adjustment-change"]').trigger("click");
+        expect((wrapper.find('[data-testid="adjustment-rate"]').element as HTMLInputElement).value).toBe("120");
+        expect(wrapper.find('[data-testid="adjustment-channel-boss"]').attributes("disabled")).toBeDefined();
+        await wrapper.find('[data-testid="adjustment-rate"]').setValue(80);
+        expect(wrapper.find('[data-testid="adjustment-rate-hint"]').text()).toBe("予測を20%減らします（予測 × 0.8）。");
+        vi.mocked(saveForecastAdjustment).mockResolvedValueOnce(adjustment({ id: 3, rate_percent: 80 }));
+        await wrapper.find('[data-testid="adjustment-form"]').trigger("submit");
+        await flushPromises();
+        expect(saveForecastAdjustment).toHaveBeenLastCalledWith(expect.objectContaining({ channel: "amazon", starts_on: "2026-10", ends_on: null, rate_percent: 80, replaces: 1 }));
+
+        // 取り消す前に確かめる
+        const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+        await wrapper.find('[data-testid="adjustment-cancel"]').trigger("click");
+        expect(cancelForecastAdjustment).not.toHaveBeenCalled();
+        vi.mocked(cancelForecastAdjustment).mockResolvedValueOnce(adjustment({ status: "cancelled" }));
+        await wrapper.find('[data-testid="adjustment-cancel"]').trigger("click");
+        await flushPromises();
+        expect(cancelForecastAdjustment).toHaveBeenCalledWith(1);
+        confirm.mockRestore();
+
+        await wrapper.find('[data-testid="adjustment-history-toggle"]').trigger("click");
+        expect(wrapper.find('[data-testid="adjustment-history"]').text()).toContain("取り消した・BOSS 2026/11〜2027/1 120%");
+        wrapper.unmount();
+    });
+
+    it("shows how much the adjustment changed the forecast in the breakdown and the tooltip", async () => {
+        const response = itemTimeline();
+        const boss = response.data[0]!.skus[0]!.detail!.channels[0]!;
+        boss.monthly = boss.monthly!.map((month, index) => (index === 1 ? { ...month, quantity: 144, adjustment_rate: 1.2, adjustment_quantity: 24 } : month));
+        const timelineBoss = response.data[0]!.skus[0]!.channels.boss!;
+        timelineBoss.forecast = timelineBoss.forecast.map((value, index) => (index === 13 ? 144 : value));
+        timelineBoss.adjustment = timelineBoss.adjustment.map((value, index) => (index === 13 ? 24 : value));
+        vi.mocked(fetchForecastTimeline).mockResolvedValue(response);
+        const { wrapper } = await mountView("/forecasts/fl-01?scope=boss");
+
+        expect(wrapper.findAll('[data-testid="breakdown-adjustment"]').map((cell) => cell.text())).toEqual(["—", "+24（120%）", "—"]);
+        expect(wrapper.findAll('[data-testid="breakdown-total"]')[1]!.text()).toBe("144");
+
+        await wrapper.findAll('[data-testid="chart-band"]')[13]!.trigger("mouseenter");
+        const rows = wrapper.findAll('[data-testid="chart-tooltip"] p').map((row) => row.text());
+        expect(rows).toEqual(expect.arrayContaining(["BOSS の予測144個", "普段の予測120個", "補正で増減した数+24個"]));
+        wrapper.unmount();
     });
 
     it("shows the item totals, the SKU chart and the basis of the forecast", async () => {

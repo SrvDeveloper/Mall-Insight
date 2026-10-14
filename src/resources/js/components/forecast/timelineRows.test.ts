@@ -80,13 +80,25 @@ describe("timelineRows", () => {
         expect(stockoutRate(timelineFigures([sku("a", { boss, amazon })], columns, "boss", "quantity", "month").stockouts[1])).toBeCloseTo(0.2);
     });
 
-    it("keeps how much of the forecast the events added for each channel", () => {
+    it("keeps how much of the forecast the events and the manual adjustments added for each channel", () => {
         const columns = dayColumns();
         const boss = channel(columns, { actual: 1, replayed: 1, forecast: 2 }, { event: [null, null, null, 0, 1.5, 1.5, 0] });
         const skus = [sku("a", { boss }, { unit_prices: { total: 500, boss: 500, amazon: null } }), sku("b", { boss })];
 
         expect(timelineFigures(skus, columns, "total", "quantity", "day").channels.boss!.event).toEqual([null, null, null, 0, 3, 3, 0]);
         expect(timelineFigures(skus, columns, "total", "amount", "day").channels.boss!.event[4]).toBe(2250);
+
+        // 手動での補正で増減した数も、チャネルごとに足す
+        const adjusted = channel(columns, { actual: 1, replayed: 1, forecast: 2 }, { adjustment: [null, null, null, 0, 0.4, -0.2, 0] });
+        expect(timelineFigures([sku("a", { boss: adjusted }), sku("b", { boss: adjusted })], columns, "total", "quantity", "day").channels.boss!.adjustment).toEqual([
+            null,
+            null,
+            null,
+            0,
+            0.8,
+            -0.4,
+            0,
+        ]);
     });
 
     it("labels months and days and finds the events of each column", () => {

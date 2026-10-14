@@ -35,6 +35,7 @@ export function channel(
         replayed: columns.map((column) => (column.kind === "past" ? values.replayed : null)),
         forecast: columns.map((column) => (column.kind === "past" ? null : values.forecast)),
         event: columns.map((column) => (column.kind === "past" ? null : 0)),
+        adjustment: columns.map((column) => (column.kind === "past" ? null : 0)),
         ...overrides,
     };
 }
@@ -92,6 +93,7 @@ export function timeline(unit: SalesUnit = "month"): ForecastTimelineResponse {
                 { length: 90, weight: 0.2 },
             ],
             min_sales_days: 14,
+            adjustments: [],
             events: [
                 {
                     id: 7,

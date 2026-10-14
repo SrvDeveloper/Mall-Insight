@@ -6,6 +6,7 @@ use App\Enums\ActiveStatus;
 use App\Enums\Channel;
 use App\Enums\Mall;
 use App\Enums\Warehouse;
+use App\Models\ForecastAdjustment;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
 use App\Models\SalesLine;
@@ -38,6 +39,9 @@ use Illuminate\Support\Collection;
  *
  * 担当者が季節係数を登録した品番（B-106、K-113）は、期間の平均日販を販売できた日の係数の合計で割って季節の影響を除き、
  * 月ごとの需要にその月の係数を掛ける。係数はすべての月を同じ倍率にしても予測が変わらない（月どうしの比だけが効く）。
+ *
+ * 担当者が手動での補正（B-109、K-132）を登録した品番・チャネル・月は、ここまでで求めた月の需要に補正の倍率を掛ける。補正は forecast() でだけ掛け、
+ * 予測精度の測定・予測し直した数・イベントの倍率の測定（forecastChannelWith()）には掛けない（自動の予測の当たり具合を測るため）。
  */
 class DemandForecaster
 {
@@ -65,6 +69,7 @@ class DemandForecaster
         $channelRanges = $this->channelSalesRanges($forecastFrom);
         $events = $this->eventUplifts->periods();
         $seasonal = ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all());
+        $adjustments = ForecastAdjustment::currentFor($items->pluck('item_no')->all(), $forecastFrom);
         $eventPlan = $this->eventUplifts->plan($this, $forecastFrom, $items, $channelRanges, $events, $seasonal);
 
         // チャネルごとに、期間・日別の販売数・欠品日を求める。SKUごとに日付の計算を繰り返すと遅いため、
@@ -92,7 +97,7 @@ class DemandForecaster
             items: $items->map(fn (Item $item): array => [
                 'item' => $item,
                 'skus' => $item->skus->map(fn (Sku $sku): SkuForecast => SkuForecast::combine($sku, array_map(
-                    fn (array $data): ChannelForecast => $this->forecastChannel(
+                    fn (array $data): ChannelForecast => self::adjust($this->forecastChannel(
                         $data['channel'],
                         $data['ranges'],
                         $data['window_dates'],
@@ -102,14 +107,50 @@ class DemandForecaster
                         $eventPlan->excludedDatesOn($data['channel']),
                         $eventPlan->upliftsFor($data['channel']->value, $item->item_no),
                         $seasonal[$item->item_no] ?? null,
-                    ),
+                    ), $adjustments[$item->item_no][$data['channel']->value] ?? []),
                     array_values(array_filter($channelData, fn (array $data): bool => self::sellsOn($sku, $data['channel']))),
                 )))->all(),
             ])->values()->all(),
             events: $events,
             seasonalFactors: $seasonal,
             eventPlan: $eventPlan,
+            adjustments: $adjustments,
         );
+    }
+
+    /**
+     * チャネルの月別の予測に、手動での補正（B-109、K-132）の倍率を掛ける。補正の無い月はそのまま。
+     *
+     * @param  list<ForecastAdjustment>  $adjustments  その品番・チャネルの取り消していない補正
+     */
+    public static function adjust(ChannelForecast $forecast, array $adjustments): ChannelForecast
+    {
+        if ($adjustments === [] || $forecast->monthly === null || $forecast->monthly === []) {
+            return $forecast;
+        }
+        $monthly = array_map(function (MonthlyDemand $month) use ($adjustments): MonthlyDemand {
+            $rate = self::adjustmentRate($adjustments, $month->month);
+
+            return $rate === null ? $month : $month->withAdjustment($rate);
+        }, $forecast->monthly);
+
+        return new ChannelForecast($forecast->channel, $forecast->windows, $forecast->baseAverage, $monthly, $forecast->unpredictableReason, $forecast->malls);
+    }
+
+    /**
+     * その月（月の1日）に掛ける補正の倍率。補正が無ければ null。
+     *
+     * @param  list<ForecastAdjustment>  $adjustments
+     */
+    public static function adjustmentRate(array $adjustments, CarbonImmutable $month): ?float
+    {
+        foreach ($adjustments as $adjustment) {
+            if ($adjustment->covers($month)) {
+                return $adjustment->rate();
+            }
+        }
+
+        return null;
     }
 
     /**

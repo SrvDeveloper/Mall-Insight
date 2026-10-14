@@ -3,6 +3,7 @@
 namespace App\Services\Forecast;
 
 use App\Enums\Channel;
+use App\Models\ForecastAdjustment;
 use App\Models\Item;
 use App\Models\SalesEventPeriod;
 use Carbon\CarbonImmutable;
@@ -19,6 +20,7 @@ final readonly class DemandForecast
      * @param  Collection<int, SalesEventPeriod>  $events  登録したイベントの期間（B-129、K-114）。平均日販から除いた日と、倍率を掛けたこれからの期間の根拠
      * @param  array<string, array<int, float>>  $seasonalFactors  品番 => 登録した季節係数（B-106）
      * @param  EventPlan  $eventPlan  平均日販から除いた日と、品番・チャネルごとのこれからのイベントの倍率（日ごとの予測に使う、B-131）
+     * @param  array<string, array<string, list<ForecastAdjustment>>>  $adjustments  品番 => チャネルの値 => 掛けた手動での補正（B-109、K-132）
      */
     public function __construct(
         public CarbonImmutable $calculatedAt,
@@ -28,5 +30,6 @@ final readonly class DemandForecast
         public Collection $events = new Collection,
         public array $seasonalFactors = [],
         public EventPlan $eventPlan = new EventPlan,
+        public array $adjustments = [],
     ) {}
 }

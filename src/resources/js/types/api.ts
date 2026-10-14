@@ -253,6 +253,10 @@ export interface MonthlyDemand {
     event_quantity: number;
     /** 登録した季節係数（B-106）。登録していなければ null */
     seasonal_factor: number | null;
+    /** 手動での補正（B-109）の倍率（1.2 など）。補正していない月とチャネルの合計は null */
+    adjustment_rate: number | null;
+    /** 手動での補正で増減した数（quantity は補正した後の数） */
+    adjustment_quantity: number;
     events: MonthlyEventDemand[];
 }
 
@@ -322,7 +326,45 @@ export interface DemandForecastResponse {
         events: { id: number; event_id: number; name: string; starts_on: string; ends_on: string; channels: ("boss" | "amazon")[]; status: SalesEventStatus }[];
         /** 季節係数を登録した品番 */
         seasonal_item_nos: string[];
+        /** 掛けている（これから掛ける）手動での補正（B-109） */
+        adjustments: ForecastAdjustment[];
     };
+}
+
+/** 手動での予測補正（B-109、K-132）。品番・チャネルごとに、始める月から終える月まで予測に倍率を掛ける。 */
+export interface ForecastAdjustment {
+    id: number;
+    item_no: string;
+    channel: "boss" | "amazon";
+    channel_label: string;
+    /** YYYY-MM */
+    starts_on: string;
+    /** YYYY-MM。null は取り消すまで続ける */
+    ends_on: string | null;
+    rate_percent: number;
+    reason: string;
+    /** 掛けている・始める月がまだ・終えた・取り消した */
+    status: "active" | "scheduled" | "ended" | "cancelled";
+    created_at: string | null;
+    created_by?: string | null;
+    cancelled_at: string | null;
+    cancelled_by?: string | null;
+}
+
+export interface ForecastAdjustmentListResponse {
+    data: ForecastAdjustment[];
+    meta: { min_percent: number; max_percent: number };
+}
+
+export interface SaveForecastAdjustmentInput {
+    item_no: string;
+    channel: "boss" | "amazon";
+    starts_on: string;
+    ends_on: string | null;
+    rate_percent: number;
+    reason: string;
+    /** 変える補正（取り消して新しい補正を登録する） */
+    replaces?: number | null;
 }
 
 /** 需要予測の画面（B-131、K-123）の月・日。past は過去、current は今月（今日）、future はこれから。 */
@@ -351,6 +393,8 @@ export interface ForecastTimelineChannel {
     forecast: (number | null)[];
     /** 今月（今日）から先の需要予測のうち、イベントで増やした数 */
     event: (number | null)[];
+    /** 今月（今日）から先の需要予測のうち、手動での補正（B-109）で増減した数 */
+    adjustment: (number | null)[];
 }
 
 export interface ForecastTimelineSku {

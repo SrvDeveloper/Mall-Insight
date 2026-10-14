@@ -16,7 +16,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * 根拠の期間はモールごとに malls に出す（B-134、K-126。BOSS は楽天市場・Yahoo!ショッピング・au PAY マーケット）。windows は、モールが1つの
  * チャネル（Amazon）ではそのモールの期間、BOSS では空。
  * 月別の予測には、イベント（B-129）の日に倍率で増やした数と、その内訳を添える（K-112）。季節係数を登録した品番（B-106）は、
- * 月の季節係数と、期間ごとの季節係数の平均（平均日販は季節の影響を除いた値）を添える。
+ * 月の季節係数と、期間ごとの季節係数の平均（平均日販は季節の影響を除いた値）を添える。手動での補正（B-109、K-132）を掛けた月は、
+ * 補正の倍率と補正で増減した数を添える（quantity は補正した後の数。チャネルの合計の月は倍率を持たない）。
  * 平均日販・重みは小数4桁、数量は小数2桁で返し、整数への丸めは表示するときに行う。
  *
  * @mixin SkuForecast
@@ -90,7 +91,7 @@ class SkuForecastResource extends JsonResource
 
     /**
      * @param  list<MonthlyDemand>|null  $months
-     * @return list<array{month: string, days: int, quantity: float, event_quantity: float, seasonal_factor: float|null, events: list<array<string, mixed>>}>|null
+     * @return list<array{month: string, days: int, quantity: float, event_quantity: float, seasonal_factor: float|null, adjustment_rate: float|null, adjustment_quantity: float, events: list<array<string, mixed>>}>|null
      */
     private function monthly(?array $months): ?array
     {
@@ -100,6 +101,8 @@ class SkuForecastResource extends JsonResource
             'quantity' => round($month->quantity, 2),
             'event_quantity' => round($month->eventQuantity(), 2),
             'seasonal_factor' => $month->seasonalFactor,
+            'adjustment_rate' => $month->adjustmentRate,
+            'adjustment_quantity' => round($month->adjustmentQuantity, 2),
             'events' => array_map(fn (MonthlyEventDemand $event): array => [
                 'period_id' => $event->periodId,
                 'event_id' => $event->eventId,

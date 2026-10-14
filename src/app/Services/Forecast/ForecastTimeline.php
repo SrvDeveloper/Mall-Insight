@@ -20,6 +20,8 @@ use Carbon\CarbonImmutable;
  *   $offset か月前の1日を起点にしたモールごとの基準平均日販に、その月の季節係数と、そのモールでその日に重なるイベントの倍率を掛けて足した1日分（B-134）。
  * - イベントで増やした数（event）：今月（今日）から先の予測のうち、イベントの倍率で増やした分。日ごとは予測－基準平均日販×季節係数、
  *   月ごとは月別の予測のイベントで増やした数。予測を「普段の予測＋イベントで増やした数」に分けて見せるため（原則4）。
+ * - 補正で増減した数（adjustment）：手動での補正（B-109、K-132）の倍率で増減した分。日ごとはその日の月の倍率を掛ける。
+ *   予測＝普段の予測＋イベントで増やした数＋補正で増減した数。予測し直した数には補正を掛けない。
  * - チャネルの販売実績を取り込んでいない月・日の販売実績は null（原則2）。欠品は、在庫の記録が無い日は分からないため null。
  *   欠品率をグラフに出すため、在庫の記録で欠品かを判定できた日数（stockout_known）を添える。
  */
@@ -38,7 +40,7 @@ class ForecastTimeline
 
     /**
      * @param  list<string>|null  $itemNos  null なら対象品番
-     * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{base_average: float|null, actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, stockout_known: list<int|null>, replayed: list<float|null>, forecast: list<float|null>, event: list<float|null>}>>}
+     * @return array{forecast: DemandForecast, columns: list<array{key: string, kind: string, start: CarbonImmutable, end: CarbonImmutable, days: int}>, skus: array<int, array<string, array{base_average: float|null, actual: list<float|null>, actual_amount: list<float|null>, stockout: list<int|bool|null>, stockout_known: list<int|null>, replayed: list<float|null>, forecast: list<float|null>, event: list<float|null>, adjustment: list<float|null>}>>}
      */
     public function build(CarbonImmutable $now, SalesUnit $unit, int $offset, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null, ?array $itemNos = null): array
     {
@@ -99,8 +101,13 @@ class ForecastTimeline
                         continue;
                     }
                     $channelForecast = collect($skuForecast->channels)->first(fn (ChannelForecast $candidate): bool => $candidate->channel === $channel);
-                    $row = ['base_average' => $channelForecast?->baseAverage === null ? null : round($channelForecast->baseAverage, 4), 'actual' => [], 'actual_amount' => [], 'stockout' => [], 'stockout_known' => [], 'replayed' => [], 'forecast' => [], 'event' => []];
+                    $row = ['base_average' => $channelForecast?->baseAverage === null ? null : round($channelForecast->baseAverage, 4), 'actual' => [], 'actual_amount' => [], 'stockout' => [], 'stockout_known' => [], 'replayed' => [], 'forecast' => [], 'event' => [], 'adjustment' => []];
                     $futureIndex = 0;
+                    // 月（Y-m）ごとの手動での補正の倍率（B-109、K-132）。日ごとの予測にも、その日の月の倍率を掛ける
+                    $adjustmentRates = [];
+                    foreach ($channelForecast?->monthly ?? [] as $month) {
+                        $adjustmentRates[$month->month->format('Y-m')] = $month->adjustmentRate;
+                    }
                     $skuSold = $sold[$sku->id][$channel->value] ?? [];
                     $skuStockouts = $stockouts[$sku->id] ?? [];
                     foreach ($columns as $index => $column) {
@@ -116,6 +123,7 @@ class ForecastTimeline
                             $row['replayed'][] = $this->replayedValue($replayed[$origin][$channel->value] ?? null, $sku->id, $column, $offset, $seasonal, $replayMultipliers[$origin][$channel->value][$item->item_no] ?? [], $unit);
                             $row['forecast'][] = null;
                             $row['event'][] = null;
+                            $row['adjustment'][] = null;
 
                             continue;
                         }
@@ -123,12 +131,15 @@ class ForecastTimeline
                         if ($unit === SalesUnit::Day) {
                             $isPredictable = $channelForecast?->isPredictable() ?? false;
                             $quantity = $isPredictable ? DemandForecaster::dailyQuantity($channelForecast->mallBases(), $seasonal, $multipliers, $column['key']) : null;
-                            $row['forecast'][] = $quantity === null ? null : round($quantity, 4);
+                            $rate = $adjustmentRates[substr($column['key'], 0, 7)] ?? null;
+                            $row['forecast'][] = $quantity === null ? null : round($quantity * ($rate ?? 1.0), 4);
                             $row['event'][] = $quantity === null ? null : round($quantity - DemandForecaster::dailyQuantity($channelForecast->mallBases(), $seasonal, [], $column['key']), 4);
+                            $row['adjustment'][] = $quantity === null ? null : round($quantity * (($rate ?? 1.0) - 1), 4);
                         } else {
                             $month = $channelForecast?->monthly[$futureIndex] ?? null;
                             $row['forecast'][] = $month === null ? null : round($month->quantity, 2);
                             $row['event'][] = $month === null ? null : round($month->eventQuantity(), 2);
+                            $row['adjustment'][] = $month === null ? null : round($month->adjustmentQuantity, 2);
                             $futureIndex++;
                         }
                     }

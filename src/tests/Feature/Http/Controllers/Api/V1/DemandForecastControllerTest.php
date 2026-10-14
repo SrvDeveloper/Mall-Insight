@@ -68,9 +68,9 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.0.channels.0.unpredictable_reason', null)
             ->assertJsonCount(12, 'data.0.skus.0.monthly')
             // 今月（10月）も1か月分（31日）
-            ->assertJsonPath('data.0.skus.0.monthly.0', ['month' => '2026-10', 'days' => 31, 'quantity' => 46.5, 'event_quantity' => 0, 'seasonal_factor' => null, 'events' => []])
-            ->assertJsonPath('data.0.skus.0.monthly.1', ['month' => '2026-11', 'days' => 30, 'quantity' => 45, 'event_quantity' => 0, 'seasonal_factor' => null, 'events' => []])
-            ->assertJsonPath('data.0.skus.0.monthly.11', ['month' => '2027-09', 'days' => 30, 'quantity' => 45, 'event_quantity' => 0, 'seasonal_factor' => null, 'events' => []]);
+            ->assertJsonPath('data.0.skus.0.monthly.0', ['month' => '2026-10', 'days' => 31, 'quantity' => 46.5, 'event_quantity' => 0, 'seasonal_factor' => null, 'adjustment_rate' => null, 'adjustment_quantity' => 0, 'events' => []])
+            ->assertJsonPath('data.0.skus.0.monthly.1', ['month' => '2026-11', 'days' => 30, 'quantity' => 45, 'event_quantity' => 0, 'seasonal_factor' => null, 'adjustment_rate' => null, 'adjustment_quantity' => 0, 'events' => []])
+            ->assertJsonPath('data.0.skus.0.monthly.11', ['month' => '2027-09', 'days' => 30, 'quantity' => 45, 'event_quantity' => 0, 'seasonal_factor' => null, 'adjustment_rate' => null, 'adjustment_quantity' => 0, 'events' => []]);
     }
 
     public function test_adds_the_unit_prices_of_the_total_and_each_mall_for_amounts(): void

@@ -42,8 +42,8 @@ export const scopeChannels = (scope: ForecastScope): ForecastChannel[] => (scope
 
 /** 表示しているモールでまとめた、月・日ごとの値（columns の順）。 */
 export interface TimelineFigures {
-    /** チャネルごとの販売実績と需要予測（積み上げに使う）と、需要予測のうちイベントで増やした数。そのチャネルで売っているSKUが無ければ持たない */
-    channels: Partial<Record<ForecastChannel, { actual: (number | null)[]; forecast: (number | null)[]; event: (number | null)[]; stockouts: StockoutFigure[] }>>;
+    /** チャネルごとの販売実績と需要予測（積み上げに使う）と、需要予測のうちイベントで増やした数・手動での補正（B-109）で増減した数。そのチャネルで売っているSKUが無ければ持たない */
+    channels: Partial<Record<ForecastChannel, { actual: (number | null)[]; forecast: (number | null)[]; event: (number | null)[]; adjustment: (number | null)[]; stockouts: StockoutFigure[] }>>;
     actual: (number | null)[];
     /** 予測し直した数（予測できたSKU・チャネルの合計） */
     replayed: (number | null)[];
@@ -101,7 +101,7 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
         if (values.length === 0) {
             continue;
         }
-        const series = { actual: empty(), forecast: empty(), event: empty(), stockouts: emptyStockouts(length) };
+        const series = { actual: empty(), forecast: empty(), event: empty(), adjustment: empty(), stockouts: emptyStockouts(length) };
         for (const sku of values) {
             const data = sku.channels[channel]!;
             if (data.base_average !== null) {
@@ -136,6 +136,10 @@ export function timelineFigures(skus: ForecastTimelineSku[], columns: ForecastTi
                 const event = data.event[index];
                 if (event !== null && event !== undefined) {
                     add(series.event, index, event * price);
+                }
+                const adjustment = data.adjustment[index];
+                if (adjustment !== null && adjustment !== undefined) {
+                    add(series.adjustment, index, adjustment * price);
                 }
                 const replayed = data.replayed[index];
                 if (replayed !== null && replayed !== undefined) {

@@ -8,7 +8,8 @@ import type { AverageWindow, ChannelForecast, ForecastTimelineColumn, ForecastTi
 
 /**
  * SKU別の需要予測（B-131、K-123）の、予測の根拠。画面デザイン案のとおり、チャネルごとの基準平均日販の根拠（重ならずに遡る3つの期間の販売数・
- * 販売日数・欠品日数・イベントの日数・平均日販・重み、K-036・K-037・K-112）と、月ごとの予測の内訳（普段の予測・季節係数・イベントで増やした数）を出す。
+ * 販売日数・欠品日数・イベントの日数・平均日販・重み、K-036・K-037・K-112）と、月ごとの予測の内訳（普段の予測・季節係数・イベントで増やした数・
+ * 手動での補正で増減した数、B-109）を出す。
  * BOSS は、基準平均日販をモール（楽天市場・Yahoo!ショッピング・au PAY マーケット）ごとに求めて足すため、期間もモールごとに出す（B-134、K-126）。
  * 日ごとのときは、月ごとの代わりに今日から先の日ごとの予測の内訳（普段の予測・季節係数・イベントで増やした数）を出す。
  * 予測できないチャネルは理由を出す。表示しているモールのチャネルだけを出し、内訳は合計する。
@@ -55,12 +56,30 @@ interface BreakdownColumn {
     eventText: string;
     eventTitle: string;
     hasEvent: boolean;
+    /** 手動での補正（B-109）で増減した数と、チャネルごとの倍率 */
+    adjustmentText: string;
+    adjustmentTitle: string;
+    hasAdjustment: boolean;
     total: string;
 }
 
 const predictable = computed(() => channels.value.filter((channel) => channel.monthly !== null));
 const eventText = (quantity: number, names: string[], format: (value: number) => string): string =>
     quantity > 0 ? `+${format(quantity)}（${names.map((name) => name.slice(0, 4)).join("・")}）` : "—";
+
+/** 補正で増減した数と、チャネルごとの倍率（「+24（Amazon 120%）」）。 */
+function adjustmentOf(quantity: number, rates: { label: string; rate: number }[], format: (value: number) => string): Pick<BreakdownColumn, "adjustmentText" | "adjustmentTitle" | "hasAdjustment"> {
+    if (rates.length === 0) {
+        return { adjustmentText: "—", adjustmentTitle: "", hasAdjustment: false };
+    }
+    const rateText = rates.map((item) => `${channels.value.length > 1 ? `${item.label} ` : ""}${Math.round(item.rate * 100)}%`).join("・");
+    return { adjustmentText: `${quantity >= 0 ? "+" : "−"}${format(Math.abs(quantity))}（${rateText}）`, adjustmentTitle: rateText, hasAdjustment: true };
+}
+const adjustmentRates = (month: string): { label: string; rate: number }[] =>
+    predictable.value.flatMap((channel) => {
+        const rate = channel.monthly?.find((item) => item.month === month)?.adjustment_rate ?? null;
+        return rate === null ? [] : [{ label: channel.channel_label, rate }];
+    });
 
 /** 月ごとの内訳（予測できたチャネルの合計）。 */
 const months = computed<BreakdownColumn[]>(() => {
@@ -69,17 +88,19 @@ const months = computed<BreakdownColumn[]>(() => {
         const rows = predictable.value.map((channel) => channel.monthly![index]!);
         const events = [...new Set(rows.flatMap((row) => row.events.map((event) => event.name)))];
         const eventQuantity = rows.reduce((sum, row) => sum + row.event_quantity, 0);
+        const adjustment = rows.reduce((sum, row) => sum + row.adjustment_quantity, 0);
         const total = rows.reduce((sum, row) => sum + row.quantity, 0);
         const monthNumber = Number(month.month.slice(5, 7));
         return {
             key: month.month,
             label: `${monthNumber === 1 || index === 0 ? `${month.month.slice(0, 4)}/` : ""}${monthNumber}月`,
             sub: "",
-            usual: formatQuantity(total - eventQuantity),
+            usual: formatQuantity(total - eventQuantity - adjustment),
             seasonal: month.seasonal_factor,
             eventText: eventText(eventQuantity, events, formatQuantity),
             eventTitle: events.join("・"),
             hasEvent: eventQuantity > 0,
+            ...adjustmentOf(adjustment, adjustmentRates(month.month), formatQuantity),
             total: formatQuantity(total),
         };
     });
@@ -95,6 +116,7 @@ const days = computed<BreakdownColumn[]>(() => {
         }
         let total = 0;
         let eventQuantity = 0;
+        let adjustment = 0;
         const multipliers: string[] = [];
         for (const channel of predictable.value) {
             const forecast = props.timeline[channel.channel]?.forecast[index];
@@ -104,6 +126,7 @@ const days = computed<BreakdownColumn[]>(() => {
             const event = props.timeline[channel.channel]?.event[index] ?? 0;
             total += forecast;
             eventQuantity += event;
+            adjustment += props.timeline[channel.channel]?.adjustment[index] ?? 0;
             // 倍率は月ごとの内訳から取る（BOSS は倍率をイベントのモールの分にだけ掛けるため、予測÷普段の予測とは合わない）
             const monthEvents = channel.monthly?.find((month) => month.month === column.key.slice(0, 7))?.events ?? [];
             for (const event of props.events[index] ?? []) {
@@ -119,11 +142,12 @@ const days = computed<BreakdownColumn[]>(() => {
             key: column.key,
             label: label.label,
             sub: label.sub,
-            usual: formatDay(total - eventQuantity),
+            usual: formatDay(total - eventQuantity - adjustment),
             seasonal: predictable.value[0]?.monthly?.find((month) => month.month === column.key.slice(0, 7))?.seasonal_factor ?? null,
             eventText: eventText(eventQuantity, events, formatDay),
             eventTitle: (multipliers.length > 0 ? multipliers : events).join("　"),
             hasEvent: eventQuantity > 0,
+            ...adjustmentOf(adjustment, adjustmentRates(column.key.slice(0, 7)), formatDay),
             total: formatDay(total),
         });
     });
@@ -132,6 +156,7 @@ const days = computed<BreakdownColumn[]>(() => {
 
 const breakdown = computed(() => (isDay.value ? days.value : months.value));
 const hasSeasonal = computed(() => breakdown.value.some((column) => column.seasonal !== null));
+const hasAdjustment = computed(() => breakdown.value.some((column) => column.hasAdjustment));
 </script>
 
 <template>
@@ -193,7 +218,9 @@ const hasSeasonal = computed(() => breakdown.value.some((column) => column.seaso
         <div class="flex flex-wrap items-baseline gap-3 border-b border-stone-200 bg-stone-50 px-3 py-2.5">
             <h3 class="m-0 text-[13px] font-semibold">{{ isDay ? "日ごと" : "月ごと" }}の予測の内訳</h3>
             <span class="text-[11px] text-stone-500">{{
-                isDay ? "予測 ＝ 基準平均日販（× 季節係数）＋ イベントで増やした数（イベントの倍率で増やした分）" : "予測 ＝ 基準平均日販 × 日数（× 季節係数）＋ イベントで増やした数"
+                isDay
+                    ? `予測 ＝ 基準平均日販（× 季節係数）＋ イベントで増やした数（イベントの倍率で増やした分）${hasAdjustment ? "＋ 補正で増減した数（それまでの予測 ×（倍率 − 1））" : ""}`
+                    : `予測 ＝ 基準平均日販 × 日数（× 季節係数）＋ イベントで増やした数${hasAdjustment ? "＋ 補正で増減した数" : ""}`
             }}</span>
         </div>
         <div class="overflow-x-auto">
@@ -232,6 +259,19 @@ const hasSeasonal = computed(() => breakdown.value.some((column) => column.seaso
                             {{ column.eventText }}
                         </td>
                     </tr>
+                    <tr v-if="hasAdjustment">
+                        <th scope="row" class="text-left font-normal whitespace-nowrap text-stone-600">補正</th>
+                        <td
+                            v-for="column in breakdown"
+                            :key="column.key"
+                            class="text-right whitespace-nowrap"
+                            :class="column.hasAdjustment ? 'font-medium text-stone-900' : 'text-stone-400'"
+                            :title="column.adjustmentTitle || undefined"
+                            data-testid="breakdown-adjustment"
+                        >
+                            {{ column.adjustmentText }}
+                        </td>
+                    </tr>
                     <tr>
                         <th scope="row" class="text-left font-semibold">予測</th>
                         <td v-for="column in breakdown" :key="column.key" class="text-right font-bold" data-testid="breakdown-total">{{ column.total }}</td>
@@ -243,6 +283,7 @@ const hasSeasonal = computed(() => breakdown.value.some((column) => column.seaso
             <template v-if="hasSeasonal">季節係数は<RouterLink to="/seasonal-factors" class="text-stone-600">季節係数</RouterLink>の画面で直せます。</template>
             <template v-else>季節係数は登録していないため掛けていません（<RouterLink to="/seasonal-factors" class="text-stone-600">季節係数を登録する</RouterLink>）。</template>
             イベントの倍率は <RouterLink to="/sales-events" class="text-stone-600">イベント</RouterLink> の画面で直せます。
+            <template v-if="hasAdjustment">補正は、この画面の「予測の補正」で変えられます。</template>
         </p>
     </div>
 </template>

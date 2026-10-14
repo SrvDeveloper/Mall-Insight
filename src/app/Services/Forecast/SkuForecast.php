@@ -8,6 +8,7 @@ use App\Models\Sku;
  * SKU1件の需要予測。販売実績を取り込んだチャネルのうち、そのSKUを売っているチャネルごとに予測し、予測できたチャネルを合計する
  * （決定記録 K-038・K-042）。
  * 予測できたチャネルが1つも無ければ、基準平均日販と月別の予測は null。一部のチャネルだけ予測できたときは isPartial。
+ * 月別の予測は、チャネルの月を足したもの（手動での補正 B-109 の後の数）で、チャネルごとの月を parts に持つ。
  */
 final readonly class SkuForecast
 {
@@ -37,6 +38,8 @@ final readonly class SkuForecast
                 array_sum(array_map(fn (ChannelForecast $channel): float => $channel->monthly[$index]->quantity, $predictable)),
                 array_merge(...array_map(fn (ChannelForecast $channel): array => $channel->monthly[$index]->events, $predictable)),
                 $month->seasonalFactor,
+                adjustmentQuantity: array_sum(array_map(fn (ChannelForecast $channel): float => $channel->monthly[$index]->adjustmentQuantity, $predictable)),
+                parts: array_map(fn (ChannelForecast $channel): MonthlyDemand => $channel->monthly[$index], $predictable),
             ),
             $predictable[0]->monthly,
             array_keys($predictable[0]->monthly),

@@ -9,8 +9,8 @@ import type { ForecastTimelineColumn, ForecastTimelineResponse, SalesUnit } from
  * 月・日ごとに、過去は販売実績、今月（今日）から先は需要予測を、モールごとの積み上げ棒で出す。需要予測は斜線で、今月は前日までの
  * 販売実績の上に残りの予測を積む（今月の予測は1か月分、K-052）。過去の月・日には予測し直した数を横線で重ね、今日の位置に点線を引く。
  * 日ごとは、上にイベントの期間の帯を出し、土日と欠品した日の地を変え、見出しは今日と毎週月曜（今日の前後3日の月曜は出さない）に出す。
- * 月・日にマウスを乗せる（またはフォーカスする）と、その月・日の内訳をグラフの上に出す。イベントで増やした予測は、普段の予測と
- * イベントで増やした数に分けて出す（原則4）。
+ * 月・日にマウスを乗せる（またはフォーカスする）と、その月・日の内訳をグラフの上に出す。イベントで増やした予測・手動で補正した予測は、
+ * 普段の予測とイベントで増やした数・補正で増減した数に分けて出す（原則4）。
  * 棒の下に、過去の月・日の欠品率（欠品した日数÷欠品かを判定できた日数、SKU・チャネルごと）を折れ線で出す。販売実績が少ないのが
  * 欠品のせいかを、販売実績と並べて確かめるため。ツールチップには、欠品したSKUの数と欠品日数を出す。在庫の記録が無い期間は線を引かない。
  */
@@ -272,10 +272,16 @@ const tooltip = computed(() => {
             }
             const forecast = series.forecast[index];
             rows.push({ label: `${labelOf(channel)} の予測`, value: forecast === null || forecast === undefined ? "予測できません" : props.formatValue(forecast), tone: "normal" });
-            const event = series.event[index];
-            if (forecast !== null && forecast !== undefined && event !== null && event !== undefined && event > 0) {
-                rows.push({ label: "普段の予測", value: props.formatValue(forecast - event), tone: "sub" });
-                rows.push({ label: "イベントで増やした数", value: `+${props.formatValue(event)}`, tone: "sub" });
+            const event = series.event[index] ?? 0;
+            const adjustment = series.adjustment[index] ?? 0;
+            if (forecast !== null && forecast !== undefined && (event > 0 || adjustment !== 0)) {
+                rows.push({ label: "普段の予測", value: props.formatValue(forecast - event - adjustment), tone: "sub" });
+                if (event > 0) {
+                    rows.push({ label: "イベントで増やした数", value: `+${props.formatValue(event)}`, tone: "sub" });
+                }
+                if (adjustment !== 0) {
+                    rows.push({ label: "補正で増減した数", value: `${adjustment > 0 ? "+" : "−"}${props.formatValue(Math.abs(adjustment))}`, tone: "sub" });
+                }
             }
         }
     }

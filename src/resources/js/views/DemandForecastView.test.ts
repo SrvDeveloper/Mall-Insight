@@ -60,6 +60,35 @@ describe("DemandForecastView", () => {
         wrapper.unmount();
     });
 
+    it("marks the items with a manual adjustment on the channels shown", async () => {
+        const response = timeline();
+        response.meta.adjustments = [
+            {
+                id: 1,
+                item_no: "fl-01",
+                channel: "amazon",
+                channel_label: "Amazon",
+                starts_on: "2026-11",
+                ends_on: null,
+                rate_percent: 120,
+                reason: "広告を強める",
+                status: "scheduled",
+                created_at: null,
+                cancelled_at: null,
+            },
+        ];
+        vi.mocked(fetchForecastTimeline).mockResolvedValue(response);
+        const { wrapper, router } = await mountView();
+
+        expect(wrapper.findAll('[data-testid="rank-adjusted"]')).toHaveLength(1);
+        expect(wrapper.find('[data-testid="rank-fl-01"] [data-testid="rank-adjusted"]').attributes("title")).toBe("予測の補正：Amazon 2026/11〜 120%");
+        // BOSS だけを見ているときは、Amazon の補正の札を出さない
+        await router.push({ query: { scope: "boss" } });
+        await flushPromises();
+        expect(wrapper.find('[data-testid="rank-adjusted"]').exists()).toBe(false);
+        wrapper.unmount();
+    });
+
     it("switches the mall, the measure, the forecast to compare and the filter in the URL", async () => {
         const { wrapper, router } = await mountView();
 
