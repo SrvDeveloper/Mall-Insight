@@ -12,7 +12,7 @@ import type { ForecastTimelineColumn, ForecastTimelineResponse, SalesUnit } from
  * 月・日にマウスを乗せる（またはフォーカスする）と、その月・日の内訳をグラフの上に出す。イベントで増やした予測・手動で補正した予測は、
  * 普段の予測とイベントで増やした数・補正で増減した数に分けて出す（原則4）。
  * 棒の下に、過去の月・日の欠品率（欠品した日数÷欠品かを判定できた日数、SKU・チャネルごと）を折れ線で出す。販売実績が少ないのが
- * 欠品のせいかを、販売実績と並べて確かめるため。ツールチップには、欠品したSKUの数と欠品日数を出す。在庫の記録が無い期間は線を引かない。
+ * 欠品のせいかを、販売実績と並べて確かめるため。ツールチップには、欠品したSKUの数と欠品日数を出す。在庫の記録が無い期間は線を引かず、灰色の斜線で塗る。
  */
 
 const props = defineProps<{
@@ -114,10 +114,33 @@ const stockoutLine = computed(() => {
             })),
     };
 });
-/** 在庫の記録より前の過去の月・日（欠品率を出せない）。3列以上あれば、その範囲に「在庫の記録なし」と出す。 */
-const stockoutGap = computed(() => {
-    const first = stockoutRates.value.findIndex((rate) => rate !== null);
-    return first >= 3 ? { left: `${AXIS}px`, width: `calc((100% - ${AXIS}px) * ${(first / props.columns.length).toFixed(4)})`, top: "4px", height: `${STOCKOUT_HEIGHT}px` } : null;
+/**
+ * 在庫の記録が無い過去の月・日（欠品率を出せない）の範囲。続いた月・日をまとめ、灰色の斜線で塗る。3列以上あれば「在庫の記録なし」と添える。
+ */
+const stockoutGaps = computed(() => {
+    const count = props.columns.length;
+    const gaps: { first: number; last: number }[] = [];
+    props.columns.forEach((column, index) => {
+        if (column.kind !== "past" || stockoutRates.value[index] !== null) {
+            return;
+        }
+        const last = gaps.at(-1);
+        if (last && last.last === index - 1) {
+            last.last = index;
+        } else {
+            gaps.push({ first: index, last: index });
+        }
+    });
+    return gaps.map((gap) => ({
+        key: gap.first,
+        showLabel: gap.last - gap.first + 1 >= 3,
+        style: {
+            left: `calc(${AXIS}px + (100% - ${AXIS}px) * ${(gap.first / count).toFixed(4)})`,
+            width: `calc((100% - ${AXIS}px) * ${((gap.last - gap.first + 1) / count).toFixed(4)})`,
+            top: "4px",
+            height: `${STOCKOUT_HEIGHT}px`,
+        },
+    }));
 });
 const formatPercent = (rate: number): string => `${Math.round(rate * 1000) / 10}%`;
 
@@ -406,8 +429,13 @@ const tooltip = computed(() => {
                     @mouseenter="hovered = index"
                 />
                 <span class="pointer-events-none absolute right-0 h-px bg-stone-200" :style="{ bottom: '0px', left: `${AXIS}px` }" />
-                <span v-if="stockoutGap" class="pointer-events-none absolute z-[2] flex items-center justify-center text-[10px] text-stone-400" :style="stockoutGap" data-testid="stockout-gap"
-                    >在庫の記録なし</span
+                <span
+                    v-for="gap in stockoutGaps"
+                    :key="gap.key"
+                    class="hatch-unknown pointer-events-none absolute z-[2] flex items-center justify-center border-x border-white text-[10px] text-stone-500"
+                    :style="gap.style"
+                    data-testid="stockout-gap"
+                    ><span v-if="gap.showLabel" class="rounded bg-white/85 px-1.5 py-px">在庫の記録なし</span></span
                 >
                 <svg
                     class="pointer-events-none absolute z-[2] overflow-visible"
@@ -456,5 +484,8 @@ const tooltip = computed(() => {
 }
 .hatch-amazon {
     background: repeating-linear-gradient(135deg, rgba(235, 104, 52, 0.62) 0 3px, rgba(235, 104, 52, 0.2) 3px 6px);
+}
+.hatch-unknown {
+    background: repeating-linear-gradient(135deg, rgba(120, 113, 108, 0.28) 0 2px, rgba(120, 113, 108, 0.1) 2px 6px);
 }
 </style>

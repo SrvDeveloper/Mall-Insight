@@ -60,6 +60,24 @@ describe("DemandForecastView", () => {
         wrapper.unmount();
     });
 
+    it("fills the months without stock records with gray hatching in the stockout lane", async () => {
+        const response = timeline();
+        // fl-01 は、過去12か月のうち最初の5か月に在庫の記録が無い
+        for (const data of Object.values(response.data[1]!.skus[0]!.channels)) {
+            data.stockout = data.stockout.map((value, index) => (index < 5 ? null : value));
+            data.stockout_known = data.stockout_known.map((value, index) => (index < 5 ? null : value));
+        }
+        vi.mocked(fetchForecastTimeline).mockResolvedValue(response);
+        const { wrapper } = await mountView();
+
+        const gaps = wrapper.findAll('[data-testid="stockout-gap"]');
+        expect(gaps).toHaveLength(1);
+        expect(gaps[0]!.classes()).toContain("hatch-unknown");
+        expect(gaps[0]!.text()).toBe("在庫の記録なし");
+        expect(gaps[0]!.attributes("style")).toContain("width: calc(0.2083 * (100% - 56px))");
+        wrapper.unmount();
+    });
+
     it("marks the items with a manual adjustment on the channels shown", async () => {
         const response = timeline();
         response.meta.adjustments = [
