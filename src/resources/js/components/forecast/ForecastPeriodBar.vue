@@ -193,6 +193,9 @@ const offsetLabel = computed(() => OFFSETS.find((option) => option.value === pro
             ><span aria-hidden="true" class="hatch-boss size-3 rounded-[3px]" /><span aria-hidden="true" class="hatch-amazon -ml-1 size-3 rounded-[3px]" />需要予測（斜線）</span
         >
         <span class="inline-flex items-center gap-1.5"><span aria-hidden="true" class="h-[3px] w-3.5 rounded-sm bg-stone-900" />予測し直した数（過去）</span>
+        <span class="inline-flex items-center gap-1.5" data-testid="legend-stockout"
+            ><span aria-hidden="true" class="h-0.5 w-3.5 rounded-sm bg-amber-600" />欠品率（下の段。欠品した日数 ÷ 在庫の記録がある日数、SKUごと）</span
+        >
         <template v-if="isDay">
             <span class="inline-flex items-center gap-1.5"><span aria-hidden="true" class="size-3 rounded-[3px] border border-amber-500 bg-amber-100" />欠品の日（差異に数えない）</span>
             <span class="inline-flex items-center gap-1.5"><span aria-hidden="true" class="size-3 rounded-[3px] bg-stone-100" />土日</span>

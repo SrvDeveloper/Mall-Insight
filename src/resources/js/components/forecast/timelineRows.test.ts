@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnEvents, forecastChartFormats, formatFigure, formatVariance, timelineFigures, timelineItems, timelineLabels } from "@/components/forecast/timelineRows";
+import { columnEvents, forecastChartFormats, formatFigure, formatVariance, stockoutRate, timelineFigures, timelineItems, timelineLabels } from "@/components/forecast/timelineRows";
 import { channel, dayColumns, monthColumns, sku, timeline } from "@/views/forecastTimeline.fixture";
 
 describe("timelineRows", () => {
@@ -53,6 +53,31 @@ describe("timelineRows", () => {
         expect(amounts.replayed[1]).toBe(10000);
         expect(amounts.forecast[4]).toBe(10000);
         expect(amounts.variance[1]).toBe(0);
+    });
+
+    it("counts the stockout days against the days the stock records cover, for each channel and in total", () => {
+        const columns = monthColumns();
+        // 1月目：BOSS は30日のうち6日欠品、Amazon は欠品なし。2月目：在庫の記録が15日分だけで、BOSS は3日欠品。3月目：在庫の記録が無い
+        const boss = channel(
+            columns,
+            { actual: 10, replayed: 10, forecast: 10 },
+            { stockout: [6, 3, null, ...columns.slice(3).map(() => null)], stockout_known: [30, 15, null, ...columns.slice(3).map(() => null)] },
+        );
+        const amazon = channel(
+            columns,
+            { actual: 10, replayed: 10, forecast: 10 },
+            { stockout: [0, 0, null, ...columns.slice(3).map(() => null)], stockout_known: [30, 15, null, ...columns.slice(3).map(() => null)] },
+        );
+        const figures = timelineFigures([sku("a", { boss, amazon })], columns, "total", "quantity", "month");
+
+        expect(figures.stockouts[0]).toEqual({ skus: 1, knownSkus: 2, days: 6, knownDays: 60 });
+        expect(stockoutRate(figures.stockouts[0])).toBeCloseTo(0.1);
+        expect(stockoutRate(figures.stockouts[1])).toBeCloseTo(0.1);
+        expect(stockoutRate(figures.stockouts[2])).toBeNull();
+        expect(figures.channels.boss!.stockouts[0]).toEqual({ skus: 1, knownSkus: 1, days: 6, knownDays: 30 });
+        expect(stockoutRate(figures.channels.amazon!.stockouts[0])).toBe(0);
+        // BOSS だけなら BOSS の欠品率
+        expect(stockoutRate(timelineFigures([sku("a", { boss, amazon })], columns, "boss", "quantity", "month").stockouts[1])).toBeCloseTo(0.2);
     });
 
     it("keeps how much of the forecast the events added for each channel", () => {

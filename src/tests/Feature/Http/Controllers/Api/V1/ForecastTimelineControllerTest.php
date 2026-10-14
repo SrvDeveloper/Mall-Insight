@@ -115,6 +115,8 @@ class ForecastTimelineControllerTest extends TestCase
         $this->assertSame(['2026-09' => null, '2026-10' => 0.0, '2026-11' => 40.0], $this->at($json, $boss['event'], ['2026-09', '2026-10', '2026-11']));
         // 欠品した日数。在庫の記録が無い月は分からない
         $this->assertSame(['2026-08' => null, '2026-09' => 3.0, '2026-10' => 0.0], $this->at($json, $boss['stockout'], ['2026-08', '2026-09', '2026-10']));
+        // 欠品かを判定できた日数。9月は在庫の記録がある20日から、今月は前日（6日）まで
+        $this->assertSame(['2026-08' => null, '2026-09' => 11.0, '2026-10' => 6.0], $this->at($json, $boss['stockout_known'], ['2026-08', '2026-09', '2026-10']));
 
         // Amazon の販売実績を取り込んでいなければ、販売実績も予測し直した数も「—」
         $amazon = collect($json['data'][0]['skus'])->firstWhere('sku_code', 'fl-01-2')['channels']['amazon'];
@@ -137,6 +139,9 @@ class ForecastTimelineControllerTest extends TestCase
 
     public function test_lines_up_days_with_the_daily_forecast_and_the_daily_share_of_the_forecast_made_again(): void
     {
+        Inventory::create(['stock_date' => '2026-09-20', 'sku_id' => $this->sku->id, 'warehouse' => 'boss_own', 'quantity' => 0]);
+        Inventory::create(['stock_date' => '2026-09-23', 'sku_id' => $this->sku->id, 'warehouse' => 'boss_own', 'quantity' => 5]);
+
         $json = $this->getJson('/api/v1/demand-forecasts/timeline?unit=day')
             ->assertOk()
             ->assertJsonPath('meta.unit', 'day')
@@ -154,6 +159,10 @@ class ForecastTimelineControllerTest extends TestCase
         $this->assertSame(['2026-09-07' => null, '2026-09-10' => null, '2026-10-06' => null, '2026-10-07' => 2.0, '2026-11-03' => 2.0, '2026-11-04' => 12.0], $this->at($json, $boss['forecast'], $days));
         // そのうちイベントで増やした数（セールの日は普段の2個に10個を足す）
         $this->assertSame(['2026-10-06' => null, '2026-11-03' => 0.0, '2026-11-04' => 10.0], $this->at($json, $boss['event'], ['2026-10-06', '2026-11-03', '2026-11-04']));
+        // 欠品したか。在庫の記録より前と、今日から先は分からない
+        $stockoutDays = ['2026-09-19', '2026-09-20', '2026-09-23', '2026-10-06', '2026-10-07'];
+        $this->assertSame(['2026-09-19' => null, '2026-09-20' => true, '2026-09-23' => false, '2026-10-06' => false, '2026-10-07' => null], $this->at($json, $boss['stockout'], $stockoutDays));
+        $this->assertSame(['2026-09-19' => null, '2026-09-20' => 1.0, '2026-09-23' => 1.0, '2026-10-06' => 1.0, '2026-10-07' => null], $this->at($json, $boss['stockout_known'], $stockoutDays));
 
         $this->getJson('/api/v1/demand-forecasts/timeline?unit=day&from=2026-10-01&to=2027-01-10')->assertUnprocessable()->assertJsonPath('errors.to.0', '日ごとの予測は、今日から90日先までです。');
         $this->getJson('/api/v1/demand-forecasts/timeline?unit=day&from=2026-10-10&to=2026-10-01')->assertUnprocessable()->assertJsonValidationErrors('to');

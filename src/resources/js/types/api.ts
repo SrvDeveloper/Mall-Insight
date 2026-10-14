@@ -343,6 +343,8 @@ export interface ForecastTimelineChannel {
     actual_amount: (number | null)[];
     /** 欠品（月ごとは欠品した日数、日ごとは欠品したか）。在庫の記録が無ければ null */
     stockout: (number | boolean | null)[];
+    /** 在庫の記録で欠品かを判定できた日数（日ごとは1）。在庫の記録が無ければ null */
+    stockout_known: (number | null)[];
     /** 過去の月・日の、予測し直した数 */
     replayed: (number | null)[];
     /** 今月（今日）から先の需要予測 */

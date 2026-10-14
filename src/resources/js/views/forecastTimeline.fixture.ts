@@ -31,6 +31,7 @@ export function channel(
         actual: columns.map((column) => (column.kind === "future" ? null : column.kind === "current" ? values.actual / 2 : values.actual)),
         actual_amount: columns.map((column) => (column.kind === "future" ? null : (column.kind === "current" ? values.actual / 2 : values.actual) * 1000)),
         stockout: columns.map((column) => (column.kind === "future" ? null : 0)),
+        stockout_known: columns.map((column) => (column.kind === "future" ? null : column.days)),
         replayed: columns.map((column) => (column.kind === "past" ? values.replayed : null)),
         forecast: columns.map((column) => (column.kind === "past" ? null : values.forecast)),
         event: columns.map((column) => (column.kind === "past" ? null : 0)),

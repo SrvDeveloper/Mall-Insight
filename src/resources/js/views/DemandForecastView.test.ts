@@ -106,6 +106,16 @@ describe("DemandForecastView", () => {
         expect(wrapper.findAll('[data-testid="chart-band"]')[0]!.attributes("style")).toContain("background: rgb(250, 250, 249)");
         expect(wrapper.findAll('[data-testid="figure-variance"]')[1]!.text()).toBe("欠品");
 
+        // 棒の下に欠品率の折れ線を出し、ツールチップに欠品したSKUの数を出す
+        expect(wrapper.find('[data-testid="stockout-lane"]').exists()).toBe(true);
+        expect(wrapper.findAll('[data-testid="stockout-line"]')).toHaveLength(1);
+        // SVG は left・right だけでは横に伸びないため、幅を指定してグラフの幅に合わせる
+        expect(wrapper.find('[data-testid="stockout-lane"] svg').attributes("style")).toContain("width: calc(100% - 56px)");
+        await wrapper.findAll('[data-testid="chart-band"]')[1]!.trigger("mouseenter");
+        const rows = wrapper.findAll('[data-testid="chart-tooltip"] p').map((row) => row.text());
+        expect(rows).toEqual(expect.arrayContaining(["差異欠品の日は数えない", "欠品率100%", "BOSS の欠品したSKU1 / 1 SKU", "Amazon の欠品したSKU1 / 1 SKU"]));
+        await wrapper.findAll('[data-testid="chart-band"]')[1]!.trigger("blur");
+
         await wrapper.find('[data-testid="period-button"]').trigger("click");
         await wrapper.find('[data-testid="period-d14"]').trigger("click");
         await flushPromises();
