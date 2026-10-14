@@ -230,7 +230,7 @@ const isRestrained = (candidate: number | null, raw: number | null): boolean => 
                                 <tr>
                                     <th scope="col" class="text-left">品番</th>
                                     <th scope="col" class="text-right">過去の期間<span class="block text-[10px] font-normal text-stone-400">普段なら→売れた数</span></th>
-                                    <th scope="col" class="text-right">候補</th>
+                                    <th scope="col" class="pr-[50px]! text-right">候補</th>
                                     <th scope="col" class="w-32 text-right">使う倍率<span class="block text-[10px] font-normal text-stone-400">空欄は候補</span></th>
                                     <th scope="col" class="text-right">普段の予測<span class="block text-[10px] font-normal text-stone-400">この期間</span></th>
                                     <th scope="col" class="text-right">増える数<span class="block text-[10px] font-normal text-stone-400">保存した倍率で計算</span></th>
@@ -246,22 +246,29 @@ const isRestrained = (candidate: number | null, raw: number | null): boolean => 
                                         <template v-if="item.past_expected !== null">{{ formatCount(item.past_expected) }}→{{ formatCount(item.past_actual) }}</template>
                                         <template v-else>—</template>
                                     </td>
-                                    <td class="text-right whitespace-nowrap tabular-nums" :class="item.candidate === null ? 'text-stone-300' : 'text-stone-700'" data-testid="candidate-value">
-                                        {{ formatMultiplier(item.candidate) }}
-                                        <span
-                                            v-if="isRestrained(item.candidate, item.candidate_raw)"
-                                            class="ml-1 text-[10px] text-stone-400"
-                                            :title="`過去の期間では ${formatMultiplier(item.candidate_raw)}。根拠の回数が少ないため、増える分を控えめにしています`"
-                                            data-testid="candidate-raw"
-                                            >←{{ formatMultiplier(item.candidate_raw) }}</span
-                                        >
-                                        <span
-                                            v-if="item.uses_overall"
-                                            class="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500"
-                                            :title="`過去の期間で普段なら売れた数が${detail.meta.min_expected}個未満のため、全体の倍率を使います`"
-                                            data-testid="uses-overall"
-                                            >全体</span
-                                        >
+                                    <td class="whitespace-nowrap tabular-nums" :class="item.candidate === null ? 'text-stone-300' : 'text-stone-700'" data-testid="candidate-value">
+                                        <!-- 「全体」の札の場所をどの行にも取り、倍率の右端をそろえる。控える前の倍率は下に出す -->
+                                        <span class="flex items-start justify-end gap-1.5">
+                                            <span class="flex flex-col items-end">
+                                                <span>{{ formatMultiplier(item.candidate) }}</span>
+                                                <span
+                                                    v-if="isRestrained(item.candidate, item.candidate_raw)"
+                                                    class="text-[10px] leading-tight text-stone-400"
+                                                    :title="`過去の期間では ${formatMultiplier(item.candidate_raw)}。根拠の回数が少ないため、増える分を控えめにしています`"
+                                                    data-testid="candidate-raw"
+                                                    >←{{ formatMultiplier(item.candidate_raw) }}</span
+                                                >
+                                            </span>
+                                            <span class="inline-flex w-7 shrink-0 justify-start pt-px">
+                                                <span
+                                                    v-if="item.uses_overall"
+                                                    class="rounded bg-stone-100 px-1 text-[10px] text-stone-500"
+                                                    :title="`過去の期間で普段なら売れた数が${detail.meta.min_expected}個未満のため、全体の倍率を使います`"
+                                                    data-testid="uses-overall"
+                                                    >全体</span
+                                                >
+                                            </span>
+                                        </span>
                                     </td>
                                     <td class="text-right">
                                         <input
