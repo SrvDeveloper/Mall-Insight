@@ -3,6 +3,7 @@ import { computed, onMounted, ref, shallowRef, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { ApiError } from "@/api/client";
 import { fetchForecastBacktest, fetchForecastBacktests, runForecastBacktest } from "@/api/forecastBacktests";
+import ForecastSnapshotPanel from "@/components/forecastAccuracy/ForecastSnapshotPanel.vue";
 import { bestMethod, biasLabel, evaluatedMonths, formatBias, formatCount, formatWape, measuredMethods, originLabel } from "@/components/forecastAccuracy/accuracyFormat";
 import { formatDateTime } from "@/components/salesTarget/format";
 import type { BacktestHorizon, ForecastBacktest, ForecastBacktestSummaryResponse } from "@/types/api";
@@ -16,6 +17,7 @@ import type { BacktestHorizon, ForecastBacktest, ForecastBacktestSummaryResponse
  * 選んだ記録・何か月先・チャネルは URL に持たせる。
  * 方式ごとに、品番の合計で比べた外れ率を添え、イベントの日と普段の日に分けた外れ率・偏りを並べる（B-133、K-124・K-125）。
  * イベントの補正が、イベントの日を当てているか、普段の日を崩していないかを確かめるため。分ける前に測った記録では「—」とする。
+ * 画面の下に、実際に出した予測（毎月1日に保存した版、B-108・K-136）の答え合わせを出す。
  */
 
 type Channel = "total" | "boss" | "amazon";
@@ -397,5 +399,7 @@ const origins = computed(() => result.value?.data.origins ?? []);
                 </p>
             </section>
         </template>
+
+        <ForecastSnapshotPanel :horizon="horizon" :channel="channel" />
     </div>
 </template>

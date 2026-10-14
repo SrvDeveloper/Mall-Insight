@@ -908,6 +908,41 @@ export interface ForecastBacktestSummaryResponse {
     meta: { backtest: ForecastBacktest; horizon: BacktestHorizon; channel: "total" | "boss" | "amazon" };
 }
 
+/** 保存した需要予測の版（B-108、K-136）の答え合わせ。補正の後（実際に出した予測）と補正の前に分ける。販売実績が0なら率は null。 */
+export interface SnapshotMetrics {
+    /** 比べたSKU・チャネルの数と、そのうち補正を掛けていた数 */
+    evaluated: number;
+    adjusted: number;
+    actual: number;
+    forecast: number;
+    wape: number | null;
+    item_wape: number | null;
+    bias: number | null;
+    unadjusted_forecast: number;
+    unadjusted_wape: number | null;
+    unadjusted_item_wape: number | null;
+    unadjusted_bias: number | null;
+}
+
+/** 保存した需要予測の版。 */
+export interface ForecastSnapshot {
+    id: number;
+    taken_at: string;
+    /** 予測の開始日（YYYY-MM-DD）。この月から12か月を予測している */
+    forecast_from: string;
+    trigger: "schedule" | "manual";
+    trigger_label: string;
+    created_by: string | null;
+    check_month_offset: number;
+    /** チャネルごとの、予測に使った販売実績の期間 */
+    channels: { channel: "boss" | "amazon"; from: string | null; to: string | null }[];
+    item_count: number;
+    sku_count: number;
+    adjustment_count: number;
+    /** 何か月先ごとの答え合わせ。まだ答え合わせできないチャネルは null */
+    evaluations: Partial<Record<BacktestHorizon, { months: string[]; available_from: string; channels: Record<"total" | "boss" | "amazon", SnapshotMetrics | null> }>>;
+}
+
 /** イベント（B-129）の、今日から見た状態。 */
 export type SalesEventStatus = "upcoming" | "ongoing" | "ended";
 

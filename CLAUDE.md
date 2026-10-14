@@ -32,7 +32,8 @@ php artisan dev                  # ローカル開発サーバーの起動（ser
 php artisan migrate              # マイグレーション実行（.env.exampleではsqliteがデフォルト、devcontainerではMySQL）
 php artisan crosswalker:sync-items   # CrossWalkerから品番・SKUを取得（CROSSWALKER_MOCK=true ならサンプルを使う）
 php artisan zerostockview:sync-inventory   # ZeroStockViewから日次在庫を取得（ZEROSTOCKVIEW_MOCK=true なら生成したサンプルを使う）
-php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得、10時のZeroStockView取得、毎晩3時の期限切れキャッシュの削除）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
+php artisan schedule:work        # 定期実行（毎朝6時のCrossWalker取得、10時のZeroStockView取得、毎晩3時の期限切れキャッシュの削除、毎月1日23時30分の需要予測の版の保存）をローカルで動かす。本番ではcronで schedule:run を毎分実行する
+php artisan forecasts:snapshot   # 今の需要予測を版として保存する（毎月1日に自動で実行。--force でその月の自動保存の版があっても保存する）
 php artisan user:create {email} {name}   # ログインできる利用者を登録する（パスワードは対話で入力。管理画面は B-117 で作る）
 php artisan user:reset-password {email}  # 利用者のパスワードを設定し直す
 php artisan sales-targets:import-excel ../docs/参考/在庫確保販売試算_検証用.xlsx   # 現行Excelから販売目標の初期値を取り込む（一度だけ。登録済みの分は取り込まない）

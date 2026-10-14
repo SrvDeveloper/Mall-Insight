@@ -7,6 +7,7 @@ import { ApiError } from "@/api/client";
 import type { BacktestErrors, BacktestMetrics, ForecastBacktest, ForecastBacktestSummaryResponse } from "@/types/api";
 
 vi.mock("@/api/forecastBacktests", () => ({ fetchForecastBacktests: vi.fn(), fetchForecastBacktest: vi.fn(), runForecastBacktest: vi.fn() }));
+vi.mock("@/api/forecastSnapshots", () => ({ fetchForecastSnapshots: vi.fn(async () => []), saveForecastSnapshot: vi.fn() }));
 
 function run(id: number, measuredAt: string): ForecastBacktest {
     return {
