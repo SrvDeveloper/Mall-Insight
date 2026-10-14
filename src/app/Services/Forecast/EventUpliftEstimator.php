@@ -21,6 +21,8 @@ use Illuminate\Support\Facades\Cache;
  *   販売実績をイベントの初日から最終日まで取り込んでいるチャネルだけで測る。
  * - これからの期間の倍率の候補（EventCandidate）：同じイベントの、終わった過去の期間の新しい方から3回分を合わせて求める（K-114）。
  *   品番ごとに、売れた数の合計÷普段なら売れた数の合計とし、普段なら売れた数の合計が10個未満の品番は対象品番の全体の倍率を使う。
+ *   そのうえで、普段より増える分（倍率－1）を、根拠にした期間の回数 n に応じて n÷(n＋c) 倍に控える（B-135、K-127・K-128。回数が少ないほど、
+ *   前の回の倍率をそのまま当てにしない）。c はチャネルごとの SHRINK_PERIODS。
  * - 担当者が期間の品番の倍率を入れていれば、候補より優先する。予測精度の測定（B-130）では、起点の前に終わったイベントの候補だけを使う。
  */
 class EventUpliftEstimator
@@ -30,6 +32,13 @@ class EventUpliftEstimator
 
     /** 品番の倍率を候補にするのに必要な、過去のイベントで普段なら売れた数の合計。これ未満なら全体の倍率を使う。 */
     public const MIN_EXPECTED = 10.0;
+
+    /**
+     * チャネルごとの、倍率の候補の増える分を控える強さ（根拠の回数 n に対して n÷(n＋この値)、B-135・K-128）。0なら控えない。
+     * Amazon は候補が実際より大きくなりやすく（普段の売れ方が年々伸び、年1回の大型イベントは前年の1回分だけで決まるため）、
+     * BOSS は控えると少なめになるため控えない。
+     */
+    public const SHRINK_PERIODS = ['boss' => 0.0, 'amazon' => 0.5];
 
     /** 終わった期間を測った結果をキャッシュに残す日数（測るのに使うものが変われば、キーが変わって測り直す）。 */
     private const CACHE_DAYS = 30;
@@ -361,17 +370,29 @@ class EventUpliftEstimator
                 $byItem[$itemNo] = ['expected' => $current['expected'] + $values['expected'], 'actual' => $current['actual'] + $values['actual']];
             }
         }
-        $overall = $expected > 0 ? round($actual / $expected, 2) : null;
+        // 増える分を控える割合（根拠の回数が少ないほど小さい）
+        $count = count($basis);
+        $strength = static::SHRINK_PERIODS[$channel->value] ?? 0.0;
+        $shrink = $count + $strength > 0 ? $count / ($count + $strength) : 1.0;
+        $rawOverall = $expected > 0 ? $actual / $expected : null;
+        $overall = $rawOverall === null ? null : round(1 + ($rawOverall - 1) * $shrink, 2);
 
         $items = [];
         foreach ($byItem as $itemNo => $values) {
-            $usesOverall = $values['expected'] < self::MIN_EXPECTED;
-            $multiplier = $usesOverall ? $overall : round($values['actual'] / $values['expected'], 2);
-            if ($multiplier !== null) {
-                $items[$itemNo] = ['multiplier' => $multiplier, 'expected' => $values['expected'], 'actual' => $values['actual'], 'uses_overall' => $usesOverall];
+            if ($rawOverall === null) {
+                continue;
             }
+            $usesOverall = $values['expected'] < self::MIN_EXPECTED;
+            $raw = $usesOverall ? $rawOverall : $values['actual'] / $values['expected'];
+            $items[$itemNo] = [
+                'multiplier' => round(1 + ($raw - 1) * $shrink, 2),
+                'raw' => round($raw, 2),
+                'expected' => $values['expected'],
+                'actual' => $values['actual'],
+                'uses_overall' => $usesOverall,
+            ];
         }
 
-        return new EventCandidate($channel, $basis, $overall, $expected, $actual, $items);
+        return new EventCandidate($channel, $basis, $overall, $expected, $actual, $items, $rawOverall === null ? null : round($rawOverall, 2));
     }
 }

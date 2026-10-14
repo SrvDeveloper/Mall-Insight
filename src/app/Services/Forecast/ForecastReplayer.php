@@ -26,8 +26,8 @@ class ForecastReplayer
     /** 結果をキャッシュに残す日数。 */
     private const CACHE_DAYS = 30;
 
-    /** 計算の方法を変えたら上げる（古いキャッシュを使わないため）。2：モールごとに平均日販を求め、倍率をイベントのモールにだけ掛ける（B-134）。 */
-    private const CACHE_VERSION = 2;
+    /** 計算の方法を変えたら上げる（古いキャッシュを使わないため）。2：モールごとに平均日販を求め、倍率をイベントのモールにだけ掛ける（B-134）。3：倍率の候補を控えめにする（B-135）。 */
+    private const CACHE_VERSION = 3;
 
     public function __construct(private DemandForecaster $forecaster, private EventUpliftEstimator $eventUplifts) {}
 
@@ -68,6 +68,8 @@ class ForecastReplayer
                 $originMonth = $origin->format('Y-m');
                 $keys[$origin->toDateString()] = 'forecast-replay:'.md5((string) json_encode([
                     self::CACHE_VERSION,
+                    // 倍率の候補の控え方を変えたら予測し直す
+                    EventUpliftEstimator::SHRINK_PERIODS,
                     $channel->value,
                     $origin->toDateString(),
                     $range['from']?->toDateString(),

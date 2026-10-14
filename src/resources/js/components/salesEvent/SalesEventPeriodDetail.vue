@@ -120,6 +120,9 @@ const measuredItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)
         return b.ratio - a.ratio || a.item_no.localeCompare(b.item_no);
     });
 const candidateItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem)[]): SalesEventCandidateItem[] => items.filter((item): item is SalesEventCandidateItem => !isMeasured(item));
+
+/** 根拠の回数に応じて、候補を控えめにしたか（B-135、K-127・K-128）。 */
+const isRestrained = (candidate: number | null, raw: number | null): boolean => candidate !== null && raw !== null && Math.abs(candidate - raw) >= 0.005;
 </script>
 
 <template>
@@ -172,6 +175,9 @@ const candidateItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem
                                 <template v-if="channel.overall !== null">
                                     全体の候補 <strong class="text-base text-stone-900">{{ formatMultiplier(channel.overall) }}</strong
                                     >（{{ basisLabel(channel.basis.length) }}で、普段なら {{ formatCount(channel.expected) }}個のところ {{ formatCount(channel.actual) }}個）
+                                    <span v-if="isRestrained(channel.overall, channel.overall_raw)" class="text-xs text-stone-500" data-testid="candidate-restrained"
+                                        >過去の期間では {{ formatMultiplier(channel.overall_raw) }}。根拠が{{ channel.basis.length }}回のため、増える分を控えめにしています。</span
+                                    >
                                 </template>
                                 <span v-else class="font-medium text-amber-700" data-testid="no-candidate"
                                     >{{ basisLabel(0) }}。このイベントに過去の期間を登録するか、使う倍率を入れてください（入れなければ、イベントの日も普段どおりに予測します）。</span
@@ -242,6 +248,13 @@ const candidateItems = (items: (SalesEventCandidateItem | SalesEventMeasuredItem
                                     </td>
                                     <td class="text-right whitespace-nowrap tabular-nums" :class="item.candidate === null ? 'text-stone-300' : 'text-stone-700'" data-testid="candidate-value">
                                         {{ formatMultiplier(item.candidate) }}
+                                        <span
+                                            v-if="isRestrained(item.candidate, item.candidate_raw)"
+                                            class="ml-1 text-[10px] text-stone-400"
+                                            :title="`過去の期間では ${formatMultiplier(item.candidate_raw)}。根拠の回数が少ないため、増える分を控えめにしています`"
+                                            data-testid="candidate-raw"
+                                            >←{{ formatMultiplier(item.candidate_raw) }}</span
+                                        >
                                         <span
                                             v-if="item.uses_overall"
                                             class="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500"

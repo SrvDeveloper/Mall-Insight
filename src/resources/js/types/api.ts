@@ -868,6 +868,8 @@ export interface SalesEventChannelMultiplier {
     label: string;
     kind: "candidate" | "measured";
     multiplier: number | null;
+    /** 根拠の回数に応じて控える前の候補（B-135、K-127・K-128）。終わった期間は null */
+    raw_multiplier: number | null;
     /** 候補を求めた過去の期間の数 */
     basis_count: number;
     /** 担当者が倍率を入れた品番の数 */
@@ -916,6 +918,8 @@ export interface SalesEventCandidateItem {
     brand: string;
     category: string;
     candidate: number | null;
+    /** 根拠の回数に応じて控える前の候補 */
+    candidate_raw: number | null;
     uses_overall: boolean;
     past_expected: number | null;
     past_actual: number | null;
@@ -949,7 +953,19 @@ export interface SalesEventBasis {
 }
 
 export type SalesEventChannelDetail =
-    | { channel: "boss" | "amazon"; label: string; kind: "candidate"; overall: number | null; expected: number; actual: number; basis: SalesEventBasis[]; note: null; items: SalesEventCandidateItem[] }
+    | {
+          channel: "boss" | "amazon";
+          label: string;
+          kind: "candidate";
+          overall: number | null;
+          /** 根拠の回数に応じて控える前の全体の候補 */
+          overall_raw: number | null;
+          expected: number;
+          actual: number;
+          basis: SalesEventBasis[];
+          note: null;
+          items: SalesEventCandidateItem[];
+      }
     | {
           channel: "boss" | "amazon";
           label: string;

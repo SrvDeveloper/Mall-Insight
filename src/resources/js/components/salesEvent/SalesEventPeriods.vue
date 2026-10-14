@@ -258,7 +258,12 @@ const dateInputClass = "h-9 rounded-md border border-stone-300 bg-white px-2 tex
                                         }}</strong>
                                         <template v-if="multiplier.kind === 'candidate'">
                                             <span v-if="multiplier.basis_count === 0" class="ml-1 text-[11px] font-medium text-amber-700">候補なし</span>
-                                            <span v-else class="ml-1 text-[11px] text-stone-400">過去{{ multiplier.basis_count }}回から</span>
+                                            <span v-else class="ml-1 text-[11px] text-stone-400"
+                                                >過去{{ multiplier.basis_count }}回から<template
+                                                    v-if="multiplier.raw_multiplier !== null && multiplier.multiplier !== null && Math.abs(multiplier.raw_multiplier - multiplier.multiplier) >= 0.005"
+                                                    >（控える前 {{ formatMultiplier(multiplier.raw_multiplier) }}）</template
+                                                ></span
+                                            >
                                             <span v-if="multiplier.override_count > 0" class="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-600"
                                                 >{{ multiplier.override_count }}品番は入力</span
                                             >

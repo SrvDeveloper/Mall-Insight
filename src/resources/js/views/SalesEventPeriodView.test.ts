@@ -48,6 +48,25 @@ describe("SalesEventPeriodView", () => {
         wrapper.unmount();
     });
 
+    it("shows the multiplier before restraining a candidate based on few past periods", async () => {
+        const detail = periodDetail();
+        const channel = detail.data.channels[0]!;
+        if (channel.kind === "candidate") {
+            channel.overall = 3.67;
+            channel.overall_raw = 4.67;
+            channel.items[0]!.candidate = 4.33;
+            channel.items[0]!.candidate_raw = 6;
+        }
+        vi.mocked(fetchSalesEventPeriod).mockResolvedValue(detail);
+        const { wrapper } = await mountAt("/sales-events/1/periods/13?mall=rakuten");
+
+        expect(wrapper.find('[data-testid="candidate-restrained"]').text()).toBe("過去の期間では 4.67倍。根拠が2回のため、増える分を控えめにしています。");
+        const raws = wrapper.findAll('[data-testid="candidate-raw"]');
+        expect(raws).toHaveLength(1);
+        expect(raws[0]!.text()).toBe("←6.00倍");
+        wrapper.unmount();
+    });
+
     it("goes back to the event page and the list with the mall", async () => {
         const { wrapper, router } = await mountAt("/sales-events/1/periods/13?mall=rakuten");
 

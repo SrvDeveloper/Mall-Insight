@@ -8,12 +8,13 @@ use App\Enums\Channel;
  * これからのイベント1つ・チャネル1つの、倍率の候補（B-129、K-112）。同じイベントの過去の期間（新しい方から3回まで）の
  * 売れた数の合計÷普段なら売れた数の合計を、品番ごとと、対象品番の全体で求める。
  * 普段なら売れた数が少ない品番は倍率がぶれやすいため、全体の倍率を候補にする。過去のイベントが無ければ候補は無い（overall が null）。
+ * 候補は、根拠の回数に応じて増える分を控えたもの（B-135、K-127・K-128）。rawOverall と items の raw は控える前の倍率。
  */
 final readonly class EventCandidate
 {
     /**
      * @param  list<EventMeasurement>  $basis  候補を求めた過去のイベント（新しい順）
-     * @param  array<string, array{multiplier: float, expected: float, actual: int, uses_overall: bool}>  $items  過去のイベントで測れた品番
+     * @param  array<string, array{multiplier: float, raw: float, expected: float, actual: int, uses_overall: bool}>  $items  過去のイベントで測れた品番
      */
     public function __construct(
         public Channel $channel,
@@ -22,6 +23,7 @@ final readonly class EventCandidate
         public float $expected,
         public int $actual,
         public array $items,
+        public ?float $rawOverall = null,
     ) {}
 
     /**

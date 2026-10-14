@@ -49,6 +49,7 @@ class SalesEventReport
                         'label' => $channel->label(),
                         'kind' => 'measured',
                         'multiplier' => $this->round($measurement?->ratio()),
+                        'raw_multiplier' => null,
                         'basis_count' => 0,
                         'override_count' => 0,
                     ];
@@ -60,6 +61,8 @@ class SalesEventReport
                     'label' => $channel->label(),
                     'kind' => 'candidate',
                     'multiplier' => $candidate->overall,
+                    // 根拠の回数に応じて控える前の倍率（B-135、K-127・K-128）
+                    'raw_multiplier' => $candidate->rawOverall,
                     'basis_count' => count($candidate->basis),
                     'override_count' => $event->multipliers->filter(fn (SalesEventMultiplier $multiplier): bool => $multiplier->channel === $channel)->count(),
                 ];
@@ -139,6 +142,7 @@ class SalesEventReport
                 'brand' => $item->brand,
                 'category' => $item->category,
                 'candidate' => $candidateValue,
+                'candidate_raw' => $candidateValue === null ? null : ($past['raw'] ?? $candidate->rawOverall),
                 'uses_overall' => $candidateValue !== null && $candidate->usesOverall($item->item_no),
                 'past_expected' => $past === null ? null : round($past['expected'], 2),
                 'past_actual' => $past['actual'] ?? null,
@@ -155,6 +159,7 @@ class SalesEventReport
             'label' => $channel->label(),
             'kind' => 'candidate',
             'overall' => $candidate->overall,
+            'overall_raw' => $candidate->rawOverall,
             'expected' => round($candidate->expected, 2),
             'actual' => $candidate->actual,
             'basis' => array_map(fn (EventMeasurement $measurement): array => [

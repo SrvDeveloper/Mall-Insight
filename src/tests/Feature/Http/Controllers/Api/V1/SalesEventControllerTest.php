@@ -54,7 +54,7 @@ class SalesEventControllerTest extends TestCase
     }
 
     /**
-     * BOSS のモール（初期値は楽天市場）の販売実績を1日ずつ入れる。
+     * モール（初期値は楽天市場）の販売実績を1日ずつ入れる。Amazon は Amazon FBA から出荷したものとする。
      *
      * @param  callable(string): int  $quantity  日付（Y-m-d） => 販売数
      */
@@ -64,7 +64,8 @@ class SalesEventControllerTest extends TestCase
         for ($day = CarbonImmutable::parse($from); $day->lte(CarbonImmutable::parse($to)); $day = $day->addDay()) {
             $count = $quantity($day->toDateString());
             if ($count > 0) {
-                $rows[] = ['source' => 'boss', 'source_order_id' => "{$sku->id}-{$mall->value}-{$day->toDateString()}", 'sales_date' => $day->toDateString(), 'mall' => $mall->value, 'sku_id' => $sku->id, 'warehouse' => 'boss_own', 'quantity' => $count, 'amount' => 1000 * $count];
+                $isAmazon = $mall === Mall::Amazon;
+                $rows[] = ['source' => $isAmazon ? 'amazon' : 'boss', 'source_order_id' => "{$sku->id}-{$mall->value}-{$day->toDateString()}", 'sales_date' => $day->toDateString(), 'mall' => $mall->value, 'sku_id' => $sku->id, 'warehouse' => $isAmazon ? 'amazon_fba' : 'boss_own', 'quantity' => $count, 'amount' => 1000 * $count];
             }
         }
         foreach (array_chunk($rows, 500) as $chunk) {
@@ -238,6 +239,32 @@ class SalesEventControllerTest extends TestCase
         // 期間の画面の普段の予測も、楽天市場の分（2個×4日）
         $items = $this->getJson("/api/v1/sales-event-periods/{$upcoming->id}")->assertOk()->json('data.channels.0.items');
         $this->assertSame(['multiplier' => 6, 'usual' => 8, 'extra' => 40], array_intersect_key($items[0], array_flip(['multiplier', 'usual', 'extra'])));
+    }
+
+    public function test_restrains_the_amazon_candidate_based_on_few_past_periods(): void
+    {
+        // Amazon で普段は1日2個、プライムデー（6月・9月の4〜7日）は1日12個（6倍）
+        [$sku] = $this->targetSkus(['fl-01']);
+        $sku->update(['child_asin' => 'B000000001']);
+        $isSale = fn (string $date): bool => $this->isOn($date, '2026-06-04', '2026-06-07') || $this->isOn($date, '2026-09-04', '2026-09-07');
+        $this->sellDaily($sku, '2026-04-01', '2026-10-06', fn (string $date): int => $isSale($date) ? 12 : 2, Mall::Amazon);
+        $this->sale = SalesEvent::factory()->malls([Mall::Amazon])->create(['name' => 'プライムデー']);
+        $this->period('2026-06-04', '2026-06-07');
+        $this->period('2026-09-04', '2026-09-07');
+        $upcoming = $this->period('2026-12-04', '2026-12-07');
+
+        // 根拠は2回のため、増える分（6倍－1）を 2÷(2＋0.5) 倍に控えて5倍。12月は 2個×31日に 2個×（5倍－1）×4日を足す
+        $amazon = $this->getJson('/api/v1/demand-forecasts')->assertOk()->json('data.0.skus.0.channels.0');
+        $this->assertSame('amazon', $amazon['channel']);
+        $december = collect($amazon['monthly'])->firstWhere('month', '2026-12');
+        $this->assertEqualsWithDelta(5.0, $december['events'][0]['multiplier'], 0.0001);
+        $this->assertEqualsWithDelta(62 + 32, $december['quantity'], 0.01);
+
+        // 期間の画面には、控える前の倍率も添える
+        $channel = $this->getJson("/api/v1/sales-event-periods/{$upcoming->id}")->assertOk()->json('data.channels.0');
+        $this->assertSame(['overall' => 5, 'overall_raw' => 6], array_intersect_key($channel, array_flip(['overall', 'overall_raw'])));
+        $this->assertSame(['candidate' => 5, 'candidate_raw' => 6], array_intersect_key($channel['items'][0], array_flip(['candidate', 'candidate_raw'])));
+        $this->getJson("/api/v1/sales-events/{$this->sale->id}")->assertOk()->assertJsonPath('data.next_period.multipliers.0.raw_multiplier', 6)->assertJsonPath('data.next_period.multipliers.0.multiplier', 5);
     }
 
     public function test_uses_the_multiplier_the_staff_entered_for_the_period_instead_of_the_candidate(): void

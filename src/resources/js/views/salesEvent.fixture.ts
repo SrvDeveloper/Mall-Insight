@@ -26,7 +26,17 @@ export function period(id: number, startsOn: string, endsOn: string, status: Sal
         status_label: STATUS_LABELS[status],
         updated_by: "担当者",
         updated_at: null,
-        multipliers: [{ channel: "boss", label: "BOSS", kind: status === "ended" ? "measured" : "candidate", multiplier, basis_count: status === "ended" ? 0 : 2, override_count: 0 }],
+        multipliers: [
+            {
+                channel: "boss",
+                label: "BOSS",
+                kind: status === "ended" ? "measured" : "candidate",
+                multiplier,
+                raw_multiplier: status === "ended" ? null : multiplier,
+                basis_count: status === "ended" ? 0 : 2,
+                override_count: 0,
+            },
+        ],
     };
 }
 
@@ -62,7 +72,7 @@ export const primeDay = withPeriods(
         {
             ...period(41, "2026-07-08", "2026-07-11", "upcoming", 3.2),
             event_id: 3,
-            multipliers: [{ channel: "amazon", label: "Amazon", kind: "candidate", multiplier: 3.2, basis_count: 1, override_count: 0 }],
+            multipliers: [{ channel: "amazon", label: "Amazon", kind: "candidate", multiplier: 3.2, raw_multiplier: 4.3, basis_count: 1, override_count: 0 }],
         },
     ],
     {
@@ -112,6 +122,7 @@ export function periodDetail(override: number | null = null): SalesEventPeriodDe
                     label: "BOSS",
                     kind: "candidate",
                     overall: 4.67,
+                    overall_raw: 4.67,
                     expected: 24,
                     actual: 112,
                     basis: [
@@ -125,6 +136,7 @@ export function periodDetail(override: number | null = null): SalesEventPeriodDe
                             brand: "FEELLIFE",
                             category: "老眼鏡",
                             candidate: 6,
+                            candidate_raw: 6,
                             uses_overall: false,
                             past_expected: 16,
                             past_actual: 96,
@@ -139,6 +151,7 @@ export function periodDetail(override: number | null = null): SalesEventPeriodDe
                             brand: "FEELLIFE",
                             category: "調光老眼鏡",
                             candidate: 4.67,
+                            candidate_raw: 4.67,
                             uses_overall: true,
                             past_expected: 8,
                             past_actual: 16,

@@ -46,6 +46,7 @@ class ForecastBacktestRecorder
                         // イベントの補正（B-129、K-112）：倍率の候補の求め方と、測ったときに登録してあったイベント
                         'event_recent_events' => EventUpliftEstimator::RECENT_EVENTS,
                         'event_min_expected' => EventUpliftEstimator::MIN_EXPECTED,
+                        'event_shrink_periods' => EventUpliftEstimator::SHRINK_PERIODS,
                         'events' => $result['events'],
                         // 季節係数（B-106、K-113）：測ったときに登録してあった品番ごとの係数
                         'seasonal_factors' => $result['seasonal_factors'],
