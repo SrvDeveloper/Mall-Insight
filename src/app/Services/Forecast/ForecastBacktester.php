@@ -5,10 +5,10 @@ namespace App\Services\Forecast;
 use App\Enums\Channel;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
-use App\Models\ItemSelection;
 use App\Models\SalesEventPeriod;
 use App\Services\Actuals\StockoutHistory;
 use App\Services\InventoryTrend\TrendSettings;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 
 /**
@@ -23,7 +23,8 @@ use Carbon\CarbonImmutable;
  *   イベントの補正は、登録したイベントの日を平均日販から除き、起点以降のイベントの日に、起点より前に終わった同じイベントの期間から求めた倍率の候補を掛ける。
  *   担当者が入れた倍率は、後から分かったことで決めた値のため使わない。
  *   季節係数は担当者が登録した今の係数をすべての起点で使う（起点の時点で登録していたかは問わない。係数が当たるかを確かめるため）。
- * - 対象は対象品番（最新の選定）の有効なSKU。チャネル（BOSS・Amazon）ごとに予測と販売実績を比べ、子ASINの無いSKUは Amazon で比べない（K-042）。
+ * - 対象は、チャネルごとにそのチャネルの対象品番（B-136、K-129。Amazon・BOSS が未確定なら全体の対象品番）の有効なSKU。チャネル（BOSS・Amazon）ごとに
+ *   予測と販売実績を比べ、子ASINの無いSKUは Amazon で比べない（K-042）。
  * - すべての方式で予測でき、答え合わせの期間の販売実績を取り込んでいるSKU・チャネル・起点だけを比べる（方式どうしを同じ条件で比べるため）。
  *   比べられなかったものは件数だけ数える。
  * - 答え合わせは取り込んだ販売実績そのもので行う。在庫の履歴が短いため、欠品していた月の販売実績も補正しない。
@@ -40,16 +41,16 @@ class ForecastBacktester
     /** 直近30日の平均（比べるための方式）の日数。 */
     public const RECENT_DAYS = 30;
 
-    public function __construct(private DemandForecaster $forecaster, private StockoutHistory $stockouts, private EventUpliftEstimator $eventUplifts) {}
+    public function __construct(private DemandForecaster $forecaster, private StockoutHistory $stockouts, private EventUpliftEstimator $eventUplifts, private TargetItems $targets) {}
 
     /**
-     * @return array{measured_at: CarbonImmutable, check_month_offset: int, origins: array<string, list<CarbonImmutable>>, item_count: int, sku_count: int, events: list<array<string, mixed>>, seasonal_factors: array<string, array<int, float>>, rows: list<array{horizon: string, method: string, item_no: string, channel: string, origin: string, evaluated: int, skipped: int, actual: float, forecast: float, abs_error: float, event_actual: float, event_forecast: float, event_abs_error: float, normal_actual: float, normal_forecast: float, normal_abs_error: float}>}
+     * @return array{measured_at: CarbonImmutable, check_month_offset: int, origins: array<string, list<CarbonImmutable>>, item_count: int, sku_count: int, events: list<array<string, mixed>>, seasonal_factors: array<string, array<int, float>>, target_items: array<string, list<string>>, rows: list<array{horizon: string, method: string, item_no: string, channel: string, origin: string, evaluated: int, skipped: int, actual: float, forecast: float, abs_error: float, event_actual: float, event_forecast: float, event_abs_error: float, normal_actual: float, normal_forecast: float, normal_abs_error: float}>}
      */
     public function run(CarbonImmutable $now): array
     {
         $today = $now->startOfDay();
         $checkMonthOffset = TrendSettings::current()->checkMonthOffset;
-        $items = $this->forecaster->items(collect(ItemSelection::current()?->items->pluck('item_no')->all() ?? []));
+        $items = $this->forecaster->items(collect($this->targets->all()));
         $skus = $items->flatMap(fn (Item $item) => $item->skus);
         $channelRanges = collect($this->forecaster->channelSalesRanges($today))->filter(fn (array $range): bool => $range['to'] !== null)->values();
 
@@ -89,6 +90,8 @@ class ForecastBacktester
                 'malls' => $event->salesEvent->malls->map(fn ($mall): string => $mall->value)->all(),
             ])->all(),
             'seasonal_factors' => ItemSeasonalFactor::currentFactors($items->pluck('item_no')->all()),
+            // 測ったときの全体・Amazon・BOSS の対象品番（B-136）
+            'target_items' => $this->targets->lists(),
             'rows' => $rows,
         ];
     }
@@ -151,7 +154,12 @@ class ForecastBacktester
                 ];
             }
 
+            // そのチャネルの対象品番だけを比べる（倍率の候補は、どれかの対象品番すべてで測ったものを使う）
+            $channelItemNos = array_flip($this->targets->channelItemNos($channel));
             foreach ($items as $item) {
+                if (! isset($channelItemNos[$item->item_no])) {
+                    continue;
+                }
                 foreach ($item->skus as $sku) {
                     if (! DemandForecaster::sellsOn($sku, $channel)) {
                         continue;

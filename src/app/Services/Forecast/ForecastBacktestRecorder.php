@@ -50,6 +50,7 @@ class ForecastBacktestRecorder
                         'events' => $result['events'],
                         // 季節係数（B-106、K-113）：測ったときに登録してあった品番ごとの係数
                         'seasonal_factors' => $result['seasonal_factors'],
+                        'target_items' => $result['target_items'],
                         'origins' => array_map(fn (array $origins): array => array_map(fn (CarbonImmutable $origin): string => $origin->toDateString(), $origins), $result['origins']),
                     ],
                     'item_count' => $result['item_count'],

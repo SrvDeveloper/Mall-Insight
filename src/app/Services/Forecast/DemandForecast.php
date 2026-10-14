@@ -4,7 +4,6 @@ namespace App\Services\Forecast;
 
 use App\Enums\Channel;
 use App\Models\Item;
-use App\Models\ItemSelection;
 use App\Models\SalesEventPeriod;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -23,7 +22,6 @@ final readonly class DemandForecast
      */
     public function __construct(
         public CarbonImmutable $calculatedAt,
-        public ?ItemSelection $selection,
         public array $channels,
         public CarbonImmutable $forecastFrom,
         public array $items,

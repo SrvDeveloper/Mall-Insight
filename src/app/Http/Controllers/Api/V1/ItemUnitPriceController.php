@@ -6,8 +6,8 @@ use App\Enums\ChangeSource;
 use App\Enums\Channel;
 use App\Http\Controllers\Controller;
 use App\Models\Item;
-use App\Models\ItemSelection;
 use App\Models\ItemUnitPrice;
+use App\Services\ItemSelection\TargetItems;
 use App\Services\Pricing\UnitPriceCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +25,8 @@ class ItemUnitPriceController extends Controller
     {
         $items = Item::query()->with('skus')->orderBy('item_no')->get();
         $catalog = UnitPriceCatalog::build($items, CarbonImmutable::now());
-        $targetItemNos = ItemSelection::current()?->items->pluck('item_no')->all() ?? [];
+        // 全体・Amazon・BOSS のどれかに入っている対象品番（B-136、K-129）
+        $targetItemNos = app(TargetItems::class)->all();
 
         return response()->json([
             'data' => $items->map(function (Item $item) use ($catalog, $targetItemNos): array {

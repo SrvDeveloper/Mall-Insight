@@ -10,6 +10,8 @@ use App\Models\SalesEventPeriod;
 use App\Services\Forecast\DemandForecast;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\Forecast\SkuForecast;
+use App\Services\InventoryTrend\TrendScope;
+use App\Services\ItemSelection\TargetItems;
 use App\Services\Pricing\UnitPriceCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -63,10 +65,13 @@ class DemandForecastController extends Controller
                 'sales_data_to' => $channel['to']?->toDateString(),
             ], $forecast->channels),
             'forecast_from' => $forecast->forecastFrom->toDateString(),
-            'selection' => $forecast->selection === null ? null : [
-                'confirmed_at' => $forecast->selection->confirmed_at->toIso8601String(),
-                'item_count' => $forecast->selection->items->count(),
-            ],
+            'selection' => app(TargetItems::class)->meta(TrendScope::Total),
+            // 全体・Amazon・BOSS ごとの対象品番と説明（B-136、K-129・K-130）。画面で全体・Amazon・BOSS を切り替えたときに、その対象品番だけを出す
+            'target_items' => app(TargetItems::class)->lists(),
+            'target_selections' => array_combine(
+                array_map(fn (TrendScope $scope): string => $scope->value, TrendScope::cases()),
+                array_map(fn (TrendScope $scope): ?array => app(TargetItems::class)->meta($scope), TrendScope::cases()),
+            ),
             'window_weights' => array_map(fn (int $length, float $weight): array => ['length' => $length, 'weight' => $weight], array_keys(DemandForecaster::WINDOW_WEIGHTS), DemandForecaster::WINDOW_WEIGHTS),
             'min_sales_days' => DemandForecaster::MIN_SALES_DAYS,
             // 平均日販から日を除き、これからの日に倍率を掛けたイベントの期間（B-129、K-112・K-114）

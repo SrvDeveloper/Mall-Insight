@@ -84,7 +84,7 @@ export function timeline(unit: SalesUnit = "month"): ForecastTimelineResponse {
                 { channel: "amazon", label: "Amazon", sales_data_from: "2023-01-01", sales_data_to: "2026-10-12" },
             ],
             forecast_from: "2026-10-13",
-            selection: { confirmed_at: "2026-10-01T10:00:00+09:00", item_count: 2 },
+            selection: { scope: "total", confirmed_at: "2026-10-01T10:00:00+09:00", item_count: 2, uses_candidates: false },
             window_weights: [
                 { length: 30, weight: 0.5 },
                 { length: 60, weight: 0.3 },

@@ -99,7 +99,7 @@ export function salesResponse(scope: "total" | "amazon" = "total"): SalesActuals
             calculated_at: "2026-10-07T10:00:00+09:00",
             scope,
             scope_label: scope === "amazon" ? "Amazon" : "全体",
-            selection: { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 2 },
+            selection: { scope: "total", confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 2, uses_candidates: false },
             unit: "month",
             from: "2026-08",
             to: "2026-10",

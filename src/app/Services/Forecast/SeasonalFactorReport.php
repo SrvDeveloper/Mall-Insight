@@ -4,7 +4,7 @@ namespace App\Services\Forecast;
 
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
-use App\Models\ItemSelection;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -161,6 +161,6 @@ class SeasonalFactorReport
      */
     private function targetItems(): Collection
     {
-        return $this->forecaster->items(collect(ItemSelection::current()?->items->pluck('item_no')->all() ?? []));
+        return $this->forecaster->items(collect(app(TargetItems::class)->all()));
     }
 }

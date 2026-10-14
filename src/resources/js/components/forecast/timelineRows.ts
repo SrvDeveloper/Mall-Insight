@@ -165,17 +165,21 @@ export interface TimelineItem {
     skus: { sku: ForecastTimelineSku; figures: TimelineFigures }[];
 }
 
+/** 品番ごとの値。全体・Amazon・BOSS の対象品番（B-136、K-129）に入っている品番だけを出す。 */
 export function timelineItems(response: ForecastTimelineResponse, scope: ForecastScope, measure: ForecastMeasure): TimelineItem[] {
     const { columns, unit } = response.meta;
-    return response.data.map((item) => ({
-        itemNo: item.item_no,
-        brand: item.brand,
-        category: item.category,
-        skuCount: item.skus.length,
-        unpredictableCount: item.skus.filter((sku) => sku.unpredictable_reason_label !== null).length,
-        figures: timelineFigures(item.skus, columns, scope, measure, unit),
-        skus: item.skus.map((sku) => ({ sku, figures: timelineFigures([sku], columns, scope, measure, unit) })),
-    }));
+    const targets = response.meta.target_items?.[scope];
+    return response.data
+        .filter((item) => targets === undefined || targets.includes(item.item_no))
+        .map((item) => ({
+            itemNo: item.item_no,
+            brand: item.brand,
+            category: item.category,
+            skuCount: item.skus.length,
+            unpredictableCount: item.skus.filter((sku) => sku.unpredictable_reason_label !== null).length,
+            figures: timelineFigures(item.skus, columns, scope, measure, unit),
+            skus: item.skus.map((sku) => ({ sku, figures: timelineFigures([sku], columns, scope, measure, unit) })),
+        }));
 }
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];

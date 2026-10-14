@@ -8,10 +8,10 @@ use App\Enums\Mall;
 use App\Enums\Warehouse;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
-use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Services\Actuals\StockoutHistory;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -44,7 +44,7 @@ class DemandForecaster
     /** @var array<string, list<array{0: CarbonImmutable, 1: int}>> 予測の開始日 => 12か月の月の初日と日数 */
     private array $monthCache = [];
 
-    public function __construct(private StockoutHistory $stockouts, private EventUpliftEstimator $eventUplifts) {}
+    public function __construct(private StockoutHistory $stockouts, private EventUpliftEstimator $eventUplifts, private TargetItems $targets) {}
 
     /** 期間の日数 => 重み（合計1）。新しい期間から順に、重ならずに遡る。 */
     public const WINDOW_WEIGHTS = [30 => 0.5, 60 => 0.3, 90 => 0.2];
@@ -55,13 +55,12 @@ class DemandForecaster
     public const MONTHS = 12;
 
     /**
-     * @param  list<string>|null  $itemNos  予測する品番。null なら対象品番（最新の選定）。入荷予定の自動割り振り（K-054）では、対象品番でない品番も予測する
+     * @param  list<string>|null  $itemNos  予測する品番。null なら全体・Amazon・BOSS のどれかの対象品番（B-136、K-129）。入荷予定の自動割り振り（K-054）では、対象品番でない品番も予測する
      */
     public function forecast(CarbonImmutable $now, ?array $itemNos = null): DemandForecast
     {
-        $selection = ItemSelection::current()?->load('items');
         $forecastFrom = $now->startOfDay();
-        $items = $this->items(collect($itemNos ?? $selection?->items->pluck('item_no')->all() ?? []));
+        $items = $this->items(collect($itemNos ?? $this->targets->all()));
         $skuIds = $items->flatMap(fn (Item $item) => $item->skus)->pluck('id')->all();
         $channelRanges = $this->channelSalesRanges($forecastFrom);
         $events = $this->eventUplifts->periods();
@@ -88,7 +87,6 @@ class DemandForecaster
 
         return new DemandForecast(
             calculatedAt: $now,
-            selection: $selection,
             channels: $channelRanges,
             forecastFrom: $forecastFrom,
             items: $items->map(fn (Item $item): array => [

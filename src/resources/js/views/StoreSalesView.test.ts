@@ -260,7 +260,7 @@ describe("StoreSalesView", () => {
 
     it("switches to the target items, quantities and the graph, keeping them in the URL", async () => {
         const response = storeSalesResponse();
-        response.meta.selection = { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1 };
+        response.meta.selection = { scope: "total", confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1, uses_candidates: false };
         vi.mocked(fetchStoreSales).mockResolvedValue(response);
         const { wrapper, router } = await mountView();
 

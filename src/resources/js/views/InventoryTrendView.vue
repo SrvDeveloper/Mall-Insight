@@ -267,10 +267,15 @@ const facts = computed(() => {
         { key: "check", label: "判定する月", value: "", note: "", warn: false },
         {
             key: "selection",
-            label: "対象品番",
+            label: `${meta.scope_label}の対象品番`,
             value: meta.selection ? `${result.value!.data.length}品番・${allSkus.value.length} SKU` : "未確定",
-            note: meta.selection ? `${formatDateTime(meta.selection.confirmed_at)} に確定` : "対象品番の画面で確定してください",
-            warn: !meta.selection,
+            // 未確定のチャネルは、そのチャネルの売上上位の品番を出す（B-136、K-129・K-130）
+            note: meta.selection
+                ? meta.selection.uses_candidates
+                    ? "未確定のため売上上位の品番（対象品番の画面で確定してください）"
+                    : `${formatDateTime(meta.selection.confirmed_at!)} に確定`
+                : "対象品番の画面で確定してください",
+            warn: !meta.selection || meta.selection.uses_candidates,
         },
     ];
 });

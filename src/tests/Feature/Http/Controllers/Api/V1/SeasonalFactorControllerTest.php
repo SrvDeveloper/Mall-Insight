@@ -32,8 +32,11 @@ class SeasonalFactorControllerTest extends TestCase
         $this->travelTo('2026-10-07 09:00:00');
         $item = Item::factory()->create(['item_no' => 'ph5099', 'category' => '調光サングラス']);
         $this->sku = Sku::factory()->create(['item_id' => $item->id, 'sku_code' => 'ph5099-1', 'child_asin' => null]);
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
-        $selection->items()->create(['item_no' => 'ph5099', 'sales_rank' => 1, 'is_candidate' => true]);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07'])];
+        foreach ($selections as $selection) {
+            $selection->items()->create(['item_no' => 'ph5099', 'sales_rank' => 1, 'is_candidate' => true]);
+        }
     }
 
     /**

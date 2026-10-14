@@ -7,7 +7,6 @@ use App\Enums\Mall;
 use App\Enums\Warehouse;
 use App\Http\Controllers\Controller;
 use App\Models\Item;
-use App\Models\ItemSelection;
 use App\Models\Sku;
 use App\Services\Actuals\ActualsReader;
 use App\Services\Actuals\Coverage;
@@ -16,6 +15,7 @@ use App\Services\Actuals\StockoutHistory;
 use App\Services\Actuals\StoreSalesReader;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\InventoryTrend\TrendScope;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,7 +38,7 @@ class ActualController extends Controller
         $unit = $request->enum('unit', SalesUnit::class) ?? SalesUnit::Month;
         $now = CarbonImmutable::now();
         [$from, $to] = $this->period($request, $reader, $unit, $now);
-        $items = $reader->items($request->filled('item_no') ? $request->string('item_no')->toString() : null);
+        $items = $reader->items($request->filled('item_no') ? $request->string('item_no')->toString() : null, $scope);
         $sales = $reader->sales($items, $now, $scope, $unit, $from, $to);
         $ranges = $reader->salesRanges();
 
@@ -88,7 +88,7 @@ class ActualController extends Controller
     public function stock(Request $request, ActualsReader $reader): JsonResponse
     {
         $scope = $this->scope($request);
-        $items = $reader->items();
+        $items = $reader->items(scope: $scope);
         $stock = $reader->stock($items, CarbonImmutable::now(), $scope);
 
         return response()->json([
@@ -199,7 +199,7 @@ class ActualController extends Controller
     }
 
     /**
-     * 対象品番（最新の選定）のSKU。
+     * 対象品番（全体・Amazon・BOSS のどれかに入っている品番、B-136・K-129）のSKU。
      *
      * @return list<int>
      */
@@ -257,16 +257,11 @@ class ActualController extends Controller
      */
     private function meta(TrendScope $scope): array
     {
-        $selection = ItemSelection::current();
-
         return [
             'calculated_at' => CarbonImmutable::now()->toIso8601String(),
             'scope' => $scope->value,
             'scope_label' => $scope->label(),
-            'selection' => $selection === null ? null : [
-                'confirmed_at' => $selection->confirmed_at->toIso8601String(),
-                'item_count' => $selection->items->count(),
-            ],
+            'selection' => app(TargetItems::class)->meta($scope),
         ];
     }
 

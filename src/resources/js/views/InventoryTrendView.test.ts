@@ -87,7 +87,7 @@ function response(overrides: Partial<InventoryTrendResponse["meta"]> = {}): Inve
                 { channel: "boss", label: "BOSS", sales_data_to: "2026-10-06" },
                 { channel: "amazon", label: "Amazon", sales_data_to: "2026-10-06" },
             ],
-            selection: { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1 },
+            selection: { scope: "total", confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1, uses_candidates: false },
             settings: { check_month_offset: 6, changed_at: null },
             check_month: "2027-04",
             overdue_inbound_count: 0,

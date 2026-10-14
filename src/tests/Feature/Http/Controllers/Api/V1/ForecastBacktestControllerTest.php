@@ -30,10 +30,13 @@ class ForecastBacktestControllerTest extends TestCase
         $this->actingAs($this->user);
         // 今日は 2026-10-07。答え合わせできる最新の月は 2026年9月
         $this->travelTo('2026-10-07 09:00:00');
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07'])];
         foreach (['fl-01', 'si-13'] as $rank => $itemNo) {
             Item::factory()->create(['item_no' => $itemNo]);
-            $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $rank + 1, 'is_candidate' => true]);
+            foreach ($selections as $selection) {
+                $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $rank + 1, 'is_candidate' => true]);
+            }
         }
     }
 
@@ -168,6 +171,29 @@ class ForecastBacktestControllerTest extends TestCase
         // 補正しないと、イベントの日は少なめ、普段の日は（セールの日を平均に入れるため）多めになる
         $this->assertLessThan(-0.5, $methods['base_average']['event']['bias']);
         $this->assertGreaterThan(0.0, $methods['base_average']['normal']['bias']);
+    }
+
+    public function test_measures_each_channel_with_its_own_target_items(): void
+    {
+        // fl-01・si-13 とも BOSS と Amazon で毎日1個売れる。Amazon の対象品番は si-13 だけ
+        foreach (['fl-01', 'si-13'] as $itemNo) {
+            $sku = Sku::factory()->create(['item_id' => Item::query()->where('item_no', $itemNo)->value('id'), 'sku_code' => "{$itemNo}-1", 'child_asin' => "B-{$itemNo}"]);
+            $this->sellDaily($sku, '2024-07-01', '2026-10-06', fn (): int => 1);
+            $rows = [];
+            for ($day = CarbonImmutable::parse('2024-07-01'); $day->lte(CarbonImmutable::parse('2026-10-06')); $day = $day->addDay()) {
+                $rows[] = ['source' => 'amazon', 'source_order_id' => "a-{$sku->id}-{$day->toDateString()}", 'sales_date' => $day->toDateString(), 'mall' => 'amazon', 'sku_id' => $sku->id, 'warehouse' => 'amazon_fba', 'quantity' => 1, 'amount' => 1000];
+            }
+            foreach (array_chunk($rows, 500) as $chunk) {
+                SalesLine::insert($chunk);
+            }
+        }
+        $amazon = ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
+        $amazon->items()->create(['item_no' => 'si-13', 'sales_rank' => 1, 'is_candidate' => true]);
+
+        $id = $this->postJson('/api/v1/forecast-backtests')->assertCreated()->json('data.id');
+        $this->assertSame(['total' => ['si-13', 'fl-01'], 'amazon' => ['si-13'], 'boss' => ['fl-01', 'si-13']], ForecastBacktest::query()->find($id)->settings['target_items']);
+        $this->getJson("/api/v1/forecast-backtests/{$id}?channel=amazon")->assertJsonPath('data.items.*.item_no', ['si-13']);
+        $this->getJson("/api/v1/forecast-backtests/{$id}?channel=boss")->assertJsonCount(2, 'data.items');
     }
 
     public function test_keeps_the_latest_twenty_measurements(): void

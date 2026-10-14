@@ -145,9 +145,23 @@ export interface ItemRank {
     is_candidate: boolean;
 }
 
+/** どの対象品番か（全体・Amazon・BOSS、B-136・K-129）。 */
+export type SelectionScope = "total" | "amazon" | "boss";
+
+/**
+ * 画面に出す対象品番の説明（B-136、K-129・K-130）。全体は Amazon・BOSS の対象品番を合わせたもの。
+ * 確定日時は、全体は Amazon・BOSS の新しい方（どちらも未確定なら null）。uses_candidates：未確定のチャネルがあり、そのチャネルの売上上位の品番を使っている。
+ */
+export interface TargetSelectionMeta {
+    scope: SelectionScope;
+    confirmed_at: string | null;
+    item_count: number;
+    uses_candidates: boolean;
+}
+
 export interface ItemRanking {
     data: ItemRank[];
-    meta: { ranking_from: string; ranking_to: string; candidate_rank: number; max_items: number };
+    meta: { scope: SelectionScope; ranking_from: string; ranking_to: string; candidate_rank: number; max_items: number };
 }
 
 /** 選定に含めた品番と、確定時の売上順位。 */
@@ -162,6 +176,7 @@ export interface ItemSelectionItem {
 /** 対象品番の選定（確定1回分、K-030）。 */
 export interface ItemSelection {
     id: number;
+    scope: SelectionScope;
     confirmed_at: string;
     /** 確定した利用者の名前。ログイン（B-009）より前に確定した選定は null。 */
     confirmed_by: string | null;
@@ -175,7 +190,20 @@ export interface ItemSelection {
 
 export interface CurrentItemSelection {
     data: ItemSelection | null;
-    meta: { fiscal_year_start: string };
+    /**
+     * item_nos：画面に出す対象品番（未確定なら売上上位の品番、uses_candidates）。全体は確定せず、Amazon・BOSS を合わせたもので、
+     * amazon_item_nos・boss_item_nos とそれぞれが未確定かを添える（K-130）。
+     */
+    meta: {
+        scope: SelectionScope;
+        item_nos: string[];
+        uses_candidates: boolean;
+        amazon_item_nos?: string[];
+        boss_item_nos?: string[];
+        amazon_uses_candidates?: boolean;
+        boss_uses_candidates?: boolean;
+        fiscal_year_start: string;
+    };
 }
 
 /** 期間別平均日販（B-006、K-035・K-036）。日数が足りず除外した期間は平均日販が null で、重みは0。 */
@@ -282,7 +310,11 @@ export interface DemandForecastResponse {
         /** チャネルごとの販売実績の期間。取り込んでいなければ null */
         channels: { channel: "boss" | "amazon"; label: string; sales_data_from: string | null; sales_data_to: string | null }[];
         forecast_from: string;
-        selection: { confirmed_at: string; item_count: number } | null;
+        selection: TargetSelectionMeta | null;
+        /** 全体・Amazon・BOSS ごとの対象品番（B-136、K-129）。画面で切り替えたときに、その対象品番だけを出す */
+        target_items?: Record<SelectionScope, string[]>;
+        /** 全体・Amazon・BOSS ごとの、画面に出す対象品番の選定（uses_total：未確定で全体の対象品番を使っている） */
+        target_selections?: Record<SelectionScope, TargetSelectionMeta | null>;
         window_weights: { length: number; weight: number }[];
         min_sales_days: number;
         /** 登録したイベント（平均日販から日を除き、これからの日に倍率を掛けたもの） */
@@ -472,7 +504,7 @@ export interface InventoryTrendResponse {
         stock_date: string | null;
         forecast_from: string;
         sales_channels: { channel: "boss" | "amazon"; label: string; sales_data_to: string | null }[];
-        selection: { confirmed_at: string; item_count: number } | null;
+        selection: TargetSelectionMeta | null;
         settings: InventoryTrendSettings;
         /** 判定する月（YYYY-MM） */
         check_month: string;
@@ -691,7 +723,7 @@ interface ActualMeta {
     calculated_at: string;
     scope: TrendScope;
     scope_label: string;
-    selection: { confirmed_at: string; item_count: number } | null;
+    selection: TargetSelectionMeta | null;
 }
 
 /** 品番別売上を何ごとに集めるか（B-127）。月ごとは直近12か月＋今月、日ごとは直近30日。 */

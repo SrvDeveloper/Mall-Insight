@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { fetchItemSelections } from "@/api/itemSelections";
-import type { ItemSelection, Paginated } from "@/types/api";
+import type { ItemSelection, Paginated, SelectionScope } from "@/types/api";
 
 /**
  * 対象品番の確定の履歴（バックログ B-005、決定記録 K-030）。新しい順に、前回からの変更とメモを表示し、
- * 開くと確定時の順位・売上金額と、外した品番を確認できる。
+ * 開くと確定時の順位・売上金額と、外した品番を確認できる。全体・Amazon・BOSS の対象品番ごとの履歴を出す（B-136）。
  */
+
+const props = withDefaults(defineProps<{ scope?: SelectionScope }>(), { scope: "total" });
 
 const result = ref<Paginated<ItemSelection> | null>(null);
 const isLoading = ref(false);
@@ -24,7 +26,7 @@ async function load(page = 1): Promise<void> {
     isLoading.value = true;
     hasError.value = false;
     try {
-        const response = await fetchItemSelections(page);
+        const response = await fetchItemSelections(page, props.scope);
         if (requestId === latestRequest) {
             result.value = response;
             expandedIds.value = new Set();

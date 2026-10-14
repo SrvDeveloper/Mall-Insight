@@ -2,18 +2,24 @@
 
 namespace App\Services\ItemSelection;
 
+use App\Enums\Warehouse;
 use App\Models\Item;
+use App\Models\ItemSelection;
+use App\Services\InventoryTrend\TrendScope;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\JoinClause;
 
 /**
  * 品番の売上順位を求める（決定記録 K-032）。直近12か月の販売実績の金額を、品番に属するSKUから品番へ合計する。
  * 同額は同順位とし、次の順位は同順位の件数分進める（1位、2位、2位、4位）。
+ * Amazon・BOSS の対象品番（B-136、K-129）では、そのチャネルの出荷倉庫の販売実績だけで順位を付ける。
  */
 class ItemRanker
 {
-    public function rank(CarbonImmutable $today): ItemRanking
+    public function rank(CarbonImmutable $today, TrendScope $scope = TrendScope::Total): ItemRanking
     {
+        $warehouses = $scope->channel() === null ? null : array_map(fn (Warehouse $warehouse): string => $warehouse->value, $scope->channel()->warehouses());
+        $candidateRank = ItemSelection::candidateRank($scope);
         $to = $today->startOfDay();
         $from = $to->subYear()->addDay();
 
@@ -25,7 +31,8 @@ class ItemRanker
             ->leftJoin('sales_lines', fn (JoinClause $join) => $join
                 ->on('sales_lines.sku_id', '=', 'skus.id')
                 ->where('sales_lines.sales_date', '>=', $from->toDateString())
-                ->where('sales_lines.sales_date', '<', $to->addDay()->toDateString()))
+                ->where('sales_lines.sales_date', '<', $to->addDay()->toDateString())
+                ->when($warehouses !== null, fn (JoinClause $join) => $join->whereIn('sales_lines.warehouse', $warehouses)))
             ->groupBy('items.id')
             ->get();
 
@@ -40,11 +47,11 @@ class ItemRanker
                 $rank = $position + 1;
                 $previousAmount = $amount;
             }
-            $ranks[] = new ItemRank($item, $amount, (int) $item->sales_quantity, $rank);
+            $ranks[] = new ItemRank($item, $amount, (int) $item->sales_quantity, $rank, $candidateRank);
         }
 
         foreach ($unsold->sortBy('item_no') as $item) {
-            $ranks[] = new ItemRank($item, null, null, null);
+            $ranks[] = new ItemRank($item, null, null, null, $candidateRank);
         }
 
         return new ItemRanking($from, $to, $ranks);

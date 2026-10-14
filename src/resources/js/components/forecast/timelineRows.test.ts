@@ -28,6 +28,15 @@ describe("timelineRows", () => {
         expect(items.find((item) => item.itemNo === "si-13")!.unpredictableCount).toBe(1);
     });
 
+    it("shows only the target items of the scope", () => {
+        const response = timeline();
+        response.meta.target_items = { total: ["si-13", "fl-01"], amazon: ["fl-01"], boss: ["si-13"] };
+
+        expect(timelineItems(response, "total", "quantity").map((item) => item.itemNo)).toEqual(["si-13", "fl-01"]);
+        expect(timelineItems(response, "amazon", "quantity").map((item) => item.itemNo)).toEqual(["fl-01"]);
+        expect(timelineItems(response, "boss", "quantity").map((item) => item.itemNo)).toEqual(["si-13"]);
+    });
+
     it("leaves stockout days out of the daily variance and uses the actual amount and unit prices for amounts", () => {
         const columns = dayColumns();
         const stocked = channel(columns, { actual: 10, replayed: 20, forecast: 20 }, { stockout: [true, false, false, null, null, null, null] });

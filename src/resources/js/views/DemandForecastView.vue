@@ -75,13 +75,19 @@ const salesToLabel = computed(() => {
     return last ? `${Number(last.slice(5, 7))}月${Number(last.slice(8, 10))}日` : "前日";
 });
 
+/** 全体・Amazon・BOSS の対象品番（B-136、K-129・K-130）。未確定のチャネルは売上上位の品番を使っていることを添える。 */
+const targetLabel = computed(() => {
+    const label = scope.value === "total" ? "全体" : scope.value === "amazon" ? "Amazon" : "BOSS";
+    return result.value?.meta.target_selections?.[scope.value]?.uses_candidates ? `${label}の対象品番（未確定のため売上上位の品番）` : `${label}の対象品番`;
+});
+
 const description = computed(() => {
     const columns = result.value?.meta.columns ?? [];
     const past = columns.filter((column) => column.kind === "past").length;
     const future = columns.filter((column) => column.kind === "future").length;
     return unit.value === "day"
-        ? `対象品番の、過去${past || 30}日の販売実績と、これからの${future || 30}日の日ごとの需要予測です。日ごとの予測は基準平均日販を1日分とし、イベントの日は倍率を、季節係数を登録した品番はその月の係数を掛けます。曜日による売れ方の違いは予測に入れていないため、日ごとの差異は月ごとより大きく出ます。`
-        : "対象品番の、過去12か月の販売実績と、これからの12か月の需要予測です。過去の月には、その月の初めに今の計算方法で予測し直した数を重ね、実績との差異を確かめられます。品番を押すと、SKUごとの予測と計算の根拠を見られます。";
+        ? `${targetLabel.value}の、過去${past || 30}日の販売実績と、これからの${future || 30}日の日ごとの需要予測です。日ごとの予測は基準平均日販を1日分とし、イベントの日は倍率を、季節係数を登録した品番はその月の係数を掛けます。曜日による売れ方の違いは予測に入れていないため、日ごとの差異は月ごとより大きく出ます。`
+        : `${targetLabel.value}の、過去12か月の販売実績と、これからの12か月の需要予測です。過去の月には、その月の初めに今の計算方法で予測し直した数を重ね、実績との差異を確かめられます。品番を押すと、SKUごとの予測と計算の根拠を見られます。`;
 });
 
 /** 品番の SKU別の需要予測（選んでいるモールなどを引き継ぎ、絞り込み・見せ方・選んだ品番は持っていかない）。 */

@@ -1,16 +1,37 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { confirmItemSelection, fetchCurrentItemSelection, fetchItemRanking } from "@/api/itemSelections";
 import { ApiError } from "@/api/client";
 import ItemSelectionHistory from "@/components/ItemSelectionHistory.vue";
-import type { CurrentItemSelection, ItemRank, ItemRanking } from "@/types/api";
+import TargetItemsOverview from "@/components/TargetItemsOverview.vue";
+import type { CurrentItemSelection, ItemRank, ItemRanking, SelectionScope } from "@/types/api";
 
 /**
  * 対象品番（バックログ B-005）。直近12か月の売上順位（K-032）を見て、在庫推移の対象にする品番を確定する。
  * 毎年4月の見直しが基本で、いつでも変更できる（K-030）。確定できるのは最大100品番（K-031）。確定の履歴はモーダルで確認する。
  *
  * 見た目は在庫予測の画面（K-047）とそろえる。上に今の対象品番の帯、一覧には売上金額の帯と、今の対象からの変更（追加・外す）の札を付ける。
+ *
+ * 対象品番は Amazon・BOSS をタブで切り替え、そのチャネルの販売実績の売上順位で選んで確定する（B-136、K-129・K-130）。
+ * 候補は上位10品番で、未確定の間はその品番を対象品番として使う。全体の対象品番は Amazon・BOSS を合わせたもので確定せず、全体のタブでは
+ * どちらのチャネルの対象品番かを見るだけにする（K-130）。選んだタブは URL に持たせる。
  */
+
+const SCOPES: { value: SelectionScope; label: string }[] = [
+    { value: "total", label: "全体" },
+    { value: "amazon", label: "Amazon" },
+    { value: "boss", label: "BOSS" },
+];
+
+const route = useRoute();
+const router = useRouter();
+const scope = computed<SelectionScope>(() => (route.query.scope === "amazon" || route.query.scope === "boss" ? route.query.scope : "total"));
+const scopeLabel = computed(() => SCOPES.find((option) => option.value === scope.value)!.label);
+
+function selectScope(value: SelectionScope): void {
+    void router.replace({ query: { ...route.query, scope: value === "total" ? undefined : value } });
+}
 
 const isHistoryOpen = ref(false);
 const historyButton = useTemplateRef<HTMLButtonElement>("historyButton");
@@ -52,22 +73,38 @@ const formatDateTime = (value: string): string => dateTimeFormat.format(new Date
 const formatDate = (value: string): string => value.replaceAll("-", "/");
 const formatYen = (value: number): string => `¥${value.toLocaleString()}`;
 
+let latestLoad = 0;
+
 async function load(): Promise<void> {
+    const loadId = ++latestLoad;
+    const target = scope.value;
     isLoading.value = true;
     hasLoadError.value = false;
     try {
-        const [rankingResponse, currentResponse] = await Promise.all([fetchItemRanking(), fetchCurrentItemSelection()]);
+        const [rankingResponse, currentResponse] = await Promise.all([fetchItemRanking(target), fetchCurrentItemSelection(target)]);
+        // 読み込み中にタブを変えたときは、古いタブの結果を出さない
+        if (loadId !== latestLoad) {
+            return;
+        }
         ranking.value = rankingResponse;
         current.value = currentResponse;
         selected.value = currentResponse.data ? currentItemNos.value : candidateItemNos.value;
+        note.value = "";
+        confirmError.value = null;
+        confirmedMessage.value = null;
     } catch {
-        hasLoadError.value = true;
+        if (loadId === latestLoad) {
+            hasLoadError.value = true;
+        }
     } finally {
-        isLoading.value = false;
+        if (loadId === latestLoad) {
+            isLoading.value = false;
+        }
     }
 }
 
 onMounted(load);
+watch(scope, () => void load());
 
 const maxItems = computed(() => ranking.value?.meta.max_items ?? 100);
 const candidateRank = computed(() => ranking.value?.meta.candidate_rank ?? 20);
@@ -127,10 +164,13 @@ async function confirm(): Promise<void> {
     try {
         const order = ranking.value.data.map((rank) => rank.item_no);
         const itemNos = [...selected.value].sort((a, b) => order.indexOf(a) - order.indexOf(b));
-        const selection = await confirmItemSelection(itemNos, note.value.trim() || null);
-        current.value = { data: selection, meta: current.value?.meta ?? { fiscal_year_start: "" } };
+        const selection = await confirmItemSelection(itemNos, note.value.trim() || null, scope.value);
+        current.value = {
+            data: selection,
+            meta: { ...(current.value?.meta ?? { scope: scope.value, fiscal_year_start: "" }), item_nos: selection.items.map((item) => item.item_no), uses_candidates: false },
+        };
         note.value = "";
-        confirmedMessage.value = `対象品番を確定しました（${selection.items.length}品番）。`;
+        confirmedMessage.value = `${scopeLabel.value}の対象品番を確定しました（${selection.items.length}品番）。`;
     } catch (error) {
         if (error instanceof ApiError && error.isValidationError) {
             confirmError.value = Object.values(error.errors).flat()[0] ?? error.message;
@@ -202,9 +242,9 @@ const facts = computed(() => {
     return [
         {
             key: "current",
-            label: "今の対象品番",
+            label: `今の${scopeLabel.value}の対象品番`,
             value: selection ? `${selection.items.length}品番` : "未確定",
-            note: selection ? `${formatDateTime(selection.confirmed_at)} ${selection.confirmed_by ?? "確定した人の記録なし"} が確定` : "まだ確定されていません",
+            note: selection ? `${formatDateTime(selection.confirmed_at)} ${selection.confirmed_by ?? "確定した人の記録なし"} が確定` : `確定するまで、売上上位${candidateRank.value}品番を使っています`,
             warn: !selection,
         },
         {
@@ -218,7 +258,7 @@ const facts = computed(() => {
             key: "ranking",
             label: "売上の集計期間",
             value: `${formatDate(value.meta.ranking_from)} 〜 ${formatDate(value.meta.ranking_to)}`,
-            note: "直近12か月・税込",
+            note: scope.value === "total" ? "直近12か月・税込・すべてのチャネル" : `直近12か月・税込・${scopeLabel.value}の販売実績`,
             warn: false,
         },
     ];
@@ -231,7 +271,25 @@ const facts = computed(() => {
             <div class="flex flex-col gap-1.5">
                 <p class="text-xs text-stone-500">在庫試算 / 対象品番</p>
                 <h1 class="text-[26px] leading-tight font-bold tracking-tight text-stone-900">対象品番</h1>
-                <p class="text-[13px] text-stone-600">需要予測と在庫予測の対象にする品番を、直近12か月の売上順位を見て確定します。毎年4月に見直します。</p>
+                <p class="text-[13px] text-stone-600">
+                    需要予測と在庫予測の対象にする品番を、Amazon・BOSS ごとに直近12か月の売上順位を見て確定します。全体の対象品番は2つを合わせたものです。各画面で全体・Amazon・BOSS
+                    を切り替えると、その対象品番を出します。毎年4月に見直します。
+                </p>
+                <div class="mt-1 inline-flex w-fit gap-0.5 rounded-[10px] border border-stone-300 bg-white p-[3px]" role="tablist" aria-label="どの対象品番か">
+                    <button
+                        v-for="option in SCOPES"
+                        :key="option.value"
+                        type="button"
+                        role="tab"
+                        class="h-8 rounded-[7px] px-3 text-[13px]"
+                        :class="scope === option.value ? 'bg-stone-900 font-semibold text-white' : 'text-stone-600 hover:text-stone-900'"
+                        :aria-selected="scope === option.value"
+                        :data-testid="`scope-${option.value}`"
+                        @click="selectScope(option.value)"
+                    >
+                        {{ option.label }}
+                    </button>
+                </div>
             </div>
             <button
                 v-if="current?.data"
@@ -257,6 +315,8 @@ const facts = computed(() => {
 
         <div v-else-if="!ranking || !current" class="rounded-xl border border-stone-200 bg-white px-6 py-16 text-center text-sm text-stone-500">読み込み中…</div>
 
+        <TargetItemsOverview v-else-if="scope === 'total'" :ranking="ranking" :current="current" @select="selectScope" />
+
         <template v-else>
             <div
                 v-if="!isConfirmedThisFiscalYear || vanishedItemNos.length > 0"
@@ -271,10 +331,14 @@ const facts = computed(() => {
                 </svg>
                 <div class="flex flex-col gap-0.5">
                     <template v-if="!current.data">
-                        <p class="font-semibold">対象品番がまだ確定されていません。</p>
-                        <p class="text-amber-800">売上順位{{ candidateRank }}位以内の品番が選ばれた状態になっています。内容を確認して確定してください。</p>
+                        <p class="font-semibold">{{ scopeLabel }}の対象品番がまだ確定されていません。</p>
+                        <p class="text-amber-800">
+                            確定するまでは、{{ scopeLabel }}の売上上位{{ candidateRank }}品番を対象品番として使います。{{ scopeLabel }}の売上順位{{
+                                candidateRank
+                            }}位以内の品番が選ばれた状態になっています。内容を確認して確定してください。
+                        </p>
                     </template>
-                    <p v-else-if="!isConfirmedThisFiscalYear" class="font-semibold">{{ fiscalYear }}年度の対象品番がまだ確定されていません。見直して確定してください。</p>
+                    <p v-else-if="!isConfirmedThisFiscalYear" class="font-semibold">{{ fiscalYear }}年度の{{ scopeLabel }}の対象品番がまだ確定されていません。見直して確定してください。</p>
                     <p v-if="vanishedItemNos.length > 0" class="text-amber-800">
                         CrossWalker から消えた品番が含まれています（<span class="font-mono">{{ vanishedItemNos.join("、") }}</span
                         >）。次に確定すると対象から外れます。
@@ -455,7 +519,7 @@ const facts = computed(() => {
                     class="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-black/5"
                 >
                     <header class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
-                        <h2 id="history-title" class="text-base font-bold text-stone-900">確定履歴</h2>
+                        <h2 id="history-title" class="text-base font-bold text-stone-900">{{ scopeLabel }}の対象品番の確定履歴</h2>
                         <button
                             ref="historyCloseButton"
                             type="button"
@@ -469,7 +533,7 @@ const facts = computed(() => {
                         </button>
                     </header>
                     <div class="overflow-y-auto">
-                        <ItemSelectionHistory />
+                        <ItemSelectionHistory :scope="scope" />
                     </div>
                 </div>
             </div>

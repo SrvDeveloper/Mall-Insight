@@ -15,10 +15,14 @@ final readonly class ItemRank
         public ?int $salesAmount,
         public ?int $salesQuantity,
         public ?int $rank,
+        public int $candidateRank = ItemSelection::CANDIDATE_RANK,
     ) {}
 
+    /**
+     * 最初に候補として選ばれた状態にするか（全体は20位、Amazon・BOSS は10位まで、K-031・K-129）。
+     */
     public function isCandidate(): bool
     {
-        return $this->rank !== null && $this->rank <= ItemSelection::CANDIDATE_RANK;
+        return $this->rank !== null && $this->rank <= $this->candidateRank;
     }
 }

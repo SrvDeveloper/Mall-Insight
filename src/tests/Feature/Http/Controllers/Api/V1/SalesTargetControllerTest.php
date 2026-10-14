@@ -68,9 +68,12 @@ class SalesTargetControllerTest extends TestCase
      */
     private function select(array $itemNos): void
     {
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-09', 'ranking_to' => '2026-10-08']);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-09', 'ranking_to' => '2026-10-08']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-09', 'ranking_to' => '2026-10-08'])];
         foreach ($itemNos as $rank => $itemNo) {
-            $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $rank + 1, 'is_candidate' => true]);
+            foreach ($selections as $selection) {
+                $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $rank + 1, 'is_candidate' => true]);
+            }
         }
     }
 

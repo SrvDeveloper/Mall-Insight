@@ -299,14 +299,16 @@ class DemandForecastControllerTest extends TestCase
             ->assertJsonPath('data.0.skus.1.unpredictable_reason_label', 'BOSS：直近180日に販売実績がありません');
     }
 
-    public function test_returns_no_items_before_target_items_are_confirmed(): void
+    public function test_uses_the_best_sellers_of_each_channel_before_target_items_are_confirmed(): void
     {
+        // 対象品番を確定していなければ、チャネルごとの売上上位10品番を使う（K-130）
         $this->sell(Sku::factory()->create(), '2026-10-06', 1);
 
         $this->getJson('/api/v1/demand-forecasts')
             ->assertOk()
-            ->assertJsonPath('data', [])
-            ->assertJsonPath('meta.selection', null)
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('meta.selection.confirmed_at', null)
+            ->assertJsonPath('meta.selection.uses_candidates', true)
             ->assertJsonPath('meta.min_sales_days', 14)
             ->assertJsonPath('meta.window_weights', [['length' => 30, 'weight' => 0.5], ['length' => 60, 'weight' => 0.3], ['length' => 90, 'weight' => 0.2]]);
     }
@@ -342,9 +344,12 @@ class DemandForecastControllerTest extends TestCase
      */
     private function select(array $itemNos): void
     {
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => CarbonImmutable::today()->subYear(), 'ranking_to' => CarbonImmutable::today()]);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => CarbonImmutable::today()->subYear(), 'ranking_to' => CarbonImmutable::today()]), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => CarbonImmutable::today()->subYear(), 'ranking_to' => CarbonImmutable::today()])];
         foreach ($itemNos as $index => $itemNo) {
-            $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $index + 1, 'is_candidate' => true]);
+            foreach ($selections as $selection) {
+                $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $index + 1, 'is_candidate' => true]);
+            }
         }
     }
 

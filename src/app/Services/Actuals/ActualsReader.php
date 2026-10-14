@@ -6,9 +6,9 @@ use App\Enums\Channel;
 use App\Enums\Warehouse;
 use App\Models\Inventory;
 use App\Models\Item;
-use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Services\InventoryTrend\TrendScope;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 
 /**
@@ -27,6 +27,8 @@ class ActualsReader
     /** 販売実績の月数（直近12か月と今月）。 */
     public const SALES_MONTHS = 13;
 
+    public function __construct(private TargetItems $targets) {}
+
     /** 日ごとの販売実績の初期日数（今日まで、B-127・K-083）。 */
     public const SALES_DAYS = 30;
 
@@ -40,12 +42,13 @@ class ActualsReader
 
     /**
      * 対象品番（選定の順）。SKUを読み込んだもの。$itemNo を指定すると、対象品番のうちその品番だけ（SKU別売上、B-127）。
+     * $scope を指定するとその対象品番（全体・Amazon・BOSS）、指定しなければ3つのどれかに入っている品番（B-136、K-129）。
      *
      * @return list<Item>
      */
-    public function items(?string $itemNo = null): array
+    public function items(?string $itemNo = null, ?TrendScope $scope = null): array
     {
-        $itemNos = ItemSelection::current()?->items->pluck('item_no') ?? collect();
+        $itemNos = collect($scope === null ? $this->targets->all() : $this->targets->itemNos($scope));
         if ($itemNo !== null) {
             $itemNos = $itemNos->filter(fn (string $selected): bool => $selected === $itemNo)->values();
         }

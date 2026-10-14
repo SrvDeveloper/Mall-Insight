@@ -7,7 +7,11 @@ import type { StockActualsResponse } from "@/types/api";
 
 vi.mock("@/api/actuals", () => ({ fetchSalesActuals: vi.fn(), fetchStockActuals: vi.fn() }));
 
-const meta = { calculated_at: "2026-10-07T10:00:00+09:00", scope_label: "全体", selection: { confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1 } };
+const meta = {
+    calculated_at: "2026-10-07T10:00:00+09:00",
+    scope_label: "全体",
+    selection: { scope: "total" as const, confirmed_at: "2026-10-07T09:00:00+09:00", item_count: 1, uses_candidates: false },
+};
 
 function stockResponse(): StockActualsResponse {
     return {

@@ -11,6 +11,7 @@ use App\Services\Forecast\DemandForecast;
 use App\Services\Forecast\DemandForecaster;
 use App\Services\Forecast\MonthlyDemand;
 use App\Services\Forecast\SkuForecast;
+use App\Services\ItemSelection\TargetItems;
 use App\Services\Pricing\UnitPriceCatalog;
 use App\Services\SalesTarget\ItemTargetPlan;
 use App\Services\SalesTarget\SalesTargetPlanner;
@@ -39,12 +40,13 @@ class InventoryTrendCalculator
 {
     public const MONTHS = DemandForecaster::MONTHS;
 
-    public function __construct(private DemandForecaster $forecaster, private SalesTargetPlanner $planner) {}
+    public function __construct(private DemandForecaster $forecaster, private SalesTargetPlanner $planner, private TargetItems $targets) {}
 
     public function calculate(CarbonImmutable $now, ?TrendSettings $settings = null, DemandBasis $basis = DemandBasis::Forecast, TrendScope $scope = TrendScope::Total): InventoryTrend
     {
         $settings ??= TrendSettings::current();
-        $forecast = $this->forecaster->forecast($now);
+        // 全体・Amazon・BOSS の対象品番（B-136、K-129）。全体は両チャネルの需要を足す
+        $forecast = $this->forecaster->forecast($now, $this->targets->itemNos($scope));
         $currentMonth = $forecast->forecastFrom->startOfMonth();
         $months = array_map(function (int $index) use ($currentMonth): array {
             $month = $currentMonth->addMonthsNoOverflow($index);

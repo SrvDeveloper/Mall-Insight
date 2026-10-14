@@ -36,8 +36,11 @@ class ItemUnitPriceControllerTest extends TestCase
         $this->sell($sku, '2026-09-02', 'amazon_fba', 30, 111000);
         $this->sell($sku, '2025-10-08', 'boss_own', 1, 99999);
         Item::factory()->create(['item_no' => 'aa-01']);
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-09', 'ranking_to' => '2026-10-08']);
-        $selection->items()->create(['item_no' => 'fisi-05', 'sales_rank' => 1, 'is_candidate' => true]);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-09', 'ranking_to' => '2026-10-08']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-09', 'ranking_to' => '2026-10-08'])];
+        foreach ($selections as $selection) {
+            $selection->items()->create(['item_no' => 'fisi-05', 'sales_rank' => 1, 'is_candidate' => true]);
+        }
     }
 
     private function sell(Sku $sku, string $date, string $warehouse, int $quantity, int $amount): void

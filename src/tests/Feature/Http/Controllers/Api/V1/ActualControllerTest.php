@@ -8,6 +8,7 @@ use App\Models\ItemSelection;
 use App\Models\SalesLine;
 use App\Models\Sku;
 use App\Models\User;
+use App\Services\InventoryTrend\TrendScope;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -27,8 +28,11 @@ class ActualControllerTest extends TestCase
         // 今日は 2026-10-07。販売実績は 2025年10月～2026年10月の13か月、在庫は 2026-09-07～2026-10-07 の31日
         $this->travelTo('2026-10-07 09:00:00');
         $this->item = Item::factory()->create(['item_no' => 'fl-01']);
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
-        $selection->items()->create(['item_no' => 'fl-01', 'sales_rank' => 1, 'is_candidate' => true]);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07'])];
+        foreach ($selections as $selection) {
+            $selection->items()->create(['item_no' => 'fl-01', 'sales_rank' => 1, 'is_candidate' => true]);
+        }
     }
 
     private function sku(string $code, int $position = 0, array $attributes = []): Sku
@@ -111,6 +115,20 @@ class ActualControllerTest extends TestCase
         $this->getJson('/api/v1/actuals/sales?scope=boss')
             ->assertJsonPath('data.0.skus.0.quantities', [null, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 3, 0])
             ->assertJsonPath('data.0.skus.1.not_sold', false);
+    }
+
+    public function test_shows_the_target_items_of_the_mall_selection(): void
+    {
+        // BOSS の対象品番を bs-01 だけにする。Amazon は fl-01 のまま。全体は2つを合わせたもの
+        $this->sku('fl-01-1');
+        $item = Item::factory()->create(['item_no' => 'bs-01']);
+        Sku::factory()->create(['item_id' => $item->id, 'sku_code' => 'bs-01-1']);
+        $boss = ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
+        $boss->items()->create(['item_no' => 'bs-01', 'sales_rank' => 1, 'is_candidate' => true]);
+
+        $this->getJson('/api/v1/actuals/sales?scope=boss')->assertOk()->assertJsonPath('data.*.item_no', ['bs-01'])->assertJsonPath('meta.selection.uses_candidates', false);
+        $this->getJson('/api/v1/actuals/sales?scope=amazon')->assertJsonPath('data.*.item_no', ['fl-01']);
+        $this->getJson('/api/v1/actuals/stock')->assertJsonPath('data.*.item_no', ['fl-01', 'bs-01'])->assertJsonPath('meta.selection.item_count', 2);
     }
 
     public function test_sums_sales_by_day_for_the_last_thirty_days_by_default(): void
@@ -538,7 +556,9 @@ class ActualControllerTest extends TestCase
     public function test_returns_only_the_requested_target_item_for_the_sku_screen(): void
     {
         Item::factory()->create(['item_no' => 'fl-02']);
-        ItemSelection::current()->items()->create(['item_no' => 'fl-02', 'sales_rank' => 2, 'is_candidate' => true]);
+        foreach ([TrendScope::Amazon, TrendScope::Boss] as $scope) {
+            ItemSelection::current($scope)->items()->create(['item_no' => 'fl-02', 'sales_rank' => 2, 'is_candidate' => true]);
+        }
         Item::factory()->create(['item_no' => 'not-selected']);
         $this->sku('fl-01-1-10');
 

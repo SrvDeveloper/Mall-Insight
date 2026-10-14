@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+import { createMemoryHistory, createRouter } from "vue-router";
 import TargetItemSelectionView from "@/views/TargetItemSelectionView.vue";
 import { confirmItemSelection, fetchCurrentItemSelection, fetchItemRanking, fetchItemSelections } from "@/api/itemSelections";
-import type { CurrentItemSelection, ItemRank, ItemRanking, ItemSelection, Paginated } from "@/types/api";
+import type { CurrentItemSelection, ItemRank, ItemRanking, ItemSelection, Paginated, SelectionScope } from "@/types/api";
 
 vi.mock("@/api/itemSelections", () => ({ fetchItemRanking: vi.fn(), fetchCurrentItemSelection: vi.fn(), confirmItemSelection: vi.fn(), fetchItemSelections: vi.fn() }));
 
@@ -24,12 +25,13 @@ function rank(item_no: string, sales_rank: number | null, is_candidate: boolean)
 
 const ranking: ItemRanking = {
     data: [rank("a-01", 1, true), rank("b-01", 2, true), rank("c-01", 3, false), rank("d-01", null, false)],
-    meta: { ranking_from: "2025-10-08", ranking_to: "2026-10-07", candidate_rank: 2, max_items: 3 },
+    meta: { scope: "boss", ranking_from: "2025-10-08", ranking_to: "2026-10-07", candidate_rank: 2, max_items: 3 },
 };
 
 function selection(itemNos: string[], confirmedAt: string): ItemSelection {
     return {
         id: 1,
+        scope: "boss",
         confirmed_at: confirmedAt,
         confirmed_by: "在庫 担当",
         ranking_from: "2025-10-08",
@@ -39,14 +41,16 @@ function selection(itemNos: string[], confirmedAt: string): ItemSelection {
     };
 }
 
-function currentWith(data: ItemSelection | null): CurrentItemSelection {
-    return { data, meta: { fiscal_year_start: "2026-04-01" } };
+function currentWith(data: ItemSelection | null, scope: SelectionScope = "boss"): CurrentItemSelection {
+    return { data, meta: { scope, item_nos: data?.items.map((item) => item.item_no) ?? ["a-01"], uses_candidates: data === null, fiscal_year_start: "2026-04-01" } };
 }
 
-async function mountView() {
-    const wrapper = mount(TargetItemSelectionView);
+async function mountView(path = "/target-items?scope=boss") {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:any(.*)", component: TargetItemSelectionView }] });
+    await router.push(path);
+    const wrapper = mount(TargetItemSelectionView, { global: { plugins: [router] } });
     await flushPromises();
-    return wrapper;
+    return Object.assign(wrapper, { router });
 }
 
 function checkedItemNos(wrapper: Awaited<ReturnType<typeof mountView>>): string[] {
@@ -84,7 +88,7 @@ describe("TargetItemSelectionView", () => {
         const wrapper = await mountView();
 
         const warning = wrapper.find('[data-testid="selection-warning"]').text();
-        expect(warning).toContain("2026年度の対象品番がまだ確定されていません。");
+        expect(warning).toContain("2026年度のBOSSの対象品番がまだ確定されていません。");
         expect(warning).toContain("gone-01");
         expect(wrapper.find('[data-testid="fact-current"]').text()).toContain("2品番2026/03/31 10:00 在庫 担当 が確定");
         expect(wrapper.find('[data-testid="fact-fiscal-year"]').text()).toContain("2026年度の見直し未確定");
@@ -124,8 +128,8 @@ describe("TargetItemSelectionView", () => {
         await wrapper.find("form").trigger("submit");
         await flushPromises();
 
-        expect(confirmItemSelection).toHaveBeenCalledWith(["a-01", "c-01"], "新商品が好調");
-        expect(wrapper.text()).toContain("対象品番を確定しました（2品番）。");
+        expect(confirmItemSelection).toHaveBeenCalledWith(["a-01", "c-01"], "新商品が好調", "boss");
+        expect(wrapper.text()).toContain("BOSSの対象品番を確定しました（2品番）。");
         expect(wrapper.find('[data-testid="fact-current"]').text()).toContain("2品番2026/10/07 10:00 在庫 担当 が確定");
     });
 
@@ -179,6 +183,50 @@ describe("TargetItemSelectionView", () => {
         await wrapper.find('[data-testid="filter-all"]').trigger("click");
         await wrapper.find('input[type="search"]').setValue("c-0");
         expect(wrapper.findAll('[data-testid="item-no"]').map((cell) => cell.text())).toEqual(["c-01"]);
+    });
+
+    it("shows the total as the amazon and boss selections combined, and switches to a channel to confirm", async () => {
+        vi.mocked(fetchCurrentItemSelection).mockImplementation(async (scope) =>
+            scope === "total"
+                ? {
+                      data: null,
+                      meta: {
+                          scope: "total",
+                          item_nos: ["a-01", "c-01"],
+                          uses_candidates: true,
+                          amazon_item_nos: ["a-01"],
+                          boss_item_nos: ["a-01", "c-01"],
+                          amazon_uses_candidates: true,
+                          boss_uses_candidates: false,
+                          fiscal_year_start: "2026-04-01",
+                      },
+                  }
+                : currentWith(null, "amazon"),
+        );
+        vi.mocked(confirmItemSelection).mockResolvedValue({ ...selection(["a-01"], "2026-10-07T10:00:00+09:00"), scope: "amazon" });
+        const wrapper = await mountView("/target-items");
+
+        // 全体は確定せず、どちらのチャネルの対象品番かを並べる
+        expect(fetchItemRanking).toHaveBeenLastCalledWith("total");
+        expect(wrapper.find("form").exists()).toBe(false);
+        expect(wrapper.find('[data-testid="total-count"]').text()).toBe("2品番");
+        expect(wrapper.find('[data-testid="total-amazon"]').text()).toContain("未確定のため、Amazonの売上上位の品番を使っています");
+        expect(wrapper.findAll('[data-testid="total-item-no"]').map((cell) => cell.text())).toEqual(["a-01", "c-01"]);
+        expect(wrapper.findAll('[data-testid="total-row"]')[1]!.find('[data-testid="total-amazon"]').text()).toBe("—");
+        await wrapper.find('[data-testid="total-filter-all"]').trigger("click");
+        expect(wrapper.findAll('[data-testid="total-row"]')).toHaveLength(4);
+
+        await wrapper.find('[data-testid="total-amazon"] button').trigger("click");
+        await flushPromises();
+        expect(wrapper.router.currentRoute.value.query).toEqual({ scope: "amazon" });
+        expect(fetchCurrentItemSelection).toHaveBeenLastCalledWith("amazon");
+        expect(wrapper.find('[data-testid="selection-warning"]').text()).toContain("確定するまでは、Amazonの売上上位2品番を対象品番として使います。");
+        expect(wrapper.find('[data-testid="fact-current"]').text()).toContain("確定するまで、売上上位2品番を使っています");
+
+        await wrapper.find("form").trigger("submit");
+        await flushPromises();
+        expect(confirmItemSelection).toHaveBeenCalledWith(["a-01", "b-01"], null, "amazon");
+        expect(wrapper.text()).toContain("Amazonの対象品番を確定しました（1品番）。");
     });
 
     it("does not offer the history before anything is confirmed", async () => {

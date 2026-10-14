@@ -8,6 +8,7 @@ use App\Http\Resources\SkuTrendResource;
 use App\Services\InventoryTrend\DemandBasis;
 use App\Services\InventoryTrend\InventoryTrendCalculator;
 use App\Services\InventoryTrend\TrendScope;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,7 @@ class InventoryTrendController extends Controller
      * 対象品番のSKUの12か月在庫推移（バックログ B-008・B-122）。開くたびに最新の在庫・需要・入荷予定から計算し、保存しない。
      * basis で需要予測（初期値）と販売試算を、scope で全体（初期値）・Amazon・BOSSを切り替える。
      */
-    public function index(Request $request, InventoryTrendCalculator $calculator): JsonResponse
+    public function index(Request $request, InventoryTrendCalculator $calculator, TargetItems $targets): JsonResponse
     {
         $request->validate(['basis' => ['nullable', Rule::enum(DemandBasis::class)], 'scope' => ['nullable', Rule::enum(TrendScope::class)]]);
         $basis = $request->enum('basis', DemandBasis::class) ?? DemandBasis::Forecast;
@@ -51,10 +52,7 @@ class InventoryTrendController extends Controller
                     'label' => $channel['channel']->label(),
                     'sales_data_to' => $channel['to']?->toDateString(),
                 ], $forecast->channels),
-                'selection' => $forecast->selection === null ? null : [
-                    'confirmed_at' => $forecast->selection->confirmed_at->toIso8601String(),
-                    'item_count' => $forecast->selection->items->count(),
-                ],
+                'selection' => $targets->meta($scope),
                 'settings' => $settings->toArray(),
                 'check_month' => $forecast->forecastFrom->startOfMonth()->addMonthsNoOverflow($settings->checkMonthOffset)->format('Y-m'),
                 'overdue_inbound_count' => $trend->overdueInboundCount,

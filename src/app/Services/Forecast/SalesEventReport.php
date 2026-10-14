@@ -6,9 +6,9 @@ use App\Enums\Channel;
 use App\Enums\Mall;
 use App\Models\Item;
 use App\Models\ItemSeasonalFactor;
-use App\Models\ItemSelection;
 use App\Models\SalesEventMultiplier;
 use App\Models\SalesEventPeriod;
+use App\Services\ItemSelection\TargetItems;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -228,13 +228,13 @@ class SalesEventReport
     }
 
     /**
-     * 対象品番（最新の選定の順）。
+     * 全体・Amazon・BOSS のどれかに入っている対象品番（B-136、K-129）。
      *
      * @return Collection<int, Item>
      */
     private function targetItems(): Collection
     {
-        return $this->forecaster->items(collect(ItemSelection::current()?->items->pluck('item_no')->all() ?? []));
+        return $this->forecaster->items(collect(app(TargetItems::class)->all()));
     }
 
     private function round(?float $value): ?float

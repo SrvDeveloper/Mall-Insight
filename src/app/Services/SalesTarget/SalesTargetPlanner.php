@@ -6,11 +6,11 @@ use App\Enums\ActiveStatus;
 use App\Enums\RatioCategoryCode;
 use App\Models\Item;
 use App\Models\ItemRatioCategory;
-use App\Models\ItemSelection;
 use App\Models\MonthlySalesRatio;
 use App\Models\RatioCategory;
 use App\Models\SalesTarget;
 use App\Models\Sku;
+use App\Services\ItemSelection\TargetItems;
 use App\Services\Pricing\UnitPriceCatalog;
 use Carbon\CarbonImmutable;
 
@@ -48,7 +48,8 @@ class SalesTargetPlanner
         $ratios = MonthlySalesRatio::currentByCategory();
         $targets = SalesTarget::currentFor($fiscalYear);
 
-        $selectedItemNos = ItemSelection::current()?->items->pluck('item_no')->all() ?? [];
+        // 全体・Amazon・BOSS のどれかに入っている対象品番（B-136、K-129）
+        $selectedItemNos = app(TargetItems::class)->all();
         $otherItemNos = $targets->keys()->diff($selectedItemNos)->sort()->values()->all();
         $itemNos = [...$selectedItemNos, ...$otherItemNos];
 

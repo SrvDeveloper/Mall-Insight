@@ -20,6 +20,7 @@ class ItemSelectionResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'scope' => $this->scope->value,
             'confirmed_at' => $this->confirmed_at->toIso8601String(),
             'confirmed_by' => $this->whenLoaded('confirmedBy', fn () => $this->confirmedBy?->name),
             'ranking_from' => $this->ranking_from->toDateString(),

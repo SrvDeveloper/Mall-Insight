@@ -30,9 +30,12 @@ class ForecastTimelineControllerTest extends TestCase
         // 今日は 2026-10-07。販売実績は前日（10-06）まで
         $this->travelTo('2026-10-07 09:00:00');
 
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07'])];
         $item = Item::factory()->create(['item_no' => 'fl-01', 'brand' => 'FEELLIFE', 'category' => '老眼鏡']);
-        $selection->items()->create(['item_no' => 'fl-01', 'sales_rank' => 1, 'is_candidate' => true]);
+        foreach ($selections as $selection) {
+            $selection->items()->create(['item_no' => 'fl-01', 'sales_rank' => 1, 'is_candidate' => true]);
+        }
         $this->sku = Sku::factory()->create(['item_id' => $item->id, 'sku_code' => 'fl-01-1', 'child_asin' => null, 'tq_color_no' => '1', 'tq_size' => '15']);
         // Amazon でも売るが、Amazon の販売実績はまだ取り込んでいない
         $this->amazonSku = Sku::factory()->create(['item_id' => $item->id, 'sku_code' => 'fl-01-2', 'child_asin' => 'B000000001']);

@@ -34,8 +34,11 @@ class InventoryTrendControllerTest extends TestCase
         // 今日は 2026-10-07。今月（10月）は残り25日、判定する月は6か月後の 2027-04
         $this->travelTo('2026-10-07 09:00:00');
         $this->item = Item::factory()->create(['item_no' => 'fl-01']);
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
-        $selection->items()->create(['item_no' => 'fl-01', 'sales_rank' => 1, 'is_candidate' => true]);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07'])];
+        foreach ($selections as $selection) {
+            $selection->items()->create(['item_no' => 'fl-01', 'sales_rank' => 1, 'is_candidate' => true]);
+        }
         // 販売実績は 2025-10-01 から（3つの期間とも使える）
         $this->sell(Sku::factory()->create(['item_id' => null]), '2025-10-01', 1);
     }
@@ -321,6 +324,20 @@ class InventoryTrendControllerTest extends TestCase
     public function test_rejects_an_unknown_basis(): void
     {
         $this->getJson('/api/v1/inventory-trends?basis=excel')->assertUnprocessable()->assertJsonValidationErrors('basis');
+    }
+
+    public function test_shows_the_target_items_of_the_amazon_and_boss_selections(): void
+    {
+        // Amazon の対象品番を az-01 だけにする。BOSS は fl-01 のまま。全体は2つを合わせたもの
+        $this->sku('fl-01-1-10', 1.0);
+        $amazonItem = Item::factory()->create(['item_no' => 'az-01']);
+        Sku::factory()->create(['item_id' => $amazonItem->id, 'sku_code' => 'az-01-1', 'child_asin' => 'B000000001']);
+        $amazon = ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
+        $amazon->items()->create(['item_no' => 'az-01', 'sales_rank' => 1, 'is_candidate' => true]);
+
+        $this->getJson('/api/v1/inventory-trends?scope=amazon')->assertOk()->assertJsonPath('data.*.item_no', ['az-01'])->assertJsonPath('meta.selection.uses_candidates', false);
+        $this->getJson('/api/v1/inventory-trends?scope=boss')->assertOk()->assertJsonPath('data.*.item_no', ['fl-01']);
+        $this->getJson('/api/v1/inventory-trends')->assertOk()->assertJsonPath('data.*.item_no', ['az-01', 'fl-01'])->assertJsonPath('meta.selection.item_count', 2);
     }
 
     public function test_projects_amazon_and_boss_from_their_own_stock_and_forecast_without_inbound(): void

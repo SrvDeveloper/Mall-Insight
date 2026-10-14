@@ -42,11 +42,14 @@ class SalesEventControllerTest extends TestCase
      */
     private function targetSkus(array $itemNos): array
     {
-        $selection = ItemSelection::create(['confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']);
+        // Amazon・BOSS の対象品番（全体はその2つを合わせたもの、K-130）
+        $selections = [ItemSelection::create(['scope' => 'amazon', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07']), ItemSelection::create(['scope' => 'boss', 'confirmed_at' => now(), 'ranking_from' => '2025-10-08', 'ranking_to' => '2026-10-07'])];
         $skus = [];
         foreach ($itemNos as $rank => $itemNo) {
             $item = Item::factory()->create(['item_no' => $itemNo]);
-            $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $rank + 1, 'is_candidate' => true]);
+            foreach ($selections as $selection) {
+                $selection->items()->create(['item_no' => $itemNo, 'sales_rank' => $rank + 1, 'is_candidate' => true]);
+            }
             $skus[] = Sku::factory()->create(['item_id' => $item->id, 'sku_code' => "{$itemNo}-1", 'child_asin' => null]);
         }
 
